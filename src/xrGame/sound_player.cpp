@@ -17,6 +17,10 @@
 #include "xrEngine/profiler.h"
 #include "sound_collection_storage.h"
 #include "Common/object_broker.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/BackgroundIo.h"
+
+#include <atomic>
 
 CSoundPlayer::CSoundPlayer(IGameObject* object)
 {
@@ -138,8 +142,42 @@ void CSoundPlayer::update_playing_sounds()
         if ((*I).m_sound->_feedback())
             (*I).m_sound->_feedback()->set_position(compute_sound_point(*I));
         else if (!(*I).started() && (Device.dwTimeGlobal >= (*I).m_start_time))
+        {
+            // 50j-slow-disk-async-sound.md: a sound whose source was still read when it was asked for
+            const bool waited = (*I).m_source_wait;
+            if (waited && !source_wait_done(*I))
+                continue;
             (*I).play_at_pos(m_object, compute_sound_point(*I));
+            if (waited) // its length is known now
+            {
+                (*I).m_stop_time =
+                    Device.dwTimeGlobal + iFloor((*I).m_sound->get_length_sec() * 1000.0f) + (*I).m_stop_extra;
+            }
+        }
     }
+}
+
+// plans/optimization_mt/50j-slow-disk-async-sound.md. A collection created in game on a slow disk reads its sources in
+// the background (CSoundCollection::add, deferred); a play of a sound whose source is not read yet waits for it here,
+// frame by frame (the source is queued as urgent: it is read before the other ones), at most snd_deferred_max_delay_ms
+// after it was due to start. Then - or if the file failed - it is dropped, as a sound that ended (m_stop_time 0).
+// Meanwhile it counts as a sound that is due: it holds its synchro mask, as a sound with a start delay does.
+bool CSoundPlayer::source_wait_done(CSoundSingle& sound)
+{
+    const SoundSourceState state = sound.m_sound->source_state(true);
+    if (state == SoundSourceState::Pending && Device.dwTimeGlobal < sound.m_start_time + snd_deferred_max_delay_ms)
+        return false;
+    sound.m_source_wait = false;
+    if (state == SoundSourceState::Ready)
+    {
+        PERF_INC(snd_async_play_late);
+        PERF_ADD(snd_async_play_late_ms, Device.dwTimeGlobal - sound.m_start_time);
+        return true;
+    }
+    PERF_INC(snd_async_play_dropped);
+    sound.m_started = true; // no play_at_pos: removed by the next remove_inappropriate_sounds
+    sound.m_stop_time = 0;
+    return false;
 }
 
 bool CSoundPlayer::need_bone_data() const
@@ -182,6 +220,11 @@ void CSoundPlayer::play(
     R_ASSERT(sound_single.m_bone_id != BI_NONE);
 
     sound_single.m_sound = xr_new<ref_sound>();
+    // 50j-slow-disk-async-sound.md: a random pick whose source is still read in the background gives way to a ready
+    // sound of the collection, if there is one
+    CSoundCollection& collection = *(*I).second.second;
+    const ref_sound& picked = collection.random(id);
+    const ref_sound& from = id == u32(-1) ? collection.ready_alternative(picked) : picked;
     /**
     sound_single.m_sound->clone	(
         *(*I).second.second->m_sounds[
@@ -197,7 +240,7 @@ void CSoundPlayer::play(
         sg_SourceType
     );
     **/
-    sound_single.m_sound->clone((*I).second.second->random(id), st_Effect, sg_SourceType);
+    sound_single.m_sound->clone(from, st_Effect, sg_SourceType);
 
     if (sound_single.m_sound->_get() == nullptr)
     {
@@ -224,6 +267,27 @@ void CSoundPlayer::play(
         random_time =
             (max_stop_time > min_stop_time) ? random(max_stop_time - min_stop_time) + min_stop_time : max_stop_time;
 
+    // 50j-slow-disk-async-sound.md: a source that could not be read - nothing plays; one still read in the background -
+    // the sound waits for it (update_playing_sounds), its stop time is set when it starts
+    const SoundSourceState source = sound_single.m_sound->source_state(true);
+    if (source == SoundSourceState::Failed)
+    {
+        PERF_INC(snd_async_play_dropped);
+        xr_delete(sound_single.m_sound);
+        return;
+    }
+    if (source == SoundSourceState::Pending)
+    {
+        sound_single.m_source_wait = true;
+        sound_single.m_stop_extra = random_time;
+        sound_single.m_stop_time = u32(-1);
+        m_playing_sounds.push_back(sound_single);
+        return;
+    }
+    // 50j: the source may have been read between clone() (a deferred clone, length 0) and the state above - its length
+    // is taken now, before the stop time (a no-op for a sound that is not deferred; the source is ready: no read)
+    sound_single.m_sound->resolve_deferred();
+
     sound_single.m_stop_time =
         sound_single.m_start_time + iFloor(sound_single.m_sound->get_length_sec() * 1000.0f) + random_time;
     m_playing_sounds.push_back(sound_single);
@@ -240,11 +304,24 @@ IC Fvector CSoundPlayer::compute_sound_point(const CSoundSingle& sound)
     return (l_tMatrix.c);
 }
 
+namespace
+{
+// plans/optimization_mt/50j-slow-disk-async-sound.md: a collection created in game (an NPC spawn) reads its sources in
+// the background on a slow disk (CSoundRender_Core decides on the disk; elsewhere create_deferred is create). On the
+// loading screen they are read here, as before: the load waits anyway, and their reads do not move into the game.
+bool sound_player_collection_deferred()
+{
+    return !load_screen_renderer.IsActive() && Device.dwPrecacheFrame == 0;
+}
+} // namespace
+
 CSoundPlayer::CSoundCollection::CSoundCollection(const CSoundCollectionParams& params)
     : m_last_sound_id(u32(-1))
 {
+    GW_FRAME_EVENT(SoundSet); // 50n: the frame spike report (a sound set built: FS lookups + its sources)
     seed(u32(CPU::QPC() & 0xffffffff));
     m_sounds.clear();
+    const bool deferred = sound_player_collection_deferred();
     for (int j = 0, N = _GetItemCount(params.m_sound_prefix.c_str()); j < N; ++j)
     {
         string_path fn, s, temp;
@@ -253,7 +330,7 @@ CSoundPlayer::CSoundCollection::CSoundCollection(const CSoundCollectionParams& p
         strconcat(sizeof(s), S, params.m_sound_player_prefix.c_str(), temp);
         if (FS.exist(fn, "$game_sounds$", S, ".ogg"))
         {
-            ref_sound* temp = add(params.m_type, S);
+            ref_sound* temp = add(params.m_type, S, deferred);
             if (temp)
                 m_sounds.push_back(temp);
         }
@@ -263,7 +340,7 @@ CSoundPlayer::CSoundCollection::CSoundCollection(const CSoundCollectionParams& p
             xr_sprintf(name, "%s%d", S, i);
             if (FS.exist(fn, "$game_sounds$", name, ".ogg"))
             {
-                ref_sound* temp = add(params.m_type, name);
+                ref_sound* temp = add(params.m_type, name, deferred);
                 if (temp)
                     m_sounds.push_back(temp);
             }
@@ -273,6 +350,23 @@ CSoundPlayer::CSoundCollection::CSoundCollection(const CSoundCollectionParams& p
     if (m_sounds.empty())
         Msg("- There are no sounds with prefix %s", params.m_sound_prefix.c_str());
 #endif
+    // plans/optimization_mt/50z3-startup-slow-disk-io.md: the laptop (USB HDD) showed no trace of 50j - this line tells
+    // whether a set built in game took the deferred path at all (pending = its sources left to the background thread;
+    // 0 of N = they were all read before, e.g. by the sets built on the loading screen)
+    if (deferred && xray::io::BackgroundIoSingle())
+    {
+        static std::atomic_bool s_logged{false}; // main or the Game thread
+        if (!s_logged.exchange(true, std::memory_order_relaxed))
+        {
+            u32 pending = 0;
+            for (const ref_sound* snd : m_sounds)
+                pending += snd->source_state() == SoundSourceState::Pending ? 1 : 0;
+            Msg("* [hw] sound: the first NPC sound set built in game on a slow disk ('%s%s'): %u sounds, %u of them read "
+                "in the background",
+                params.m_sound_player_prefix.c_str(), params.m_sound_prefix.c_str(), static_cast<u32>(m_sounds.size()),
+                pending);
+        }
+    }
 }
 
 CSoundPlayer::CSoundCollection::~CSoundCollection()
@@ -313,4 +407,23 @@ const ref_sound& CSoundPlayer::CSoundCollection::random(u32 id)
 
     m_last_sound_id = result;
     return *m_sounds[result];
+}
+
+const ref_sound& CSoundPlayer::CSoundCollection::ready_alternative(const ref_sound& picked)
+{
+    if (picked.source_state() != SoundSourceState::Pending)
+        return picked; // always so on a fast disk and on the loading screen
+    const u32 count = m_sounds.size();
+    const u32 first = CRandom32::random(count);
+    for (u32 i = 0; i < count; ++i)
+    {
+        const u32 index = (first + i) % count;
+        if (m_sounds[index]->source_state() == SoundSourceState::Ready)
+        {
+            PERF_INC(snd_async_play_substituted);
+            m_last_sound_id = index;
+            return *m_sounds[index];
+        }
+    }
+    return picked;
 }

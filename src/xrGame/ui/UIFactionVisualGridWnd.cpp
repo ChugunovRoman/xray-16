@@ -683,7 +683,11 @@ void CUIFactionVisualGridWnd::AddModelToTab(pcstr tab_name, pcstr model_path)
     const shared_str path = model_path;
     AddUniqueToTab(tab, path);
     AddUniqueToAll(path);
-    schedule_preview_model(path.c_str());
+    // No background preview here: the faction editor adds ~2100 NPC models to the
+    // popup grid, and each queued preview is a synchronous model + texture load
+    // (one per frame), i.e. minutes of stutter on an HDD or a weak CPU, also after
+    // the popup is closed and in game. Previews are queued for the visible cells
+    // only, by Draw() / WarmPreviewVisibleModels() (plans/optimization_mt/50s).
 }
 
 void CUIFactionVisualGridWnd::AddModelsToTab(pcstr tab_name, const TModelList& models)

@@ -2,6 +2,7 @@
 #include "addon_event_bus.h"
 #include "Level.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
 #include "Level_Bullet_Manager.h"
 #include "xrServer.h"
 #include "xrMessages.h"
@@ -120,6 +121,8 @@ extern CUISequencer* g_tutorial2;
 void CLevel::net_Stop()
 {
     Msg("- Disconnect");
+    // 50n-frame-spike-report.md: the frames of the disconnect and the unload are not reported as spikes
+    xray::perf::FrameSessionMark(xray::perf::frame_session::Exit);
     gw::addons::events::FlushBatches(true); // the ids in the batches are still valid here, throttle ignored
     gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnStop);
 
@@ -151,6 +154,7 @@ void CLevel::net_Stop()
         SaveDemoInfo();
 
     remove_objects();
+    xray::perf::LoadMark("remove_objects"); // 50z5-extra-diagnostics.md: the [load] timeline of the unload
 
     // WARNING ! remove_objects() uses this flag, so position of this line must e here ..
     game_configured = FALSE;
@@ -165,9 +169,11 @@ void CLevel::net_Stop()
         Server->Disconnect();
         xr_delete(Server);
     }
+    xray::perf::LoadMark("server_stop"); // 50z5: the server and the ALife simulator deleted
 
     if (!GEnv.isDedicatedServer)
         GEnv.ScriptEngine->collect_all_garbage();
+    xray::perf::LoadMark("lua_gc"); // 50z5
 
 #ifdef DEBUG
     show_animation_stats();

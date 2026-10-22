@@ -3,6 +3,7 @@
 
 #include "ResourceManager.h"
 #include "Blender.h"
+#include "xrCore/FileCRC32.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -136,6 +137,7 @@ void CResourceManager::OnDeviceCreate(IReader* F)
 void CResourceManager::OnDeviceCreate(LPCSTR shName)
 {
     ZoneScoped;
+    resetFileCrc32IncludeMemo(); // 50z2: the shaders' includes are hashed again once (they may have changed)
 
 #ifdef _EDITOR
     if (!FS.exist(shName))

@@ -98,6 +98,14 @@ protected:
     void prefetch_thread_proc();
     void prefetch_run(const PrefetchJob& job);
 
+    // plans/optimization_mt/50j-slow-disk-async-sound.md: the deferred sources (a slow disk) are read on the same
+    // thread, before the folders: the urgent ones (a play waits) first, then the others in order of creation
+    bool i_defer_sources() const; // a slow disk and the prefetch is there
+    CSoundRender_Source* i_create_deferred_source(pcstr id);
+    void prefetch_enqueue_source(CSoundRender_Source* source, bool urgent);
+    bool prefetch_sources_waiting() const;
+    void prefetch_serve_sources(); // the thread: reads the deferred sources queued, returns when none is left (or stop)
+
     u32 s_emitters_u; // emitter update marker
     xr_vector<CSoundRender_Target*> s_targets;
 
@@ -122,6 +130,7 @@ public:
 
     // Sound interface
     CSound* create(pcstr fName, esound_type sound_type, u32 game_type) override;
+    CSound* create_deferred(pcstr fName, esound_type sound_type, u32 game_type) override; // 50j
     void attach_tail(CSound& S, pcstr fName) override;
 
     void destroy(CSound& S) override;
@@ -143,9 +152,17 @@ public:
 
     void refresh_sources() override;
     void prefetch_sources(pcstr folder) override;
+    void memory_stats(size_t& sources, size_t& pcm_cached_bytes) override; // 50c-commit-growth-analysis.md
+    SoundSourceState source_state(const CSound& S, bool urgent) override; // 50j-slow-disk-async-sound.md
+    u32 read_pending_sources() override; // 50z3-startup-slow-disk-io.md
+    bool resolve_deferred(CSound& S) override { return i_resolve_deferred(S); } // 50z3
 
 public:
-    CSoundRender_Source* i_create_source(pcstr name);
+    // deferred (50j): on a slow disk a source not loaded yet is created pending and read in the background
+    CSoundRender_Source* i_create_source(pcstr name, bool deferred = false);
+    // 50j: before a play / a tail of S - a deferred sound gets its numbers from its source (read here if it still
+    // waits). false = the source could not be read
+    bool i_resolve_deferred(CSound& S);
 
     void i_destroy_source(CSoundRender_Source* S);
     void i_start(CSoundRender_Emitter* E) const;

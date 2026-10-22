@@ -30,6 +30,11 @@ void CUIStaticItem::SetHeadingPivot(const Fvector2& p, const Fvector2& offset, b
 
 void CUIStaticItem::RenderInternal(const Fvector2& in_pos)
 {
+    // 50r-slow-disk-async-textures.md: the texture is still being read - nothing drawn and nothing taken from its size
+    // (the rect below is kept from the first real size)
+    if (hShader->BaseTexturePending())
+        return;
+
     Fvector2 pos;
     UI().ClientToScreenScaled(pos, in_pos.x, in_pos.y);
     UI().AlignPixel(pos.x);
@@ -106,6 +111,9 @@ void CUIStaticItem::RenderInternal(const Fvector2& in_pos)
 
 void CUIStaticItem::RenderInternal(float angle)
 {
+    if (hShader->BaseTexturePending()) // 50r-slow-disk-async-textures.md: still being read, as above
+        return;
+
     Fvector2 ts{};
     hShader->GetBaseTextureResolution(ts);
 

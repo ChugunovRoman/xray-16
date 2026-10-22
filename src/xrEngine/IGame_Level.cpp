@@ -12,6 +12,7 @@
 #include "Feel_Sound.h"
 #include "xrServerEntities/ai_sounds.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
 
 #include <algorithm>
 
@@ -58,11 +59,12 @@ IGame_Level::~IGame_Level()
     GEnv.Render->ResourcesDumpMemoryUsage();
 #endif
 
-    u32 m_base = 0, c_base = 0, m_lmaps = 0, c_lmaps = 0;
+    u64 m_base = 0, m_lmaps = 0;
+    u32 c_base = 0, c_lmaps = 0;
     if (GEnv.Render)
         GEnv.Render->ResourcesGetMemoryUsage(m_base, c_base, m_lmaps, c_lmaps);
 
-    Msg("* [ D3D ]: textures[%d K]", (m_base + m_lmaps) / 1024);
+    Msg("* [ D3D ]: textures[%llu K]", (m_base + m_lmaps) / 1024);
 }
 
 void IGame_Level::net_Stop()
@@ -134,6 +136,7 @@ bool IGame_Level::Load(u32 dwNum)
     g_pGamePersistent->SpatialSpacePhysic.initialize(ObjectSpace.GetBoundingVolume());
 
     Sound->set_geometry_occ(ObjectSpace.GetStaticModel(), ObjectSpace.GetBoundingVolume());
+    xray::perf::LoadMark("level_cform"); // 50z5-extra-diagnostics.md: the [load] timeline
     Sound->set_handler([](const ref_sound& S, float range)
     {
         if (g_pGameLevel && S && S->feedback)
@@ -142,6 +145,7 @@ bool IGame_Level::Load(u32 dwNum)
 
     // Render-level Load
     GEnv.Render->level_Load(LL_Stream);
+    xray::perf::LoadMark("render_level_load"); // 50z5: shaders, geometry, sectors, details, lights of the level
     // tscreate.FrameEnd ();
     // Msg ("* S-CREATE: %f ms, %d times",tscreate.result,tscreate.count);
 

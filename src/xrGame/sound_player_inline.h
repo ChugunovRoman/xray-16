@@ -42,10 +42,14 @@ IC u32 CSoundPlayer::active_sound_count(bool only_playing) const
     return (count);
 }
 
-IC ref_sound* CSoundPlayer::CSoundCollection::add(ESoundTypes type, LPCSTR name) const
+IC ref_sound* CSoundPlayer::CSoundCollection::add(ESoundTypes type, LPCSTR name, bool deferred) const
 {
     ref_sound* temp = xr_new<ref_sound>();
-    temp->create(name, st_Effect, type);
+    // 50j-slow-disk-async-sound.md: deferred = the source is read in the background on a slow disk (a no-op elsewhere)
+    if (deferred)
+        temp->create_deferred(name, st_Effect, type);
+    else
+        temp->create(name, st_Effect, type);
     if (!temp)
     {
         xr_delete(temp);

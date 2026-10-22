@@ -58,6 +58,9 @@ void CUIProgressShape::Draw()
     }
 
     GEnv.UIRender->SetShader(*origin->GetShader());
+    // 50r-slow-disk-async-textures.md: the texture is still being read (a slow disk) - not drawn this frame
+    if (origin->GetShader()->BaseTexturePending())
+        return;
 
     Fvector2 tsize{};
     origin->GetShader()->GetBaseTextureResolution(tsize);

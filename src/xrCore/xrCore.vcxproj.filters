@@ -127,6 +127,9 @@
     <Filter Include="Profiling">
       <UniqueIdentifier>{ea7e41e5-3ae4-44a3-8b2a-21337befa3d1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Platform">
+      <UniqueIdentifier>{5b0e7c1a-3d2f-4c8e-9a61-7f4e2b9d0c13}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Debug core\StackTrace">
       <UniqueIdentifier>{5c4e63d2-d5e9-4e42-8ae2-f8316acdd000}</UniqueIdentifier>
     </Filter>
@@ -175,6 +178,9 @@
       <Filter>FS</Filter>
     </ClCompile>
     <ClCompile Include="LocatorAPI.cpp">
+      <Filter>FS</Filter>
+    </ClCompile>
+    <ClCompile Include="BackgroundIo.cpp">
       <Filter>FS</Filter>
     </ClCompile>
     <ClCompile Include="LocatorAPI_auth.cpp">
@@ -242,6 +248,27 @@
     </ClCompile>
     <ClCompile Include="Profiling\PerfMetrics.cpp">
       <Filter>Profiling</Filter>
+    </ClCompile>
+    <ClCompile Include="Profiling\StartupMarks.cpp">
+      <Filter>Profiling</Filter>
+    </ClCompile>
+    <ClCompile Include="Profiling\SysDiag.cpp">
+      <Filter>Profiling</Filter>
+    </ClCompile>
+    <ClCompile Include="Platform\HwPolicy.cpp">
+      <Filter>Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Platform\HwProfile.cpp">
+      <Filter>Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Platform\HwProfile_Apple.cpp">
+      <Filter>Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Platform\HwProfile_Linux.cpp">
+      <Filter>Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Platform\HwProfile_Windows.cpp">
+      <Filter>Platform</Filter>
     </ClCompile>
     <ClCompile Include="Media\Image.cpp">
       <Filter>Media</Filter>
@@ -488,6 +515,9 @@
     <ClInclude Include="LocatorAPI.h">
       <Filter>FS</Filter>
     </ClInclude>
+    <ClInclude Include="BackgroundIo.h">
+      <Filter>FS</Filter>
+    </ClInclude>
     <ClInclude Include="LocatorAPI_defs.h">
       <Filter>FS</Filter>
     </ClInclude>
@@ -563,7 +593,19 @@
     <ClInclude Include="Profiling\PerfMetrics.hpp">
       <Filter>Profiling</Filter>
     </ClInclude>
+    <ClInclude Include="Platform\HwProfile.h">
+      <Filter>Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="Platform\HwProfile_impl.h">
+      <Filter>Platform</Filter>
+    </ClInclude>
     <ClInclude Include="Profiling\PerfMetricsList.inl">
+      <Filter>Profiling</Filter>
+    </ClInclude>
+    <ClInclude Include="Profiling\StartupMarks.hpp">
+      <Filter>Profiling</Filter>
+    </ClInclude>
+    <ClInclude Include="Profiling\SysDiag.hpp">
       <Filter>Profiling</Filter>
     </ClInclude>
     <ClInclude Include="Media\Image.hpp">

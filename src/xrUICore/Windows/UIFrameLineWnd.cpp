@@ -166,9 +166,13 @@ void CUIFrameLineWnd::DrawElements() const
         }
         cursor += length;
 
+        // 50r-slow-disk-async-textures.md: bound first - a texture still being read (a slow disk) is not drawn and
+        // its size not asked (that would read it now)
+        GEnv.UIRender->SetShader(*m_shader[segment]);
+        if (m_shader[segment]->BaseTexturePending())
+            return;
         Fvector2 ts{};
         m_shader[segment]->GetBaseTextureResolution(ts);
-        GEnv.UIRender->SetShader(*m_shader[segment]);
 
         draw_rect(lt, rb, tex_rect.lt, tex_rect.rb, m_texture_color, ts);
     };

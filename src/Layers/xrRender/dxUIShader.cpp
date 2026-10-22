@@ -65,4 +65,11 @@ bool dxUIShader::GetBaseTextureResolution(Fvector2& res)
     res = { float(texture->get_Width()), float(texture->get_Height()) };
     return true;
 }
+
+bool dxUIShader::BaseTexturePending()
+{
+    // 50r-slow-disk-async-textures.md: the UI asks after SetShader - a texture not loaded yet is queued by that bind
+    const CTexture* texture = GetBaseTexture();
+    return texture && texture->async_pending();
+}
 } // namespace xray::render::RENDER_NAMESPACE

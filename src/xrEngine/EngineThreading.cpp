@@ -83,6 +83,7 @@ void RunParallelSequence()
 {
     ZoneScopedN("ProcessParallelSequence");
     PERF_SCOPE(game_parallel_seq);
+    GW_FRAME_PHASE(GParallel); // 50n: the frame spike report
     PERF_SPIKE_PHASE("game/parallel_seq"); // P19 spike logger (14-spike-instrumentation.md)
     xr_vector<fastdelegate::FastDelegate0<>> parallel_batch;
     parallel_batch.swap(Device.seqParallel);
@@ -97,6 +98,7 @@ void RunSeqFrameMT()
 {
     ZoneScopedN("seqFrameMT");
     PERF_SCOPE(game_seq_frame_mt);
+    GW_FRAME_PHASE(GSeqMt); // 50n: the frame spike report
     PERF_SPIKE_PHASE("game/seq_frame_mt");
     Device.seqFrameMT.Process();
 }
@@ -128,6 +130,7 @@ void GameThreadEarlyBody(GameLogicThreadState& s)
 {
     ZoneScopedN("GameThreadEarly");
     PERF_SCOPE(game_early);
+    GW_GAME_SPAN(); // 50n: the frame spike report
     s.early_dispatched = false;
     const bool dispatch = s.early_sound_dispatch && g_pGameLevel && g_pGameLevel->bReady;
     if (dispatch)
@@ -138,6 +141,7 @@ void GameThreadEarlyBody(GameLogicThreadState& s)
         {
             ZoneScopedN("SoundEvent_Dispatch");
             PERF_SCOPE(game_sound_dispatch);
+            GW_FRAME_PHASE(GSound); // 50n: the frame spike report
             PERF_SPIKE_PHASE("game/sound_dispatch");
             g_pGameLevel->SoundEvent_Dispatch();
         }
@@ -167,6 +171,7 @@ void GameThreadOverlapBody(GameLogicThreadState& s)
     if (s.kick_ticks)
         PERF_ADD(game_start_delay, xray::perf::Ticks() - s.kick_ticks);
     PERF_SCOPE(game_total);
+    GW_GAME_SPAN(); // 50n: the frame spike report
     const bool run_scheduler = s.run_scheduler;
 
     // K3: phase 0 of this frame dispatched the sounds already
@@ -176,6 +181,7 @@ void GameThreadOverlapBody(GameLogicThreadState& s)
     {
         ZoneScopedN("SoundEvent_Dispatch");
         PERF_SCOPE(game_sound_dispatch);
+        GW_FRAME_PHASE(GSound); // 50n: the frame spike report
         PERF_SPIKE_PHASE("game/sound_dispatch");
         g_pGameLevel->SoundEvent_Dispatch();
     }
@@ -185,6 +191,7 @@ void GameThreadOverlapBody(GameLogicThreadState& s)
     if (run_scheduler && g_pGameLevel && g_pGameLevel->bReady)
     {
         ZoneScopedN("GameLogicFrame");
+        GW_FRAME_PHASE(GLogic); // 50n: the frame spike report
         g_pGameLevel->OnGameLogicFrame();
     }
 
@@ -193,11 +200,13 @@ void GameThreadOverlapBody(GameLogicThreadState& s)
         ZoneScopedN("Sheduler_UpdateNonRT");
         {
             PERF_SCOPE(game_sheduler);
+            GW_FRAME_PHASE(GSched); // 50n: the frame spike report
             ::Engine.Sheduler.UpdateNonRT(); // the RT part already ran on the main thread (GameThreadRT)
         }
         if (Device.PostSchedulerVisionBatch)
         {
             PERF_SCOPE(game_vision_batch);
+            GW_FRAME_PHASE(GVision); // 50n: the frame spike report
             PERF_SPIKE_PHASE("game/vision_batch");
             Device.PostSchedulerVisionBatch();
         }
@@ -221,6 +230,7 @@ void GameThreadOverlapBody(GameLogicThreadState& s)
         // Normally done long ago (seqParallel takes ms); while waiting this thread runs other queued tasks
         ZoneScopedN("SoundRenderTask/wait");
         PERF_SCOPE(game_sound_render_wait);
+        GW_FRAME_PHASE(GSoundWait); // 50n: the frame spike report
         TaskScheduler->Wait(*sound_task);
     }
     RunSeqFrameMT();
@@ -236,6 +246,8 @@ void GameLogicThreadLoop(GameLogicThreadState& s)
     // (hang on the first game/render overlap frames, 2026-10-10). Slot: TaskManager CUSTOM_THREADS_RESERVE.
     if (TaskScheduler)
         TaskScheduler->RegisterThisThreadAsWorker();
+    Threading::SetCurrentThreadHighQos(); // plans/optimization_mt 50g, R15: on the frame's critical path, as main
+
     for (;;)
     {
         s.wake.Wait();
@@ -322,12 +334,14 @@ void XRay::Engine::GameThread()
     // Game thread both became "Game").
     ZoneScopedN("GameThread");
     PERF_SCOPE(game_total);
+    GW_GAME_SPAN(); // 50n: the frame spike report
     const GameThreadScope logic_thread; // IsGameLogicThread() is true on this thread until the task ends
 
     if (g_pGameLevel && g_pGameLevel->bReady)
     {
         ZoneScopedN("SoundEvent_Dispatch");
         PERF_SCOPE(game_sound_dispatch);
+        GW_FRAME_PHASE(GSound); // 50n: the frame spike report
         PERF_SPIKE_PHASE("game/sound_dispatch");
         g_pGameLevel->SoundEvent_Dispatch();
     }
@@ -337,6 +351,7 @@ void XRay::Engine::GameThread()
     if (!Device.Paused() && g_pGameLevel && g_pGameLevel->bReady)
     {
         ZoneScopedN("GameLogicFrame");
+        GW_FRAME_PHASE(GLogic); // 50n: the frame spike report
         g_pGameLevel->OnGameLogicFrame();
     }
 
@@ -345,6 +360,7 @@ void XRay::Engine::GameThread()
         ZoneScopedN("Sheduler_Update");
         {
             PERF_SCOPE(game_sheduler);
+            GW_FRAME_PHASE(GSched); // 50n: the frame spike report
             ::Engine.Sheduler.Update();
         }
 
@@ -353,6 +369,7 @@ void XRay::Engine::GameThread()
         if (Device.PostSchedulerVisionBatch)
         {
             PERF_SCOPE(game_vision_batch);
+            GW_FRAME_PHASE(GVision); // 50n: the frame spike report
             PERF_SPIKE_PHASE("game/vision_batch");
             Device.PostSchedulerVisionBatch();
         }

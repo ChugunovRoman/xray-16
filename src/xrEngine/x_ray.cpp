@@ -13,6 +13,7 @@
 #include "EngineThreading.h"
 
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/StartupMarks.hpp"
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrNetServer/NET_AuthCheck.h"
 
@@ -115,7 +116,8 @@ void set_free_mode()
     ClearSkyMode = false;
 }
 
-void InitSettings()
+// system.ltx without the files fill_auth_check_params leaves out of the multiplayer auth check (text, ui, fonts...)
+static void LoadSettingsAuth()
 {
     ZoneScoped;
 
@@ -125,8 +127,19 @@ void InitSettings()
     CInifile::allow_include_func_t includeFilter;
     includeFilter.bind(&includePred, &PathIncludePred::IsIncluded);
 
-    InitConfig(pSettings, "system.ltx");
     InitConfig(pSettingsAuth, "system.ltx", true, true, true, false, 0, includeFilter);
+}
+
+void InitSettings()
+{
+    ZoneScoped;
+
+    InitConfig(pSettings, "system.ltx");
+    // 50z1 (plans/optimization_mt/50z1-startup-markers-fs-index.md): pSettingsAuth is used only by the multiplayer
+    // auth check (CLocatorAPI::auth_runtime), which parses it on its first use. Before, every start parsed the whole
+    // system.ltx tree a second time (~660 files) for it. Its content differs from pSettings (fonts.ltx,
+    // localization.ltx... are filtered out), so it is not a copy of pSettings.
+    pSettingsAuthLoader = &LoadSettingsAuth;
     InitConfig(pSettingsOpenXRay, "openxray.ltx", false, true, true, false);
     InitConfig(pSettingsFE, "faction_editor_config.ltx", true, true, true, false);
     InitConfig(pGameIni, "game.ltx");
@@ -185,6 +198,7 @@ void destroySettings()
 
     auto sa = const_cast<CInifile**>(&pSettingsAuth);
     xr_delete(*sa);
+    pSettingsAuthLoader = nullptr;
 
     auto so = const_cast<CInifile**>(&pSettingsOpenXRay);
     xr_delete(*so);
@@ -200,10 +214,73 @@ void destroyConsole()
     xr_delete(Console);
 }
 
+// What the user config says about the quality preset (plans/optimization_mt/50d-stage2-auto-engine.md, R22)
+enum class EUserCfgPreset
+{
+    NoFile, // no user config at all: the first start, a deleted user.ltx
+    NoLine, // the file exists, but has no "_preset" line: the engine never saved it (the launcher creates user.ltx
+            // with its own lines only - vid_mode, renderer, fov...); cfg_save writes "_preset" into every user.ltx
+    HasLine,
+};
+
+// Looks the config up as cfg_load does (CCC_LoadCFG::Execute): appdata, then fs root, then the name as it is. Quiet:
+// cfg_load itself logs the missing file right after.
+EUserCfgPreset XRayUserConfigPresetState(pcstr config)
+{
+    string_path cfg_name;
+    xr_strcpy(cfg_name, config);
+    if (strext(cfg_name))
+        *strext(cfg_name) = 0;
+    xr_strcat(cfg_name, ".ltx");
+
+    string_path cfg_full_name;
+    FS.update_path(cfg_full_name, "$app_data_root$", cfg_name);
+    if (!FS.exist(cfg_full_name))
+        FS.update_path(cfg_full_name, "$fs_root$", cfg_name);
+    if (!FS.exist(cfg_full_name))
+        xr_strcpy(cfg_full_name, cfg_name);
+    if (!FS.exist(cfg_full_name))
+        return EUserCfgPreset::NoFile;
+
+    IReader* F = FS.r_open(cfg_full_name);
+    if (!F)
+        return EUserCfgPreset::NoFile;
+    constexpr pcstr preset_cmd = "_preset";
+    const size_t preset_len = xr_strlen(preset_cmd);
+    bool found = false;
+    string1024 str;
+    while (!found && !F->eof())
+    {
+        F->r_string(str, sizeof(str));
+        pcstr s = str;
+        while (*s == ' ' || *s == '\t')
+            ++s;
+        found = !strncmp(s, preset_cmd, preset_len) && (s[preset_len] == ' ' || s[preset_len] == '\t');
+    }
+    FS.r_close(F);
+    return found ? EUserCfgPreset::HasLine : EUserCfgPreset::NoLine;
+}
+
 void execUserScript()
 {
     ZoneScoped;
     Console->Execute("default_controls");
+    // R22 (50d-stage2-auto-engine.md): a config without "_preset" never got a quality preset - no rspec_*.ltx, and an
+    // integrated GPU kept the full-size main pass (no r__render_scale 0.75). "_preset Auto" runs first, as the first
+    // line of a saved user.ltx does ("_preset Auto" sorts before the other commands), so every line of the config
+    // still wins over the preset. Here the hardware policy is valid (stages A/B in xrCore, the GPU of the startup
+    // probe of the renderer list), the renderer and its console commands are set up, the device is not created yet.
+    // The normal cfg_save at exit writes "_preset Auto" with the values: the next start keeps the player's values.
+    if (!GEnv.isDedicatedServer && Console->GetCommand("_preset"))
+    {
+        const EUserCfgPreset state = XRayUserConfigPresetState(Console->ConfigFile);
+        if (state != EUserCfgPreset::HasLine)
+        {
+            Msg("* [hw] first run (%s %s): _preset Auto", Console->ConfigFile,
+                state == EUserCfgPreset::NoFile ? "is missing" : "has no _preset line");
+            Console->Execute("_preset Auto");
+        }
+    }
     Console->ExecuteScript(Console->ConfigFile);
 }
 
@@ -263,8 +340,12 @@ CApplication::CApplication(pcstr commandLine, GameModule* game, const std::array
     }
 
     Core.Initialize("OpenXRay", commandLine, true, *fsgame ? fsgame : nullptr);
+    xray::StartupMark("core"); // 50z1: the rest of xrCore::Initialize after the log (hardware profile, disk probe)
+    // plans/optimization_mt 50g, R15: main never on the efficiency cores / at a throttled clock (the log is up now)
+    Threading::SetCurrentThreadHighQos();
 
     InitSettings();
+    xray::StartupMark("settings"); // 50z1: system.ltx with its includes, openxray.ltx, faction_editor_config, game.ltx
     // Adjust player & computer name for Asian
     if (pSettings->line_exist("string_table", "no_native_input"))
     {
@@ -276,6 +357,7 @@ CApplication::CApplication(pcstr commandLine, GameModule* game, const std::array
     Device.FillVideoModes();
     TaskScheduler->Wait(inputTask);
     InitConsole();
+    xray::StartupMark("console"); // 50z1: ImGui, video modes, input, console
 
     Engine.Initialize(game, modules);
     Device.Initialize();
@@ -284,9 +366,11 @@ CApplication::CApplication(pcstr commandLine, GameModule* game, const std::array
 
     execUserScript();
     InitializeDiscord();
+    xray::StartupMark("device_init_user_ltx"); // 50z1: Device.Initialize (window), user.ltx, Discord
 
     TaskScheduler->Wait(createSoundDevicesList);
     Engine.Sound.Create();
+    xray::StartupMark("sound_create"); // 50z1
 
     // ...command line for auto start
     pcstr startArgs = strstr(Core.Params, "-start ");
@@ -304,6 +388,7 @@ CApplication::CApplication(pcstr commandLine, GameModule* game, const std::array
 
     Device.Create();
     TaskScheduler->Wait(createLightAnim);
+    xray::StartupMark("device_create_done"); // 50z1: the rest of Device.Create (marks device_* inside)
 
     if (game)
     {
@@ -315,6 +400,7 @@ CApplication::CApplication(pcstr commandLine, GameModule* game, const std::array
         g_pGamePersistent->OnAppStart();
     else
         Console->Show();
+    xray::StartupMark("app_start_done"); // 50z1: the rest of OnAppStart (marks app_* inside)
 
     FrameMarkEnd(FRAME_MARK_APPLICATION_STARTUP);
 }
@@ -380,6 +466,7 @@ CApplication::~CApplication()
 int CApplication::Run()
 {
     HideSplash();
+    xray::StartupMark("splash_hidden"); // 50z1
     Device.Run();
 
     while (!SDL_QuitRequested()) // SDL_PumpEvents is here

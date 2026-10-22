@@ -187,6 +187,18 @@ private:
 
     files_it file_find_it(pcstr n);
 
+    // 50z1 (plans/optimization_mt/50z1-startup-markers-fs-index.md): the startup index skips the directories already
+    // enumerated through another alias of fsgame.ltx, and leaves the appdata caches out (indexed on demand). Defined
+    // in LocatorAPI.cpp.
+    struct LazyRoot;
+    struct IndexState;
+    IndexState* m_index_state;
+
+    LazyRoot* find_lazy_root(pcstr normalized_name) const;
+    bool lazy_register(pcstr name);
+    void lazy_scan(pcstr path, bool root_only);
+    files_it file_find_it_lazy(pcstr n);
+
 public:
     enum : u32
     {

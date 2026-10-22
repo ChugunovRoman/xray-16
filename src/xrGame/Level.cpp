@@ -21,6 +21,8 @@
 #include "xrPhysics/PhysicsShell.h"
 #include "xrCore/Threading/ParallelFor.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/BackgroundIo.h"
+#include "xrCore/Platform/HwProfile.h"
 #include "HUDManager.h"
 #include "xrServer.h"
 #include "NET_Queue.h"
@@ -470,6 +472,18 @@ int g_spawn_catchup_us = 20000;
 // weapons still loads them together).
 int g_spawn_cold_models = 1; // the default since 2026-10-17
 
+// 50i-stage3-slow-disk-io.md (plans/optimization_mt, plan 50 R6), a slow disk only: the hw policy's spawn_cold_ms is 0
+// (an HDD / USB / network disk of gamedata) or the start-up warm-up measured the disk slow. A group with no parent (a
+// creature or an object coming online - not an item given to someone) does not start while the "Model prefetch"
+// thread still has to read the files of its models: they are queued ahead of the ALife jobs, and the group with
+// everything behind it waits for the next frames, as with the budget. Instead of a 50-400 ms cold load of an ogf from an
+// HDD in one frame the NPC appears a little later. At most until the head has spent spawn_warm_max_delay_ms in the
+// client queue (then it goes on, cold); not on the loading screen, on pause or without the spawn budget. 1.5 s: three
+// times spawn_max_delay_ms - an HDD reads a model (ogf, LOD, omf; no dds there) in ~50-150 ms, a group has 1-4 models,
+// and the thread may be in the middle of a model of ALife. On an SSD / NVMe (spawn_cold_ms 6 / 8) the spawns do not
+// wait: the limits there are spawn_cold_models and the time limit spawn_cold_ms (ProcessGameEvents), as before.
+constexpr u32 spawn_warm_max_delay_ms = 1500;
+
 namespace
 {
 // An M_SPAWN joins the open group when its parent is the root or a child already in it (the server sends the
@@ -503,6 +517,176 @@ void count_spawn_groups(const xr_deque<NET_Event>& queue, xr_vector<u16>& group,
 
 // How long the event has been in the client queue, ms (real time)
 u32 queue_wait_ms(const NET_Event& event, u32 now_ms) { return now_ms - event.time_queued; }
+
+// 50i (R6): the group the spawns wait for (main thread)
+struct SpawnWarmWait
+{
+    u16 id = u16(-1); // the root M_SPAWN
+    bool waiting = false;
+    u64 t0 = 0; // xray::perf::Ticks() of the first stopped pass (metrics)
+};
+SpawnWarmWait s_spawn_warm_wait;
+xr_vector<u16> s_spawn_warm_group; // scratch: the IDs of the group asked about
+
+// 50i: the spawns wait for the warm-up of their models (a slow disk). The "* [hw] io" line once per process.
+bool spawn_warm_wait_mode()
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    const bool by_policy = xray::hw::PolicyValid(policy) && policy.spawn_cold_ms == 0;
+    const bool measured = xray::io::BackgroundIoMeasuredSlow();
+    if (!by_policy && !measured)
+        return false;
+    static bool s_logged = false;
+    if (!s_logged)
+    {
+        s_logged = true;
+        Msg("* [hw] io: slow disk -> single background queue, spawn waits for warm-up (max %u ms)%s",
+            spawn_warm_max_delay_ms, by_policy ? "" : " (measured at the start-up warm-up)");
+    }
+    return true;
+}
+
+// 50i (R6): the time limit of the cold model loads of a budgeted pass, us; 0 = none (no policy, or the slow disk's
+// spawn_cold_ms 0: the spawns wait for the warm-up instead)
+u64 spawn_cold_us_limit()
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    return xray::hw::PolicyValid(policy) ? u64(policy.spawn_cold_ms) * 1000 : 0;
+}
+
+// 50l-weak-cpu-spawn-models.md (plans/optimization_mt): a weak CPU (the hw policy's cpu tier low / potato), where a cold
+// model load costs 100-350 ms of this thread. At most one per spawn_cold_frames frames (low 3, potato 4): a group with
+// no parent does not start while the last cold model load of this thread is more recent than that - of a spawn
+// (spawn_cold_models stops the pass right after one) or outside the pass (cNameVisual_set of an update...). The group
+// and everything behind it wait, as with the budget: NPCs appear a few frames later. Not with spawn_cold_models 0 (the
+// console switch of the cold limits). With the background base loading (D3D11 with DriverConcurrentCreates, the render)
+// the groups wait as on a slow disk (spawn_warm_wait_stop, up to spawn_warm_max_delay_ms) - for the files and the base
+// models of their creatures, which then come off the main thread: the spawn only makes a copy.
+struct SpawnColdSpacing
+{
+    u32 loads = 0; // TlColdModelLoads of this thread when last looked at
+    u32 frame = 0; // the frame a cold load was seen in last
+    bool any = false;
+};
+thread_local SpawnColdSpacing s_spawn_cold_spacing; // the passes run on the thread of CLevel::OnFrame
+
+u32 spawn_cold_frames()
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    return xray::hw::PolicyValid(policy) ? policy.spawn_cold_frames : 0;
+}
+
+bool spawn_bg_wait_mode()
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    return xray::hw::PolicyValid(policy) && policy.model_bg_load != 0;
+}
+
+// The "* [hw] spawn" line once per process, at the first budgeted pass in play on a weak CPU
+void spawn_weak_cpu_log()
+{
+    static bool s_logged = false;
+    if (s_logged)
+        return;
+    const u32 frames = spawn_cold_frames();
+    const bool bg = spawn_bg_wait_mode();
+    if (!frames && !bg)
+        return;
+    s_logged = true;
+    Msg("* [hw] spawn: weak CPU -> 1 cold model per %u frames, background base loading %s", frames, bg ? "on" : "off");
+}
+
+// A cold model load of this thread since the last look: its frame
+void spawn_cold_note()
+{
+    SpawnColdSpacing& spacing = s_spawn_cold_spacing;
+    const u32 loads = xray::perf::TlColdModelLoads();
+    if (loads == spacing.loads)
+        return;
+    spacing.loads = loads;
+    spacing.frame = Device.dwFrame;
+    spacing.any = true;
+}
+
+// true = the last cold model load of this thread was less than `frames` frames ago (this frame counts)
+bool spawn_cold_spaced(u32 frames)
+{
+    spawn_cold_note();
+    const SpawnColdSpacing& spacing = s_spawn_cold_spacing;
+    return spacing.any && Device.dwFrame - spacing.frame < frames;
+}
+
+void spawn_warm_wait_end()
+{
+    SpawnWarmWait& wait = s_spawn_warm_wait;
+    if (!wait.waiting)
+        return;
+    wait.waiting = false;
+#if XR_PERF_METRICS
+    if (wait.t0 && xray::perf::g_perf_metrics_active)
+        xray::perf::AddTimeSlow(xray::perf::Metric::spawn_warm_time, xray::perf::Ticks() - wait.t0);
+#endif
+}
+
+// 50i: are the model files of the group at the head of the queue still to be read? The root and its children right
+// behind it (the rule of the budget groups); every one of them is asked, so all their jobs go ahead of the ALife ones at
+// once.
+bool spawn_group_files_pending(const xr_deque<NET_Event>& queue)
+{
+    xr_vector<u16>& group = s_spawn_warm_group;
+    group.clear();
+    bool pending = false;
+    u32 spawns = 0;
+    for (const NET_Event& event : queue)
+    {
+        if (event.ID != M_SPAWN)
+            continue;
+        if (spawns && !spawn_joins_group(group, event.spawn_parent))
+            break;
+        if (event.spawn_id != u16(-1))
+        {
+            group.push_back(event.spawn_id);
+            pending = model_prefetch_spawn_pending(event.spawn_id) || pending;
+        }
+        if (++spawns >= 64) // an inventory larger than this: the rest is asked when the budget defers it
+            break;
+    }
+    group.clear();
+    return pending;
+}
+
+// 50i: in front of a root M_SPAWN with no parent (a slow disk, a budgeted pass that is not loading / paused): true =
+// the group waits for the "Model prefetch" thread, stop the pass here
+bool spawn_warm_wait_stop(const xr_deque<NET_Event>& queue, const NET_Event& head)
+{
+    SpawnWarmWait& wait = s_spawn_warm_wait;
+    if (wait.waiting && wait.id != head.spawn_id)
+        spawn_warm_wait_end(); // the group it waited for went on another way (a nested pass, the loading screen...)
+    if (head.spawn_id == u16(-1) || !spawn_group_files_pending(queue))
+    {
+        spawn_warm_wait_end();
+        return false;
+    }
+    if (queue_wait_ms(head, CPU::GetTicks()) >= spawn_warm_max_delay_ms)
+    {
+        PERF_INC(spawn_warm_timeout); // goes on cold, its jobs still queued are dropped by the cold load
+        spawn_warm_wait_end();
+        return false;
+    }
+    if (!wait.waiting)
+    {
+        wait.waiting = true;
+        wait.id = head.spawn_id;
+        wait.t0 = 0;
+#if XR_PERF_METRICS
+        if (xray::perf::g_perf_metrics_active)
+            wait.t0 = xray::perf::Ticks();
+#endif
+        PERF_INC(spawn_warm_wait);
+    }
+    PERF_INC(spawn_warm_frames);
+    return true;
+}
 } // namespace
 
 bool CLevel::SpawnBudgetSpent(SpawnBudgetPass& pass, const NET_Event& head)
@@ -748,6 +932,22 @@ void CLevel::ProcessGameEvents(bool frame_budget)
         const u32 cold_models_at_start = xray::perf::TlColdModelLoads();
         const u32 cold_models_limit = budget.budget_ns && budget.force != SpawnBudgetForce::Loading &&
                 budget.force != SpawnBudgetForce::Pause ? u32(std::max(g_spawn_cold_models, 0)) : 0;
+        // 50i-stage3-slow-disk-io.md (R6): a slow disk - a group with no parent waits for the warm-up of its models.
+        // Otherwise the time limit of the cold model loads of this pass: the hw policy's spawn_cold_ms (NVMe 8, SATA 6;
+        // it can only stop where spawn_cold_models stops too unless that is 0 or more than 1 on the console)
+        // 50l-weak-cpu-spawn-models.md: and on a weak CPU with the background base loading (no "[hw] io" line then)
+        const bool warm_wait = budget.budget_ns && budget.force == SpawnBudgetForce::None &&
+            (spawn_warm_wait_mode() || spawn_bg_wait_mode());
+        const u64 cold_us_at_start = xray::perf::TlColdModelUs();
+        const u64 cold_us_limit =
+            budget.budget_ns && budget.force == SpawnBudgetForce::None ? spawn_cold_us_limit() : 0;
+        // 50l-weak-cpu-spawn-models.md: a weak CPU - one cold model load per spawn_cold_frames frames
+        const u32 cold_frames =
+            cold_models_limit && budget.force == SpawnBudgetForce::None ? spawn_cold_frames() : 0;
+        if (budget.budget_ns && budget.force == SpawnBudgetForce::None)
+            spawn_weak_cpu_log();
+        if (cold_frames)
+            spawn_cold_note(); // a cold load since the last pass (an update of an object...) counts from this frame
 
         while (game_events->available(svT))
         {
@@ -765,9 +965,35 @@ void CLevel::ProcessGameEvents(bool frame_budget)
                         budget.stopped = true;
                         break; // as the budget below: the group and everything behind it wait for the next frame
                     }
+                    // 50i (R6): and after spawn_cold_ms of them
+                    if (!joins_group && cold_us_limit && budget.groups > 0 &&
+                        xray::perf::TlColdModelUs() - cold_us_at_start >= cold_us_limit)
+                    {
+                        PERF_INC(spawn_cold_time_stopped);
+                        budget.stopped = true;
+                        break;
+                    }
+                    // 50l: a weak CPU - a group with no parent waits until spawn_cold_frames frames have passed since
+                    // the last cold model load (the first group of a frame too: that is the spacing); not a head older
+                    // than spawn_warm_max_delay_ms (cold loads outside the passes every frame must not hold it)
+                    if (!joins_group && cold_frames && head.spawn_parent == u16(-1) && spawn_cold_spaced(cold_frames) &&
+                        queue_wait_ms(head, CPU::GetTicks()) < spawn_warm_max_delay_ms)
+                    {
+                        PERF_INC(spawn_cold_spaced);
+                        budget.stopped = true;
+                        break;
+                    }
                     // Stage 2: the budget is checked in front of a root only, a group is never split by it
                     if (!joins_group && SpawnBudgetSpent(budget, head))
                         break; // this group and everything behind it go on in the next frame, in the same order
+                    // 50i (R6): past the budget too (a head older than spawn_max_delay_ms), up to
+                    // spawn_warm_max_delay_ms; as the budget, the deferred spawns behind it are asked ahead below
+                    if (!joins_group && warm_wait && head.spawn_parent == u16(-1) &&
+                        spawn_warm_wait_stop(game_events->queue, head))
+                    {
+                        budget.stopped = true;
+                        break;
+                    }
                     if (SpawnMustWait(head.spawn_id, head.spawn_section()))
                         break; // SPEC.md 8.6: this spawn and everything behind it go on in the next frame
                     if (!joins_group)
@@ -858,6 +1084,10 @@ void CLevel::ProcessGameEvents(bool frame_budget)
             }
             }
         }
+
+        // 50l: the frame of a cold model load of this pass, for the spacing of the next frames
+        if (cold_frames)
+            spawn_cold_note();
 
         // 30-game-events.md, B1 (ol_destroy_child_scan_batch 1): the live children of the objects destroyed by this pass
         // are destroyed now, before UpdateCL of the objects (as when every destruction walked for them at once)
@@ -2039,6 +2269,7 @@ void CLevel::OnFrame()
     }
     {
         LEVEL_FRAME_PHASE("level/game_events", lvl_frame_game_events);
+        GW_FRAME_PHASE(LvlEvents); // 50n: the frame spike report
         ProcessGameEvents(true); // the only call with the spawn budget (spawn_budget_us, SPEC.md 5.A)
     }
     if (m_bNeed_CrPr)
@@ -2078,6 +2309,7 @@ void CLevel::OnFrame()
             //}
             // else
             LEVEL_FRAME_PHASE("level/update_tasks", lvl_frame_tasks);
+            GW_FRAME_PHASE(LvlScript); // 50n: the frame spike report
             GameTaskManager().UpdateTasks();
         }
     }
@@ -2085,6 +2317,7 @@ void CLevel::OnFrame()
     {
         // objects UpdateCL + destroy + HUD: no spike phase (tens of ms is normal), each object UpdateCL is a spike site
         PERF_SCOPE(lvl_frame_objects);
+        GW_FRAME_PHASE(LvlObjects); // 50n: the frame spike report
         inherited::OnFrame();
     }
     if (!Device.Paused())
@@ -2094,6 +2327,7 @@ void CLevel::OnFrame()
         m_level_on_frame_pending = true;
         // Plugin timers (timer_start) stay here, on main: a timer may send any event, to any subscriber
         LEVEL_FRAME_PHASE("level/plugin_timers", lvl_frame_plugin_timers);
+        GW_FRAME_PHASE(LvlScript); // 50n: the frame spike report
         gw::addons::timers::Update(Device.dwTimeDelta);
     }
     // Draw client/server stats
@@ -2179,6 +2413,7 @@ void CLevel::OnFrame()
     if (!GEnv.isDedicatedServer)
     {
         LEVEL_FRAME_PHASE("level/script_process", lvl_frame_script_process);
+        GW_FRAME_PHASE(LvlScript); // 50n: the frame spike report
         GEnv.ScriptEngine->script_process(ScriptProcessor::Level)->update();
     }
     {
@@ -2187,6 +2422,7 @@ void CLevel::OnFrame()
     }
     {
         LEVEL_FRAME_PHASE("level/add_call", lvl_frame_add_call);
+        GW_FRAME_PHASE(LvlScript); // 50n: the frame spike report
         // 32-frame-spikes.md, npc_perf_lua_spike_us > 0: the phase over the threshold goes to the log as
         // "[lua-spike] add_call" with its slowest call (the Lua source of its condition/action), the heap and the GC
         const bool lua_spike = gw::lua_spike::Enabled();
@@ -2659,6 +2895,7 @@ void CLevel::script_gc()
     // G2 (32-frame-spikes.md): lua_gc_pause/lua_gc_stepmul, lua_gc_atomic_stats, lua_heap_census - outside lua/gc_step
     gw::lua_spike::ServiceGcDiagnostics(L);
     PERF_SCOPE(lua_gc_step);
+    GW_FRAME_EVENT(LuaGc); // 50n: the frame spike report
     // P18 (plans/optimization_mt/13-lua-spikes.md), npc_perf_lua_spike_us > 0: a long GC step goes to the log, and an
     // atomic phase inside the step is counted apart (lua/gc_atomic_in_step of lua/gc_atomic)
     const bool probe_atomic = gw::lua_spike::Enabled() && L;
@@ -2779,6 +3016,7 @@ void CLevel::OnRender()
     {
         ZoneScopedN("lvl_RenderUI");
         PERF_SCOPE(rlvl_ui);
+        GW_FRAME_PHASE(UiRender); // 50z5-extra-diagnostics.md: the "uir" phase of the frame report (out of "rs")
         if (!Device.IsAnselActive)
             HUD().RenderUI();
     }

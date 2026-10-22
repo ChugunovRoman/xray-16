@@ -182,6 +182,9 @@ CUIStatic* CUIFrameWindow::GetTitleText(bool create_on_demand /*= false*/)
 void CUIFrameWindow::DrawElements()
 {
     GEnv.UIRender->SetShader(*m_shader);
+    // 50r-slow-disk-async-textures.md: the texture is still being read (a slow disk) - not drawn this frame
+    if (m_shader->BaseTexturePending())
+        return;
 
     Fvector2 ts{};
     m_shader->GetBaseTextureResolution(ts);

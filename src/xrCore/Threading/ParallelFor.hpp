@@ -38,7 +38,9 @@ public:
 public:
     constexpr TaskRange() = default;
     constexpr TaskRange(T begin, T end) : m_begin(begin), m_end(end),
-        m_grain(size() / (TaskScheduler ? TaskScheduler->GetWorkersCount() : std::thread::hardware_concurrency()))
+        // GW: not below 1 - hardware_concurrency() may be 0 ("not computable")
+        m_grain(size() / std::max<size_t>(1,
+            TaskScheduler ? TaskScheduler->GetWorkersCount() : std::thread::hardware_concurrency()))
     {
         if (m_grain <= 0)
             m_grain = 1;

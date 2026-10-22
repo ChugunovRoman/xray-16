@@ -50,6 +50,7 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
     _SHOW_REF(msg_buff, pSurface);
 #endif // DEBUG
 
+    async_detach(); // 50r: a surface given from outside replaces the async loading (if any)
     if (surf)
         surf->AddRef();
     _RELEASE(pSurface);
@@ -149,6 +150,7 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
 
 ID3DBaseTexture* CTexture::surface_get() const
 {
+    const_cast<CTexture*>(this)->async_ensure(); // 50r: the surface of a texture still being read - finished now
     if (pSurface)
         pSurface->AddRef();
     return pSurface;
@@ -168,6 +170,9 @@ void CTexture::PostLoad()
 
 void CTexture::apply_load(CBackend& cmd_list, u32 dwStage)
 {
+    // 50r-slow-disk-async-textures.md: a slow disk - the placeholder until the texture is in place
+    if (async_bind(cmd_list, dwStage))
+        return;
     if (!flags.bLoaded)
     {
         PERF_INC(tex_apply_load); // spawn stage 0: loaded by its first bind (render)
@@ -177,6 +182,37 @@ void CTexture::apply_load(CBackend& cmd_list, u32 dwStage)
         PostLoad();
     bind(cmd_list, dwStage);
 };
+
+// The view of a texture to its stage (Apply), also the placeholder of the async loading (50r: no view)
+static void dx11_texture_bind_view(CBackend& cmd_list, u32 dwStage, ID3DShaderResourceView* view)
+{
+    if (dwStage < CTexture::rstVertex) //	Pixel shader stage resources
+    {
+        cmd_list.SRVSManager.SetPSResource(dwStage, view);
+    }
+    else if (dwStage < CTexture::rstGeometry) //	Vertex shader stage resources
+    {
+        cmd_list.SRVSManager.SetVSResource(dwStage - CTexture::rstVertex, view);
+    }
+    else if (dwStage < CTexture::rstHull) //	Geometry shader stage resources
+    {
+        cmd_list.SRVSManager.SetGSResource(dwStage - CTexture::rstGeometry, view);
+    }
+    else if (dwStage < CTexture::rstDomain) //	Geometry shader stage resources
+    {
+        cmd_list.SRVSManager.SetHSResource(dwStage - CTexture::rstHull, view);
+    }
+    else if (dwStage < CTexture::rstCompute) //	Geometry shader stage resources
+    {
+        cmd_list.SRVSManager.SetDSResource(dwStage - CTexture::rstDomain, view);
+    }
+    else if (dwStage < CTexture::rstInvalid) //	Geometry shader stage resources
+    {
+        cmd_list.SRVSManager.SetCSResource(dwStage - CTexture::rstCompute, view);
+    }
+    else
+        VERIFY("Invalid stage");
+}
 
 void CTexture::Apply(CBackend& cmd_list, u32 dwStage) const
 {
@@ -188,32 +224,14 @@ void CTexture::Apply(CBackend& cmd_list, u32 dwStage) const
     //   return;
     //}
 
-    if (dwStage < rstVertex) //	Pixel shader stage resources
-    {
-        cmd_list.SRVSManager.SetPSResource(dwStage, m_pSRView);
-    }
-    else if (dwStage < rstGeometry) //	Vertex shader stage resources
-    {
-        cmd_list.SRVSManager.SetVSResource(dwStage - rstVertex, m_pSRView);
-    }
-    else if (dwStage < rstHull) //	Geometry shader stage resources
-    {
-        cmd_list.SRVSManager.SetGSResource(dwStage - rstGeometry, m_pSRView);
-    }
-    else if (dwStage < rstDomain) //	Geometry shader stage resources
-    {
-        cmd_list.SRVSManager.SetHSResource(dwStage - rstHull, m_pSRView);
-    }
-    else if (dwStage < rstCompute) //	Geometry shader stage resources
-    {
-        cmd_list.SRVSManager.SetDSResource(dwStage - rstDomain, m_pSRView);
-    }
-    else if (dwStage < rstInvalid) //	Geometry shader stage resources
-    {
-        cmd_list.SRVSManager.SetCSResource(dwStage - rstCompute, m_pSRView);
-    }
-    else
-        VERIFY("Invalid stage");
+    dx11_texture_bind_view(cmd_list, dwStage, m_pSRView);
+}
+
+// 50r-slow-disk-async-textures.md (plans/optimization_mt): no view - the shader samples zeros (transparent black) until
+// the texture is in place
+void CTexture::async_bind_placeholder(CBackend& cmd_list, u32 dwStage)
+{
+    dx11_texture_bind_view(cmd_list, dwStage, nullptr);
 }
 
 void CTexture::apply_theora(CBackend& cmd_list, u32 dwStage)
@@ -317,6 +335,59 @@ void CTexture::Preload()
 }
 
 void CTexture::Load()
+{
+    // 50r-slow-disk-async-textures.md: a texture of the async loading is finished here - the caller needs it now
+    if (m_async_state.load(std::memory_order_acquire) != asNone && async_finish_now())
+        return;
+    load_now();
+}
+
+bool CTexture::async_create()
+{
+    // 50r: the "Texture async" thread, D3D11 with DriverConcurrentCreates - the normal texture branch of load_now (the
+    // file is in the OS cache already). The device is free-threaded, the immediate context is not used.
+    u32 mem = 0;
+    ID3DBaseTexture* surface = RImplementation.texture_load(cName.c_str(), mem);
+    if (!surface)
+        return false;
+    ID3DShaderResourceView* view = nullptr;
+    if (FAILED(HW.pDevice->CreateShaderResourceView(surface, nullptr, &view)) || !view)
+    {
+        _RELEASE(surface);
+        return false;
+    }
+#ifdef DEBUG
+    surface->SetPrivateData(WKPDID_D3DDebugObjectName, cName.size(), cName.c_str());
+#endif
+    m_async_surface = surface;
+    m_async_srv = view;
+    m_async_mem = mem;
+    return true;
+}
+
+void CTexture::async_install()
+{
+    // 50r: the claimer of asInstalling - what the thread created goes in place, as load_now leaves a normal texture.
+    // The bind stays apply_load: its first call after asReady switches to apply_normal (PostLoad), on the render side.
+    flags.bLoaded = true;
+    flags.bUser = false;
+    flags.MemoryUsage = m_async_mem;
+    pSurface = m_async_surface;
+    m_pSRView = m_async_srv;
+    m_async_surface = nullptr;
+    m_async_srv = nullptr;
+    desc_cache = 0;
+    desc_update();
+}
+
+void CTexture::async_release_created()
+{
+    _RELEASE(m_async_surface);
+    _RELEASE(m_async_srv);
+    m_async_mem = 0;
+}
+
+void CTexture::load_now()
 {
     flags.bLoaded = true;
     desc_cache = 0;
@@ -510,6 +581,7 @@ void CTexture::Unload()
     _SHOW_REF(msg_buff, pSurface);
 #endif // DEBUG
 
+    async_detach(); // 50r: out of the async loading first (waits for the thread if it is reading this one)
     flags.bLoaded = FALSE;
     if (!seqDATA.empty())
     {

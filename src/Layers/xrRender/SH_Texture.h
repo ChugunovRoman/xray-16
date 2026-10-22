@@ -91,14 +91,80 @@ public:
 
     u32 get_Width()
     {
+        async_ensure(); // 50r: the size of a texture still being read - finished now
         desc_enshure();
         return m_width;
     }
 
     u32 get_Height()
     {
+        async_ensure();
         desc_enshure();
         return m_height;
+    }
+
+    // 50r-slow-disk-async-textures.md (plans/optimization_mt): the asynchronous loading of a texture on a slow disk
+    // (CResourceManager::_AsyncTexture*, ResourceManager.cpp). A texture created in the game (or first bound in the
+    // menu) is not read on the calling thread: the "Texture async" thread reads its file, a placeholder (no view) is
+    // bound meanwhile, and the texture is put in place when created. Whoever needs it as a loaded one (Load, the size,
+    // the surface) finishes it on the spot - a sync fallback. The state is the only thing read across threads.
+    enum AsyncState : u8
+    {
+        asNone = 0, // not in the async loading: loaded or not, as before
+        asQueued, // waits for the "Texture async" thread (a queue entry points at it)
+        asReading, // the thread reads its file and, D3D11 with concurrent creates, creates it
+        asWarm, // its file is in the OS cache: the main thread creates it (a budget per frame)
+        asCreated, // created by the thread (m_async_*): the main thread puts it in place
+        asInstalling, // being finished by one thread
+        asReady, // in place: a loaded texture
+    };
+    std::atomic<u8> m_async_state{ asNone };
+    std::atomic<u8> m_async_urgent{ 0 }; // bound with the placeholder: in the urgent queue too
+    std::atomic<u8> m_async_entries{ 0 }; // queue entries pointing at it (changed under the queue lock)
+    u32 m_async_t0{ 0 }; // queued at, ms (the loader's clock)
+#if defined(USE_DX11)
+    ID3DBaseTexture* m_async_surface{}; // asCreated: made by the thread
+    ID3DShaderResourceView* m_async_srv{};
+    u32 m_async_mem{};
+#endif
+
+    [[nodiscard]] bool async_pending() const
+    {
+        const u8 s = m_async_state.load(std::memory_order_acquire);
+        return s != asNone && s != asReady;
+    }
+    // A texture of the async loading as a loaded one, now (any thread); cheap when it is not pending
+    void async_ensure()
+    {
+        if (async_pending())
+            async_finish_now();
+    }
+    // ResourceManager.cpp: finishes a pending texture on the calling thread (waits for the thread if it is reading this
+    // one); true = in place now (or was), false = not in the async loading (any more): load it as before
+    bool async_finish_now();
+    // ResourceManager.cpp: the texture leaves the async loading (Unload, surface_set): waits for the thread or a
+    // finisher working on it, drops its queue entries and what the thread created
+    void async_detach();
+    // the render API files: the thread's part (D3D11: texture_load + the view into m_async_*; GL: false - created on
+    // main), putting m_async_* in place (the claimer of asInstalling), dropping them
+    bool async_create();
+    void async_install();
+    void async_release_created();
+    // the former body of Load: loads it now on the calling thread
+    void load_now();
+    // ResourceManager.cpp: a bind of a texture not loaded yet (apply_load). true = the async loading has it (queued
+    // now or pending): the placeholder is bound; false = load it as before
+    bool async_bind(CBackend& cmd_list, u32 stage);
+    void async_bind_placeholder(CBackend& cmd_list, u32 stage); // the render API files
+
+    // 50a-stage1-prefetch.md (plans/optimization_mt): Load reads no file of this texture now - it is created already
+    // (pSurface: loaded earlier, by the prefetch stage or on the previous level; a surface set from outside; a video:
+    // load_now returns at once) or put in place by the async loading (asReady: Load returns at once). DeferredUpload
+    // asks it on the main thread before the loads start, to keep the "Texture warm" reader of a slow disk off such
+    // textures. Only a hint: a texture taken for created that is not reads its file in its own Load, as without the reader.
+    [[nodiscard]] bool load_reads_no_file() const
+    {
+        return pSurface || m_async_state.load(std::memory_order_acquire) == asReady;
     }
 
     void video_Sync(u32 _time) { m_play_time = _time; }

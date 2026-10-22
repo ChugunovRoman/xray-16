@@ -20,6 +20,34 @@
 #include "ui/UIMMShniaga.h"
 #include "ui/UISleepStatic.h"
 
+// 50r-slow-disk-async-textures.md (plans/optimization_mt), Lua: prefetch_textures(names) -> number. names: a Lua array
+// of texture names as InitTexture takes them ("ui\\ui_emblem_x", .dds optional), in the order they are wanted. On a slow
+// disk (HDD, USB, network) their dds are queued for the render's "Texture async" thread, which reads them into the OS
+// cache - without creating them - after the textures already on the screen, so a window opened later creates them from
+// memory. Never waits. Returns the names queued: 0 on a fast disk, for textures created already, for a non-table.
+static u32 ui_export_prefetch_textures(const luabind::object& names)
+{
+    if (!GEnv.Render || luabind::type(names) != LUA_TTABLE)
+        return 0;
+    xr_vector<xr_string> list;
+    for (int i = 1;; ++i)
+    {
+        const luabind::object value = names[i];
+        const int value_type = luabind::type(value);
+        if (value_type == LUA_TNIL)
+            break;
+        if (value_type == LUA_TSTRING)
+            list.emplace_back(luabind::object_cast<pcstr>(value));
+    }
+    if (list.empty())
+        return 0;
+    xr_vector<pcstr> pointers;
+    pointers.reserve(list.size());
+    for (const xr_string& name : list)
+        pointers.push_back(name.c_str());
+    return GEnv.Render->texture_prefetch_files(pointers.data(), static_cast<u32>(pointers.size()));
+}
+
 void CDialogHolder::script_register(lua_State* luaState)
 {
     using namespace luabind;
@@ -149,6 +177,12 @@ void CMainMenu::script_register(lua_State* luaState)
     module(luaState, "main_menu")
     [
         def("get_main_menu", &MainMenu)
+    ];
+
+    // 50r-slow-disk-async-textures.md: prefetch_textures(names), see ui_export_prefetch_textures above
+    module(luaState)
+    [
+        def("prefetch_textures", &ui_export_prefetch_textures)
     ];
 }
 

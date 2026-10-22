@@ -16,6 +16,7 @@
 #include "FSkinned.h"
 #include "LightTrack.h"
 #include "xrCore/Threading/TaskManager.hpp"
+#include "xrCore/Platform/HwProfile.h"
 #include "Layers/xrRenderDX11/dx11ConstantBuffer.h"
 #endif
 
@@ -533,9 +534,14 @@ bool R_dsgraph_structure::render_graph_main_parallel()
     // Only the main view's G-buffer graph on the immediate context (the scope pass, shadows, Z-prefill and the split
     // scene keep render_graph). RenderDoc: its hooks are not safe with deferred recording on several threads (see
     // BeginSecondVPCalculateParallel) - serial, like the scope pass.
-    const u32 workers = TaskScheduler ? static_cast<u32>(TaskScheduler->GetWorkersCount()) : 0;
+    // R9 (plan 50): the units = min(r__main_parallel_parts, hardware policy). The policy says 1 (sequential) without
+    // DriverCommandLists - the runtime emulates the deferred contexts, recording is pure overhead - or with a pool < 3;
+    // else its cap is pool + 1. Helpers are the pool threads only: main, Game and Physics have their own work.
+    const u32 pool = TaskScheduler ? static_cast<u32>(TaskScheduler->GetPoolWorkersCount()) : 0;
+    const u32 user_parts = static_cast<u32>(std::clamp(ps_r__main_parallel_parts, 2, 12));
+    const u32 parts = xray::hw::EffectiveMainParallelParts(user_parts);
     if (!o.is_main_pass || o.second_vp_pass || o.phase != CRender::PHASE_NORMAL ||
-        cmd_list.context_id != CHW::IMM_CTX_ID || workers < 2 || D3DXRenderBase::RenderDocActive())
+        cmd_list.context_id != CHW::IMM_CTX_ID || pool < 2 || parts < 2 || D3DXRenderBase::RenderDocActive())
     {
         PERF_INC(rmain_par_submit_fallback);
         return false;
@@ -558,7 +564,7 @@ bool R_dsgraph_structure::render_graph_main_parallel()
 
     // One pooled deferred context per deferred unit. At this point the sun cascades (3), rain and the scope worker
     // may hold some of the pool; a short pool just means fewer units.
-    const u32 slots_wanted = std::min(static_cast<u32>(std::clamp(ps_r__main_parallel_parts, 2, 12)) - 1, MAIN_PAR_MAX_SLOTS);
+    const u32 slots_wanted = std::min(parts - 1, MAIN_PAR_MAX_SLOTS);
     u32 slots = 0;
     for (; slots < slots_wanted; ++slots)
     {
@@ -758,7 +764,7 @@ bool R_dsgraph_structure::render_graph_main_parallel()
     };
 
     Task& root = TaskScheduler->CreateTask([] {});
-    const u32 helpers = std::min(slots, workers - 1);
+    const u32 helpers = std::min(slots, pool);
     for (u32 h = 0; h < helpers; ++h)
         TaskScheduler->AddTask(root, [&run_slots] { run_slots(); });
 
@@ -799,8 +805,8 @@ bool R_dsgraph_structure::render_graph_main_parallel()
                 continue;
             }
             PERF_SCOPE(rmain_par_submit_tail);
-            while (!slot.done.load(std::memory_order_acquire))
-                std::this_thread::yield();
+            // yield as before; the bounded spin in the Short spin class (plans/optimization_mt 50g, R11)
+            TaskManager::SpinUntil([&slot] { return slot.done.load(std::memory_order_acquire); });
         }
         {
             PERF_SCOPE(rmain_par_submit_execute);
@@ -1193,7 +1199,8 @@ void ps_batch_fill(FVF::LIT* pv, u32 total_particles, [[maybe_unused]] bool perf
         }
     };
 
-    const u32 workers = static_cast<u32>(TaskScheduler->GetWorkersCount());
+    // Main plus the pool threads (GetWorkersCount would count Game and Physics, busy with their own work)
+    const u32 workers = static_cast<u32>(TaskScheduler->GetPoolWorkersCount()) + 1;
     const u32 chunks = std::min({ total_particles / PS_BATCH_PARALLEL_MIN, workers, PS_BATCH_CHUNKS_MAX });
     if (chunks < 2)
     {
@@ -1224,8 +1231,8 @@ void ps_batch_fill(FVF::LIT* pv, u32 total_particles, [[maybe_unused]] bool perf
     for (u32 h = 0; h < helpers; ++h)
         TaskScheduler->AddTask(root, [&run_chunks] { run_chunks(); });
     run_chunks();
-    while (done.load(std::memory_order_acquire) < chunks)
-        std::this_thread::yield();
+    // yield as before; the bounded spin in the Short spin class (plans/optimization_mt 50g, R11)
+    TaskManager::SpinUntil([&done, chunks] { return done.load(std::memory_order_acquire) >= chunks; });
     // Helpers still queued find no chunks and return at once; Wait() runs them first from this thread's queue.
     TaskManager::RunTask(root);
     TaskScheduler->Wait(root);

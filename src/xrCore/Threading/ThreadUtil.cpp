@@ -1,5 +1,8 @@
 #include "stdafx.h"
 #include "ThreadUtil.h"
+#include "xrCore/Profiling/SysDiag.hpp"
+
+#include <atomic>
 
 #if defined(XR_PLATFORM_POSIX)
 #   include <pthread.h>
@@ -36,6 +39,54 @@ static int pthread_setname_np(pthread_t /*threadId*/, const char* name)
 namespace Threading
 {
 #if defined(XR_PLATFORM_WINDOWS)
+namespace
+{
+// R15 (plans/optimization_mt 50g): THREAD_POWER_THROTTLING_STATE and the ThreadPowerThrottling class of the Windows
+// 10 SDK spelled out - the function is looked up by name (it is not in kernel32 of Windows 7), so nothing here may
+// depend on the SDK headers or _WIN32_WINNT.
+struct ThreadUtilPowerThrottlingState
+{
+    ULONG Version;
+    ULONG ControlMask;
+    ULONG StateMask;
+};
+constexpr int THREAD_UTIL_POWER_THROTTLING_CLASS = 3; // THREAD_INFORMATION_CLASS::ThreadPowerThrottling
+constexpr ULONG THREAD_UTIL_POWER_THROTTLING_VERSION = 1; // THREAD_POWER_THROTTLING_CURRENT_VERSION
+constexpr ULONG THREAD_UTIL_POWER_THROTTLING_EXECUTION_SPEED = 0x1; // THREAD_POWER_THROTTLING_EXECUTION_SPEED
+using ThreadUtilSetThreadInformationFn = BOOL(WINAPI*)(HANDLE, int, LPVOID, DWORD);
+
+// ControlMask = EXECUTION_SPEED: the thread decides itself (the system heuristics no longer apply to it);
+// StateMask = EXECUTION_SPEED - throttle (EcoQoS), 0 - never throttle (high QoS)
+bool SetCurrentThreadPowerThrottling(bool eco)
+{
+    static const auto set_thread_information = reinterpret_cast<ThreadUtilSetThreadInformationFn>(
+        GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetThreadInformation"));
+    static std::atomic<bool> logged[2]{};
+
+    const pcstr kind = eco ? "EcoQoS" : "high QoS (power throttling opted out)";
+    DWORD error = 0;
+    bool ok = false;
+    if (set_thread_information)
+    {
+        ThreadUtilPowerThrottlingState state{ THREAD_UTIL_POWER_THROTTLING_VERSION,
+            THREAD_UTIL_POWER_THROTTLING_EXECUTION_SPEED, eco ? THREAD_UTIL_POWER_THROTTLING_EXECUTION_SPEED : 0u };
+        ok = !!set_thread_information(GetCurrentThread(), THREAD_UTIL_POWER_THROTTLING_CLASS, &state, sizeof(state));
+        if (!ok)
+            error = GetLastError(); // ERROR_INVALID_PARAMETER before Windows 10 1709
+    }
+    if (!logged[eco ? 1 : 0].exchange(true, std::memory_order_relaxed))
+    {
+        if (ok)
+            Msg("* [hw] thread QoS: %s set", kind);
+        else if (!set_thread_information)
+            Msg("~ [hw] thread QoS: %s not set - no SetThreadInformation (Windows 7)", kind);
+        else
+            Msg("~ [hw] thread QoS: %s not set - error %u (needs Windows 10 1709+)", kind, error);
+    }
+    return ok;
+}
+} // namespace
+
 void SetThreadNameImpl(pcstr name)
 {
     string256 fullName;
@@ -75,6 +126,7 @@ void SetThreadNameImpl(pcstr name)
 void SetCurrentThreadName(cpcstr name)
 {
     SetThreadNameImpl(name);
+    xray::perf::ThreadDiagRegister(name); // 50z5-extra-diagnostics.md: the CPU of the thread in the [sys] lines
 #ifdef TRACY_ENABLE
     tracy::SetThreadName(name);
 #endif
@@ -123,8 +175,23 @@ void SetCurrentThreadPriorityLevel(priority_level prio)
     case priority_level::highest:       nPriority = THREAD_PRIORITY_HIGHEST; break;
     case priority_level::time_critical: nPriority = THREAD_PRIORITY_TIME_CRITICAL; break;
     }
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    // GW (plans/optimization_mt 49, W1): the requested level. Upstream passed THREAD_PRIORITY_TIME_CRITICAL here
+    // whatever was asked, so the "below normal" I/O threads preempted main and the workers on a 4-thread CPU.
+    SetThreadPriority(GetCurrentThread(), nPriority);
 }
+
+bool SetCurrentThreadBackgroundMode()
+{
+    // Works for the current thread only (GetCurrentThread). The system lowers the resource scheduling priorities of the
+    // thread (I/O priority very low, memory priority low) until THREAD_MODE_BACKGROUND_END or the thread ends.
+    const bool background = !!SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+    // R15: and the most efficient clock / cores for it (the callers are the background readers only)
+    SetCurrentThreadEcoQos();
+    return background;
+}
+
+bool SetCurrentThreadHighQos() { return SetCurrentThreadPowerThrottling(false); }
+bool SetCurrentThreadEcoQos() { return SetCurrentThreadPowerThrottling(true); }
 
 void SetCurrentProcessPriorityClass(priority_class cls)
 {
@@ -144,6 +211,7 @@ void SetCurrentProcessPriorityClass(priority_class cls)
 #elif defined(XR_PLATFORM_POSIX)
 void SetCurrentThreadName(cpcstr name)
 {
+    xray::perf::ThreadDiagRegister(name); // 50z5-extra-diagnostics.md: the CPU of the thread in the [sys] lines
     if (auto error = pthread_setname_np(pthread_self(), name) != 0)
     {
         Msg("SetCurrentThreadName: failed to set thread name to '%s'. Errno: '%d'", name, error);
@@ -168,6 +236,11 @@ void SetCurrentThreadPriorityLevel(priority_level prio)
 
 }
 
+bool SetCurrentThreadBackgroundMode() { return false; } // as the priority functions above: not done on POSIX yet
+// R15: no per-thread QoS API on POSIX (Linux EAS / macOS QoS classes are not used yet)
+bool SetCurrentThreadHighQos() { return false; }
+bool SetCurrentThreadEcoQos() { return false; }
+
 void SetCurrentProcessPriorityClass(priority_class cls)
 {
 
@@ -179,6 +252,9 @@ priority_level GetCurrentThreadPriorityLevel() { return priority_level::normal; 
 priority_class GetCurrentProcessPriorityClass() { return priority_class::normal; }
 
 void SetCurrentThreadPriorityLevel(priority_level prio) {}
+bool SetCurrentThreadBackgroundMode() { return false; }
+bool SetCurrentThreadHighQos() { return false; }
+bool SetCurrentThreadEcoQos() { return false; }
 void SetCurrentProcessPriorityClass(priority_class cls) {}
 #endif
 } // namespace Threading

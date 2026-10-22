@@ -2457,7 +2457,9 @@ PERF_TIMER(mpreload_time, "modelpool/preload/time")
 // alife = asks from ALife (an offline object or squad nearer than the online distance + model_prefetch_margin %),
 // deferred = asks from spawns the budget left in the queue, queue = models waiting (gauge); files / kb = files read;
 // time = the thread's time per model; missing = a file of a model not found; cold_warm / cold_miss = cold loads of
-// a model the thread had / had not read before.
+// a model the thread had / had not read before. 50-smart-engine-hw-profile.md R5: skipped = models not queued, in the
+// pool already (a base or a free instance); busy = asks put off, the pool lock was held (asked again later);
+// dropped = queued models loaded cold before the thread got to them, their job taken off the queue.
 PERF_COUNTER(mprefetch_queued, "modelpool/prefetch/queued")
 PERF_COUNTER(mprefetch_alife, "modelpool/prefetch/alife")
 PERF_COUNTER(mprefetch_deferred, "modelpool/prefetch/deferred")
@@ -2468,6 +2470,45 @@ PERF_TIMER(mprefetch_time, "modelpool/prefetch/time")
 PERF_COUNTER(mprefetch_missing, "modelpool/prefetch/missing")
 PERF_COUNTER(mprefetch_cold_warm, "modelpool/prefetch/cold_warm")
 PERF_COUNTER(mprefetch_cold_miss, "modelpool/prefetch/cold_miss")
+PERF_COUNTER(mprefetch_skipped, "modelpool/prefetch/skipped")
+PERF_COUNTER(mprefetch_busy, "modelpool/prefetch/busy")
+PERF_COUNTER(mprefetch_dropped, "modelpool/prefetch/dropped")
+// 50i-stage3-slow-disk-io.md (plans/optimization_mt, plan 50 R6, R7, R19), a slow disk only. spawn/warm/wait = root
+// spawn groups (no parent) that waited for the "Model prefetch" thread to read their model files; frames = passes of
+// ProcessGameEvents such a wait stopped; time = the waits, from the first stopped pass to the group going on (calls =
+// groups); timeout = groups that went on before the files were read (1.5 s in the client queue). spawn_first = jobs of
+// spawns put ahead of the ALife ones (queued or moved); io_wait (model / sound) = the time a prefetch thread waited
+// for the single background I/O slot; bulk_skipped = "*" folders a script named, not read ahead in bulk. Any disk:
+// spawn/cold_time_stopped = passes the time limit of cold model loads (spawn_cold_ms of the policy) stopped in front
+// of a root M_SPAWN (spawn/cold_stopped stops first while spawn_cold_models is 1).
+PERF_COUNTER(spawn_cold_time_stopped, "spawn/cold_time_stopped")
+PERF_COUNTER(spawn_warm_wait, "spawn/warm/wait")
+PERF_COUNTER(spawn_warm_frames, "spawn/warm/frames")
+PERF_TIMER(spawn_warm_time, "spawn/warm/time")
+PERF_COUNTER(spawn_warm_timeout, "spawn/warm/timeout")
+PERF_COUNTER(mprefetch_spawn_first, "modelpool/prefetch/spawn_first")
+PERF_TIMER(mprefetch_io_wait, "modelpool/prefetch/io_wait")
+PERF_TIMER(snd_prefetch_io_wait, "sound/prefetch/io_wait")
+PERF_COUNTER(snd_prefetch_bulk_skipped, "sound/prefetch/bulk_skipped")
+// 50l-weak-cpu-spawn-models.md (plans/optimization_mt), a weak CPU (the hw policy's cpu tier low / potato).
+// spawn/cold_spaced = passes of ProcessGameEvents that started no group without a parent because a cold model load was
+// made on this thread less than spawn_cold_frames frames ago (one cold load per 3 / 4 frames). D3D11 with
+// DriverConcurrentCreates only, the background base loading: modelpool/bgload/loaded = base models of creatures loaded
+// on the "Model bg load" thread (after the "Model prefetch" thread read their files), time = its loads (the wall time
+// per model, calls = models), queue = models waiting for it (gauge); finish = the main thread's part of a model it
+// loaded (the motions part, the registration in the pool; calls = models); used = the first Create of such a base (a
+// spawn found its base ready); discarded = loaded ones thrown away (loaded cold meanwhile, a level unload); cold =
+// cold loads in play while the background loading is on (any model), late = of them models the thread had queued or
+// was loading then.
+PERF_COUNTER(spawn_cold_spaced, "spawn/cold_spaced")
+PERF_COUNTER(mbg_loaded, "modelpool/bgload/loaded")
+PERF_TIMER(mbg_time, "modelpool/bgload/time")
+PERF_GAUGE(mbg_queue, "modelpool/bgload/queue")
+PERF_TIMER(mbg_finish, "modelpool/bgload/finish")
+PERF_COUNTER(mbg_used, "modelpool/bgload/used")
+PERF_COUNTER(mbg_discarded, "modelpool/bgload/discarded")
+PERF_COUNTER(mbg_cold, "modelpool/bgload/cold")
+PERF_COUNTER(mbg_late, "modelpool/bgload/late")
 // 37-destroy-relcase-smooth.md: objects/relcase/total = the whole destroy phase of CObjectList::Update (child scan,
 // relcase, sound, callbacks, net_Destroy), calls = frames with a destroy, max_frame = the tallest such frame. With
 // ol_relcase_sleep_parallel 1: sleep_deferred = the own parts of the sleeping stalkers put off (corpses mostly; also in
@@ -2537,3 +2578,68 @@ PERF_TIMER(go_net_destroy_subs, "objects/net_destroy/subscriptions")
 PERF_TIMER(stalker_net_destroy, "objects/net_destroy/stalker")
 PERF_TIMER(stalker_net_destroy_inventory, "objects/net_destroy/stalker_inventory")
 PERF_TIMER(stalker_net_destroy_physics, "objects/net_destroy/stalker_physics")
+// 50g-stage3-threads-power.md, R11: blocks of the bounded spin (Short spin class only: a small pool, battery, battery
+// saver) - a wait loop that found nothing to do after the pauses and yields sleeps until a task finishes or is pushed
+// (at most ~1 ms). wait_block_time = the time slept, part of task/wait/total and task/wait_game/total. Always 0 in the
+// Long class (the tester's machine on AC).
+PERF_COUNTER(task_wait_block, "task/wait_block")
+PERF_TIMER(task_wait_block_time, "task/wait_block_time")
+// 50j-slow-disk-async-sound.md (plans/optimization_mt): async sound sources on a slow disk (the NPC sound sets,
+// ref_sound::create_deferred from CSoundPlayer, in game). created = sources created pending (their file not read on the
+// creating thread); loaded / failed = read by the "Sound prefetch" thread; load = its time per source (not a wait of
+// main); urgent = pending sources a play waits for, read first; queue = deferred sources left to read. sync = a caller
+// needed a pending source now and read it itself (the length of a sound created the usual way, a play outside
+// CSoundPlayer; calls = fallbacks, time = its wait); wait = a caller waited for the thread in the middle of its read.
+// CSoundPlayer: play_substituted = a play took another ready sound of the collection instead of a pending one;
+// play_late / play_late_ms = plays started after their source was read (count, sum of the delays in ms);
+// play_dropped = plays dropped: the source failed or was not read within snd_deferred_max_delay_ms (1500).
+PERF_COUNTER(snd_async_created, "sound/async/created")
+PERF_COUNTER(snd_async_loaded, "sound/async/loaded")
+PERF_COUNTER(snd_async_failed, "sound/async/failed")
+PERF_TIMER(snd_async_load, "sound/async/load")
+PERF_COUNTER(snd_async_urgent, "sound/async/urgent")
+PERF_GAUGE(snd_async_queue, "sound/async/queue")
+PERF_TIMER(snd_async_sync, "sound/async/sync")
+PERF_TIMER(snd_async_wait, "sound/async/wait")
+PERF_COUNTER(snd_async_play_substituted, "sound/async/play_substituted")
+PERF_COUNTER(snd_async_play_late, "sound/async/play_late")
+PERF_COUNTER(snd_async_play_late_ms, "sound/async/play_late_ms")
+PERF_COUNTER(snd_async_play_dropped, "sound/async/play_dropped")
+
+// 50o-gpu-frame-timing.md (plans/optimization_mt): GPU time from the render's timestamp queries (D3D11 / GL), added
+// when a frame's result arrives (1-3 frames late, render/gpu/latency = the frames of that delay, a per-frame max).
+// frame = begin..end timestamps around the frame's work; gap = GPU idle from the previous frame's end; gbuffer = main
+// pass entry .. the sun (part0/part1, occlusion, wallmarks, rain smap); lights = the sun (its cascades) .. combine
+// (accumulate, shadowed lights); combine = phase_combine; svp = the whole scope pass. present_wait = CPU time of the
+// Present / swap call. disjoint = frames without a value (disjoint clock, failed); skipped = frames not measured
+// (every query set still in flight).
+PERF_TIMER(rgpu_frame, "render/gpu/frame")
+PERF_TIMER(rgpu_gap, "render/gpu/gap")
+PERF_TIMER(rgpu_gbuffer, "render/gpu/gbuffer")
+PERF_TIMER(rgpu_lights, "render/gpu/lights")
+PERF_TIMER(rgpu_combine, "render/gpu/combine")
+PERF_TIMER(rgpu_svp, "render/gpu/svp")
+PERF_TIMER(rgpu_present_wait, "render/gpu/present_wait")
+PERF_COUNTER(rgpu_disjoint, "render/gpu/disjoint")
+PERF_COUNTER(rgpu_skipped, "render/gpu/skipped")
+PERF_GAUGE(rgpu_latency, "render/gpu/latency")
+
+// 50r-slow-disk-async-textures.md (plans/optimization_mt): the async loading of textures on a slow disk (the render,
+// ResourceManager.cpp). queued = textures given to the "Texture async" thread; urgent = bound with the placeholder
+// before they were in place; read = the thread's file reads (calls = files, the warm-up names included); create = its
+// D3D11 creates (concurrent creates only); main = the main thread putting them in place (calls = textures; created
+// there from the OS cache on GL / serialized creates); sync = a caller that needed one now created it itself (calls =
+// textures); wait = a caller waited for the thread in the middle of a texture; frames = frames begun with textures
+// pending; pending = textures not in place (gauge); latency_ms = queued -> in place, summed (divide by the textures
+// put in place: main + sync calls); kb = read by the thread.
+PERF_COUNTER(tex_async_queued, "texture/async/queued")
+PERF_COUNTER(tex_async_urgent, "texture/async/urgent")
+PERF_TIMER(tex_async_read, "texture/async/read")
+PERF_TIMER(tex_async_create, "texture/async/create")
+PERF_TIMER(tex_async_main, "texture/async/main")
+PERF_TIMER(tex_async_sync, "texture/async/sync")
+PERF_TIMER(tex_async_wait, "texture/async/wait")
+PERF_COUNTER(tex_async_frames, "texture/async/frames")
+PERF_GAUGE(tex_async_pending, "texture/async/pending")
+PERF_COUNTER(tex_async_latency_ms, "texture/async/latency_ms")
+PERF_COUNTER(tex_async_kb, "texture/async/kb")

@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "xrCore/buffer_vector.h"
+#include "xrCore/FileCRC32.h"
 
 #include "ResourceManager.h"
 #ifdef _EDITOR
@@ -13,6 +14,7 @@ namespace xray::render::RENDER_NAMESPACE
 void CResourceManager::reset_begin()
 {
     ZoneScoped;
+    resetFileCrc32IncludeMemo(); // 50z2: vid_restart - the shaders' includes are hashed again once
     // destroy state-blocks
     for (SState* sstate : v_states)
         _RELEASE(sstate->state);

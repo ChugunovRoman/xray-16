@@ -277,6 +277,10 @@ public:
 // Main configuration file
 extern XRCORE_API CInifile const* pSettings;
 extern XRCORE_API CInifile const* pSettingsAuth;
+// 50z1 (plans/optimization_mt/50z1-startup-markers-fs-index.md): pSettingsAuth is parsed on its first use
+// (CLocatorAPI::auth_runtime, multiplayer only) by this loader, set by the engine at startup
+using SettingsAuthLoader = void (*)();
+extern XRCORE_API SettingsAuthLoader pSettingsAuthLoader;
 extern XRCORE_API CInifile const* pSettingsOpenXRay;
 extern XRCORE_API CInifile const* pSettingsFE;
 

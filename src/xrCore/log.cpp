@@ -6,6 +6,7 @@
 #include "log.h"
 #include "xrCore/Threading/Lock.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/StartupMarks.hpp"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #   include "xrCore/Text/Utf8Utils.hpp"
@@ -222,6 +223,9 @@ LogCallback LogCB = nullptr;
 
 bool ForceFlushLog = false;
 IWriter* LogWriter = nullptr;
+// 50z1: -log_time - every line of the log file starts with the seconds since the process started ("[+12.345] ").
+// Only the file: the console and the log callbacks get the lines as they are. Set under logCS with LogWriter.
+static bool LogTimePrefix = false;
 // P19b: Tracy zones of AddOne only between CreateLog and CloseLog - a log line written during static initialization or
 // destruction must not touch the profiler.
 std::atomic<bool> s_log_tracy_zones{false};
@@ -266,6 +270,13 @@ void AddOne(pcstr split)
 
     if (LogWriter)
     {
+        if (LogTimePrefix)
+        {
+            char prefix[32];
+            const int length = std::snprintf(prefix, sizeof(prefix), "[+%.3f] ", xray::StartupElapsedMs() / 1000.0);
+            if (length > 0)
+                LogWriter->w(prefix, std::min<size_t>(size_t(length), sizeof(prefix) - 1));
+        }
         WriteLogLine(LogWriter, split);
 
         if (ForceFlushLog)
@@ -491,6 +502,7 @@ void CreateLog(bool nl)
         }
         w->flush();
 
+        LogTimePrefix = nullptr != strstr(Core.Params, "-log_time"); // the lines above (before the log) have no time
         LogWriter = w;
     }
     s_log_tracy_zones.store(true, std::memory_order_relaxed);

@@ -3,6 +3,7 @@
 
 #include "../xrRender/ResourceManager.h"
 #include "glTextureUtils.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -20,6 +21,7 @@ void CRT::set_slice_write(u32 context_id, int slice) {}
 void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, u32 slices_num /*=1*/, Flags32 /*flags = {}*/)
 {
     if (pRT) return;
+    GW_FRAME_EVENT(RtCreate); // 50z5-extra-diagnostics.md: "rtc" of the frame report
 
     R_ASSERT(Name && Name[0] && w && h);
     _order = CPU::QPC(); //Device.GetTimerGlobal()->GetElapsed_clk();

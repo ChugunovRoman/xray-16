@@ -217,6 +217,85 @@ extern ENGINE_API float ps_r__hud_overlay_brightness;
 // FOV scale for overlay HUD after ADS lerp (1.0 = g_fov size, <1 larger HUD). Console: r__hud_overlay_fov_scale
 extern ENGINE_API float ps_r__hud_overlay_fov_scale;
 
+// 40-parallel-prefetch.md / 50a-stage1-prefetch.md (plans/optimization_mt): one model of IRender::models_PrefetchList -
+// the name and the suffix as model_Create takes them, and the estimated size of its files (prefetch_single.ltx; the
+// warm-up lead of the model prefetch counts it, plan 50 R4)
+struct PrefetchModel
+{
+    shared_str name;
+    shared_str suffix;
+    u64 bytes{};
+};
+
+// 50k-slow-disk-early-prefetch.md (plans/optimization_mt): the early warm-up of a slow disk at the main menu
+// (IRender::models_EarlyWarmStart / models_EarlyWarmStop). PODs: they cross the engine / render boundary.
+struct PrefetchEarlyWarmParams
+{
+    u64 lead_bytes{}; // plan 50 R4: at most this much of the list estimates (nothing loads the files before the load)
+    u64 ram_floor{}; // the warm-up stops when the RAM available falls below it
+    u64 ram_cap{}; // -hw_ram / -hw_profile: the live RAM available is capped by it; 0 = not emulated
+    bool with_textures{}; // the dds too
+};
+enum class PrefetchEarlyWarmEnd : u32
+{
+    Stopped, // stopped from outside (the level load, the exit) before the end of the list
+    ListEnd, // the whole list read
+    Lead, // the warm-up lead reached
+    LowRam, // the RAM available fell below ram_floor
+};
+struct PrefetchEarlyWarmStats
+{
+    u32 models{}; // in the list, each once
+    u32 models_read{}; // read through (a model whose ogf is not there counts too)
+    u32 files{};
+    u32 missing{};
+    u64 bytes{};
+    u64 estimate{}; // the estimates of the list
+    u64 estimate_read{}; // ... of the models read
+    u32 read_ms{}; // the thread, from its start to its end
+    PrefetchEarlyWarmEnd end{ PrefetchEarlyWarmEnd::Stopped };
+    u32 skipped{}; // the prefetch warm-up found these models read (the stages since the stop)
+    u32 waited_ms{}; // the loads waiting for the prefetch warm-up in those stages (a slow disk)
+};
+
+// 50c-commit-growth-analysis.md (plans/optimization_mt): what the render holds, for the [mem] line of stat_memory
+// (IRender::GetMemoryStats). A value the render can not get stays 0.
+struct RenderMemoryStats
+{
+    // DXGI QueryVideoMemoryInfo (D3D11 only, vram_valid): non-local > 0 - resources moved to the system memory
+    bool vram_valid{};
+    u64 vram_local_usage{};
+    u64 vram_local_budget{};
+    u64 vram_nonlocal_usage{};
+    // CModelPool: the base models, of them those with no instance (kept until the device goes), the free instances
+    // (Pool), all the instances (Registry). models_valid: false = not taken (GetMemoryStats with no_wait, the pool lock
+    // was busy)
+    bool models_valid{};
+    u32 model_bases{};
+    u32 model_bases_unref{};
+    u32 model_pool{};
+    u32 model_instances{};
+    // the estimated bytes of the free instances (Pool) and of all the instances (the instance counts of the bases,
+    // ModelDef::refs, times the bytes of one instance; CModelPool::memory_counts), the sum of those counts (equals
+    // model_instances while the counts are consistent) and the time of the model part (its lock wait included)
+    u64 model_pool_bytes{};
+    u64 model_instance_bytes{};
+    u32 model_instance_refs{};
+    float models_ms{};
+    // g_pMotionsContainer: the docked motions, of them those no model holds. motions_valid: false = its lock was busy
+    bool motions_valid{};
+    u32 motions{};
+    u32 motions_unref{};
+    // CResourceManager textures: count and the VRAM estimate (as ResourcesGetMemoryUsage). tex_valid: false = the
+    // textures lock was busy (no_wait)
+    bool tex_valid{};
+    u32 tex_count{};
+    u64 tex_bytes{};
+    // the host (RAM) copies of the static VB / IB the staging buffers hold
+    u64 host_vb_bytes{};
+    u64 host_ib_bytes{};
+};
+
 class ENGINE_API IRender
 {
 public:
@@ -432,7 +511,10 @@ public:
     // model into the pool (an instance left in the pool, as models_Prefetch does) unless it is there already or its ogf
     // does not exist; true = it was loaded now. model_PrefetchFiles: any thread, cheap; queues the files of the model
     // (ogf, LOD ogf, omf, textures) for the "Model prefetch" thread, which reads them into the OS cache. Each name once
-    // per session. source: 0 = ALife (near the online distance), 1 = a spawn the budget deferred (metrics only).
+    // per session, not a model in the pool already. source: 0 = ALife (near the online distance), 1 = a spawn the
+    // budget deferred (metrics; on a slow disk its job also goes ahead of the ALife ones, 50i-stage3-slow-disk-io.md);
+    // bit 2 (50l-weak-cpu-spawn-models.md) = a creature's model: on a weak CPU (D3D11) its base model is also loaded
+    // into the pool in the background once the files are read, and the spawn jobs go first there too.
     virtual bool model_Preload(pcstr name)
     {
         (void)name;
@@ -443,10 +525,37 @@ public:
         (void)name;
         (void)source;
     }
+    // 50i-stage3-slow-disk-io.md (plans/optimization_mt, plan 50 R6): main thread, a slow disk only (the spawn waits for
+    // the warm-up). Asks as a deferred spawn does (source 1; on a slow disk ahead of the ALife jobs) and returns true
+    // while the files of the model are still to be read by the "Model prefetch" thread (queued or being read, or not
+    // known yet: ask again next frame). false = in the pool, read already, or no prefetch. 50l-weak-cpu-spawn-models.md:
+    // also a weak CPU with the background base loading - true while a creature's base model is still to come from it.
+    virtual bool model_PrefetchPending(pcstr name)
+    {
+        (void)name;
+        return false;
+    }
     // 40-parallel-prefetch.md (plans/optimization_mt): main thread. Loads the models (name, suffix - as model_Create
     // takes them) into the pool on the load threads of the parallel prefetch, an instance of each left in the pool, as
     // models_Prefetch does. Does nothing where the prefetch is sequential (GL).
-    virtual void models_PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals) { (void)visuals; }
+    virtual void models_PrefetchList(const xr_vector<PrefetchModel>& visuals) { (void)visuals; }
+    // 50k-slow-disk-early-prefetch.md (plans/optimization_mt): main thread, the early warm-up of a slow disk.
+    // models_EarlyWarmStart: one background thread reads the files of the models (ogf, LOD, omf, partition ltx, dds) into
+    // the OS cache in this order while the player is in the main menu - once per process; true = started.
+    // models_EarlyWarmStop: stops it (waits for the read in progress) and reports what it did; the warm-up of the next
+    // models_Prefetch / models_PrefetchList skips the models it read, until a call with release. false = none started.
+    virtual bool models_EarlyWarmStart(const xr_vector<PrefetchModel>& models, const PrefetchEarlyWarmParams& params)
+    {
+        (void)models;
+        (void)params;
+        return false;
+    }
+    virtual bool models_EarlyWarmStop(PrefetchEarlyWarmStats& stats, bool release)
+    {
+        (void)release;
+        stats = {};
+        return false;
+    }
     virtual void emplace_texture_replacements(shared_str material_key, shared_str dds_path) = 0;
 
     // GAME_RENDER_OVERLAP_PLAN P1.6: texture_replacements had no lock. Its own lock, not shared with
@@ -509,10 +618,26 @@ public:
     virtual void DeferredLoad(bool E) = 0;
     virtual void ResourcesDeferredUpload() = 0;
     virtual void ResourcesDeferredUnload() = 0;
-    virtual void ResourcesGetMemoryUsage(u32& m_base, u32& c_base, u32& m_lmaps, u32& c_lmaps) = 0;
+    // 50r-slow-disk-async-textures.md (plans/optimization_mt): any thread, cheap, never waits. On a slow disk queues
+    // the dds of these textures (names as for a shader / UI: "ui\\ui_name", .dds optional; not registered textures only)
+    // for the "Texture async" thread of the render, which reads them into the OS cache without creating them, after the
+    // textures on the screen. The strings are copied inside. Returns the names queued: 0 on a fast disk.
+    virtual u32 texture_prefetch_files(const char* const* names, u32 count)
+    {
+        (void)names;
+        (void)count;
+        return 0;
+    }
+    // Bytes in u64 (50d-stage2-auto-engine.md): the textures of a level exceed 4 GB on a big video card
+    virtual void ResourcesGetMemoryUsage(u64& m_base, u32& c_base, u64& m_lmaps, u32& c_lmaps) = 0;
     virtual void ResourcesDestroyNecessaryTextures() = 0;
     virtual void ResourcesStoreNecessaryTextures() = 0;
     virtual void ResourcesDumpMemoryUsage() = 0;
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): fills `stats`. Takes the model pool lock and the motions
+    // lock (a pass over a few thousand entries): stat_memory and the [mem] line once a minute, not per frame.
+    // no_wait (in play): those locks and the textures lock are only tried - a busy one leaves its part out (the
+    // *_valid flags); otherwise they are waited for and the textures are walked unlocked (as ResourcesGetMemoryUsage)
+    virtual void GetMemoryStats(RenderMemoryStats& stats, bool no_wait) { stats = {}; (void)no_wait; }
 
     //	HWSupport
     virtual bool HWSupportsShaderYUV2RGB() = 0;

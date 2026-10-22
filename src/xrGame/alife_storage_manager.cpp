@@ -24,6 +24,7 @@
 #include "addon_api_alife_ext.h"
 #include "addon_event_bus.h"
 #include "addon_timers.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 using namespace ALife;
 
@@ -32,6 +33,9 @@ extern string_path g_last_saved_game;
 CALifeStorageManager::~CALifeStorageManager() {}
 void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
 {
+    GW_FRAME_EVENT(Save); // 50n: the frame spike report
+    // 50z5-extra-diagnostics.md: the "* [save]" line - the stages of the save and its size
+    const u64 save_t0 = xray::perf::Ticks();
     pcstr gameSaveExtension = SAVE_EXTENSION;
     if (ShadowOfChernobylMode || ClearSkyMode)
         gameSaveExtension = SAVE_EXTENSION_LEGACY;
@@ -74,6 +78,8 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
     u32 source_count;
     u32 dest_count;
     void* dest_data;
+    const u64 save_t_lua = xray::perf::Ticks(); // 50z5
+    u64 save_t_built;
     {
         CMemoryWriter stream;
         header().save(stream);
@@ -84,12 +90,14 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
         gw::addons::WriteSaveData(stream); // plugin data: own chunk of the stream, see ReadSaveData
 
         source_count = stream.tell();
+        save_t_built = xray::perf::Ticks(); // 50z5
         void* source_data = stream.pointer();
         dest_count = rtc_csize(source_count);
         dest_data = xr_malloc(dest_count);
         dest_count = rtc_compress(dest_data, dest_count, source_data, source_count);
     }
 
+    const u64 save_t_compressed = xray::perf::Ticks(); // 50z5
     string_path temp;
     FS.update_path(temp, "$game_saves$", m_save_name);
     IWriter* writer = FS.w_open(temp);
@@ -100,6 +108,7 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
     writer->w(dest_data, dest_count);
     xr_free(dest_data);
     FS.w_close(writer);
+    const u64 save_t_written = xray::perf::Ticks(); // 50z5
 #ifdef DEBUG
     Msg("* Game %s is successfully saved to file '%s' (%d bytes compressed to %d)", m_save_name, temp, source_count,
         dest_count + 4);
@@ -116,6 +125,16 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
     {
         const GwpValue args[] = { gw::addons::events::String(m_save_name) };
         gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnAfterSave, args, 1);
+    }
+    {
+        // 50z5-extra-diagnostics.md: lua before = the before-save callbacks and plugins; build = the ALife stream;
+        // write = the file (open, write, close); lua after = the after-save callbacks
+        const auto ms = [](u64 a, u64 b) { return xray::perf::TicksToMilliseconds(b - a); };
+        const u64 save_t_end = xray::perf::Ticks();
+        Msg("* [save] %s %.1f ms: lua before %.1f, build %.1f, compress %.1f, write %.1f, lua after %.1f | %.1f MB -> "
+            "%.1f MB", m_save_name, ms(save_t0, save_t_end), ms(save_t0, save_t_lua), ms(save_t_lua, save_t_built),
+            ms(save_t_built, save_t_compressed), ms(save_t_compressed, save_t_written), ms(save_t_written, save_t_end),
+            source_count / (1024.0 * 1024.0), (dest_count + 12) / (1024.0 * 1024.0));
     }
 
     if (!update_name)

@@ -167,6 +167,9 @@ void CSoundRender_Scene::play(ref_sound& S, IGameObject* O, u32 flags, float del
 {
     if (!SoundRender->bPresent || !S._handle())
         return;
+    // 50j-slow-disk-async-sound.md: a deferred sound takes its lengths from its source (outside the lock: it may read)
+    if (!SoundRender->i_resolve_deferred(*S._get()))
+        return;
     ScopeLock lock(&SoundRender->m_emitters_lock); // i_play: s_emitters, see CSoundRender_Core::m_emitters_lock
     S->g_object = O;
     if (S._feedback())
@@ -184,6 +187,8 @@ void CSoundRender_Scene::play_no_feedback(
     ref_sound& S, IGameObject* O, u32 flags, float delay, Fvector* pos, float* vol, float* freq, Fvector2* range)
 {
     if (!SoundRender->bPresent || !S._handle())
+        return;
+    if (!SoundRender->i_resolve_deferred(*S._get())) // 50j: before its numbers are copied below
         return;
     ScopeLock lock(&SoundRender->m_emitters_lock);
     const ref_sound orig = S;
@@ -214,6 +219,8 @@ void CSoundRender_Scene::play_no_feedback(
 void CSoundRender_Scene::play_at_pos(ref_sound& S, IGameObject* O, const Fvector& pos, u32 flags, float delay)
 {
     if (!SoundRender->bPresent || !S._handle())
+        return;
+    if (!SoundRender->i_resolve_deferred(*S._get())) // 50j, as in play()
         return;
     // Also the physics step's thread: ODE contact callback -> CPHSoundPlayer::Play (physics_game.cpp), beside the
     // Game logic thread's own play() in an overlap frame - two unlocked s_emitters.emplace_back() lost or duplicated

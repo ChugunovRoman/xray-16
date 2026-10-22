@@ -6,7 +6,7 @@
 #include "xrServerEntities/smart_cast.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
-#include <unordered_set>
+#include <unordered_map>
 
 namespace
 {
@@ -18,12 +18,16 @@ namespace
 // (keys "<visual>:<child><suffix>") just before it creates it. Only the sections of the visual register them, so for
 // the other visuals nothing is registered before the load either way. A visual Load does not create (another class)
 // is just loaded into the pool earlier - the model prefetch list loads every mesh anyway.
-void collect_object_visuals(const CInifile::Sect& sect, xr_vector<std::pair<shared_str, shared_str>>& visuals)
+// 50a-stage1-prefetch.md: the sections taken by the prefetch budget, in the priority order; a visual gets the size
+// estimates of its sections (the warm-up lead of the load threads counts them).
+// 50k-slow-disk-early-prefetch.md: with_material_visuals - the visuals left to Load as well (a file warm-up only).
+void collect_object_visuals(
+    const xr_vector<PrefetchListItem>& sections, xr_vector<PrefetchModel>& visuals, bool with_material_visuals)
 {
-    std::unordered_set<xr_string> seen;
-    for (const auto& item : sect.Data)
+    std::unordered_map<xr_string, size_t> seen; // key -> index into visuals, or size_t(-1) (left to Load)
+    for (const PrefetchListItem& item : sections)
     {
-        pcstr section = item.first.c_str();
+        pcstr section = item.name.c_str();
         if (!pSettings->section_exist(section) || !pSettings->line_exist(section, "visual"))
             continue;
         pcstr visual = pSettings->r_string(section, "visual");
@@ -44,8 +48,12 @@ void collect_object_visuals(const CInifile::Sect& sect, xr_vector<std::pair<shar
         xr_string key(name);
         key += '|';
         key += suffix;
-        if (!seen.insert(key).second)
+        if (const auto it = seen.find(key); it != seen.end())
+        {
+            if (it->second != size_t(-1))
+                visuals[it->second].bytes += item.bytes;
             continue;
+        }
         bool materials = false;
         for (const auto& line : pSettings->r_section(section).Data)
         {
@@ -55,11 +63,19 @@ void collect_object_visuals(const CInifile::Sect& sect, xr_vector<std::pair<shar
                 break;
             }
         }
-        if (!materials)
-            visuals.emplace_back(shared_str(name), shared_str(suffix));
+        const bool left_to_load = materials && !with_material_visuals;
+        seen.emplace(key, left_to_load ? size_t(-1) : visuals.size());
+        if (!left_to_load)
+            visuals.push_back({ shared_str(name), shared_str(suffix), item.bytes });
     }
 }
 } // namespace
+
+void PrefetchObjectVisuals(
+    const xr_vector<PrefetchListItem>& sections, xr_vector<PrefetchModel>& visuals, bool with_material_visuals)
+{
+    collect_object_visuals(sections, visuals, with_material_visuals);
+}
 
 IGame_ObjectPool::IGame_ObjectPool(void) {}
 IGame_ObjectPool::~IGame_ObjectPool(void) { R_ASSERT(m_PrefetchObjects.empty()); }
@@ -73,22 +89,26 @@ void IGame_ObjectPool::prefetch()
     string256 section;
     // prefetch objects
     strconcat(sizeof(section), section, "prefetch_objects_", g_pGamePersistent->m_game_params.m_game_type);
-    CInifile::Sect const& sect = pSettings->r_section(section);
+    // 50a-stage1-prefetch.md (plans/optimization_mt): in the priority order of the list, the objects of the prefix of
+    // the priority order over both lists the prefetch budget allows (plan 50 R1; PrefetchMode::Full - all of them)
+    xr_vector<PrefetchListItem> sections;
+    PrefetchListRead(section, sections);
+    PrefetchListTake("objects", sections);
 
     // 40-parallel-prefetch.md (plans/optimization_mt): their visuals first, on the load threads (R4)
     {
-        xr_vector<std::pair<shared_str, shared_str>> visuals;
-        collect_object_visuals(sect, visuals);
+        xr_vector<PrefetchModel> visuals;
+        collect_object_visuals(sections, visuals, false);
         GEnv.Render->models_PrefetchList(visuals);
     }
 
-    for (const auto& item : sect.Data)
+    for (const PrefetchListItem& item : sections)
     {
-        CLASS_ID CLS = pSettings->r_clsid(item.first.c_str(), "class");
+        CLASS_ID CLS = pSettings->r_clsid(item.name.c_str(), "class");
         p_count++;
         IGameObject* pObject = smart_cast<IGameObject*>(NEW_INSTANCE(CLS));
-        pObject->Load(item.first.c_str());
-        VERIFY2(pObject->cNameSect().c_str(), item.first.c_str());
+        pObject->Load(item.name.c_str());
+        VERIFY2(pObject->cNameSect().c_str(), item.name.c_str());
         m_PrefetchObjects.push_back(pObject);
     }
 

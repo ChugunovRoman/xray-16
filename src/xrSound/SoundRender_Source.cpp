@@ -8,6 +8,7 @@
 #include <vorbis/vorbisfile.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <thread>
 
@@ -18,6 +19,12 @@ constexpr u8 snd_pcm_state_none = 0;   // not decided yet: streamed, the starts 
 constexpr u8 snd_pcm_state_queued = 1; // budget reserved, the decode task is queued or running
 constexpr u8 snd_pcm_state_done = 2;   // m_cached_pcm published
 constexpr u8 snd_pcm_state_off = 3;    // stays streamed (long, over the budget, no task manager, file not opened)
+
+// plans/optimization_mt/50j-slow-disk-async-sound.md: CSoundRender_Source::m_src_state
+constexpr u8 snd_src_ready = 0;   // read (the default: a source loaded the usual way)
+constexpr u8 snd_src_pending = 1; // deferred, its file not read yet
+constexpr u8 snd_src_loading = 2; // being read by the thread that took it (begin_load)
+constexpr u8 snd_src_failed = 3;  // the read failed: zero length, nothing plays
 } // namespace
 
 // B-1: global accounting of bytes held in per-source PCM caches, bounded by psSoundCacheSizeMB. Touched from
@@ -35,6 +42,8 @@ static bool try_reserve_pcm(size_t bytes, size_t limit)
     } while (!s_cached_pcm_bytes.compare_exchange_weak(cur, cur + bytes, std::memory_order_relaxed));
     return true;
 }
+
+size_t CSoundRender_Source::cached_pcm_bytes_total() { return s_cached_pcm_bytes.load(std::memory_order_relaxed); }
 
 static void snd_pcm_cached_kb_gauge()
 {
@@ -78,7 +87,9 @@ CSoundRender_Source::CSoundRender_Source(CSoundRender_Source&& other) noexcept
       m_data_info(other.m_data_info), m_info(other.m_info),
       m_cached_pcm(other.m_cached_pcm.exchange(nullptr, std::memory_order_relaxed)),
       m_pcm_plays(other.m_pcm_plays.load(std::memory_order_relaxed)),
-      m_pcm_state(other.m_pcm_state.exchange(snd_pcm_state_none, std::memory_order_relaxed))
+      m_pcm_state(other.m_pcm_state.exchange(snd_pcm_state_none, std::memory_order_relaxed)),
+      m_src_state(other.m_src_state.load(std::memory_order_relaxed)),
+      m_src_urgent(other.m_src_urgent.load(std::memory_order_relaxed))
 {
     VERIFY(m_pcm_state.load(std::memory_order_relaxed) != snd_pcm_state_queued);
     // the PCM (if any) and its share of the budget belong to this one now: other.unload() gives back nothing
@@ -384,19 +395,24 @@ void CSoundRender_Source::cache_pcm_step(PcmJob* job) const
 
 void CSoundRender_Source::wait_pcm_task() const
 {
-    // the same help-while-waiting loop as CSoundRender_Emitter::wait_prefill
-    while (m_pcm_state.load(std::memory_order_acquire) == snd_pcm_state_queued)
+    // the same help-while-waiting loop as CSoundRender_Emitter::wait_prefill (plans/optimization_mt 50g, R11)
+    const auto done = [this] { return m_pcm_state.load(std::memory_order_acquire) != snd_pcm_state_queued; };
+    if (TaskScheduler)
+        TaskScheduler->HelpUntil(done);
+    else
     {
-        if (!TaskScheduler || !TaskScheduler->ExecuteOneTask())
+        while (!done())
             std::this_thread::yield();
     }
 }
 
-bool CSoundRender_Source::LoadWave(pcstr pName)
+bool CSoundRender_Source::LoadWave(pcstr pName, bool background)
 {
     ZoneScoped;
 
-    pname = pName;
+    // 50j: a deferred source got pname from prepare_deferred, before any other thread could see it; pName is its c_str()
+    if (!background)
+        pname = pName;
 
     // Load file into memory and parse WAV-format
     OggVorbis_File ovf;
@@ -406,12 +422,12 @@ bool CSoundRender_Source::LoadWave(pcstr pName)
         // archive mapping), ov_open = the vorbis headers and, the stream being seekable, the seek to its end for the
         // length: the first reads of the mapped pages, i.e. the disk reads of a file not yet in the OS cache.
         ZoneScopedN("snd_load_open");
-        PERF_SCOPE(snd_load_open);
+        PERF_SCOPE_IF(!background, snd_load_open);
         PERF_SCOPE_IF(xray::perf::TlGameEvent() != 0, ge_cold_sound_open);
         IReader* wave;
         {
             ZoneScopedN("snd_load_r_open");
-            PERF_SCOPE(snd_load_r_open);
+            PERF_SCOPE_IF(!background, snd_load_r_open);
             wave = FS.r_open(pname.c_str());
         }
         R_ASSERT3(wave && wave->length(), "Can't open wave file:", pname.c_str());
@@ -511,7 +527,16 @@ bool CSoundRender_Source::LoadWave(pcstr pName)
 
 bool CSoundRender_Source::load(pcstr name)
 {
-    string_path fn, N;
+    string_path fn;
+    const bool loaded = resolve_path(name, fn) && LoadWave(fn); // B-1: a short SFX is cached later, by use
+    // 50j: a pending source loaded here (refresh_sources) is read now
+    m_src_state.store(loaded ? snd_src_ready : snd_src_failed, std::memory_order_release);
+    return loaded;
+}
+
+bool CSoundRender_Source::resolve_path(pcstr name, string_path& fn)
+{
+    string_path N;
     xr_strcpy(N, name);
 #ifdef XR_PLATFORM_WINDOWS
     xr_strlwr(N);
@@ -536,13 +561,72 @@ bool CSoundRender_Source::load(pcstr name)
     }
 #endif
 
-    if (FS.exist(fn))
-    {
-        if (LoadWave(fn))
-            return true; // B-1: a short SFX is cached later, by use (request_pcm_cache)
-    }
+    return FS.exist(fn);
+}
 
-    return false;
+// plans/optimization_mt/50j-slow-disk-async-sound.md. The source is not in s_sources yet: the thread that inserts it
+// publishes these writes with the map (s_sources_lock).
+bool CSoundRender_Source::prepare_deferred(pcstr name)
+{
+    string_path fn;
+    if (!resolve_path(name, fn))
+        return false;
+    pname = fn;
+    m_src_state.store(snd_src_pending, std::memory_order_relaxed);
+    return true;
+}
+
+bool CSoundRender_Source::begin_load()
+{
+    u8 expected = snd_src_pending;
+    return m_src_state.compare_exchange_strong(expected, snd_src_loading, std::memory_order_acq_rel);
+}
+
+void CSoundRender_Source::finish_load(bool background)
+{
+    VERIFY(m_src_state.load(std::memory_order_relaxed) == snd_src_loading);
+    const bool loaded = LoadWave(pname.c_str(), background);
+    if (!loaded)
+    {
+        fTimeTotal = 0.0f;
+        dwBytesTotal = 0;
+    }
+    m_src_state.store(loaded ? snd_src_ready : snd_src_failed, std::memory_order_release);
+}
+
+SoundSourceState CSoundRender_Source::load_state() const
+{
+    switch (m_src_state.load(std::memory_order_acquire))
+    {
+    case snd_src_ready: return SoundSourceState::Ready;
+    case snd_src_failed: return SoundSourceState::Failed;
+    default: return SoundSourceState::Pending;
+    }
+}
+
+// 50j: the source is needed now - its length (a sound created the usual way, a script's length()), its format or info
+// (the start of a play) - while it is pending or being read. The callers that can wait (CSoundPlayer) ask
+// load_state first, so this is the fallback: counted, the time is the wait of the caller.
+void CSoundRender_Source::ensure_ready_slow() const
+{
+    auto* self = const_cast<CSoundRender_Source*>(this); // the fields are written by the one that takes the read
+    if (self->begin_load())
+    {
+        ZoneScopedN("snd_async_sync");
+        PERF_SCOPE(snd_async_sync);
+        GW_FRAME_EVENT_IF(xray::perf::CurrentThreadKind() != xray::perf::ThreadKind::Worker, SoundCold); // 50n: the frame spike report
+        self->finish_load(false);
+        return;
+    }
+    if (m_src_state.load(std::memory_order_acquire) != snd_src_loading)
+        return; // ready or failed
+    // The "Sound prefetch" thread reads it now (one file). It runs at a low priority: sleep, do not spin, so it gets
+    // the CPU.
+    ZoneScopedN("snd_async_wait");
+    PERF_SCOPE(snd_async_wait);
+    GW_FRAME_EVENT_IF(xray::perf::CurrentThreadKind() != xray::perf::ThreadKind::Worker, IoWait); // 50n: the frame spike report
+    while (m_src_state.load(std::memory_order_acquire) == snd_src_loading)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
 
 void CSoundRender_Source::unload()

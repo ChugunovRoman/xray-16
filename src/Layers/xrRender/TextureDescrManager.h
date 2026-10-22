@@ -8,6 +8,7 @@
 namespace xray::render::RENDER_NAMESPACE
 {
 class cl_dt_scaler;
+struct texture_thm_record; // what LoadTHM takes from a .thm (TextureDescrManager.cpp, 50z2)
 
 class CTextureDescrMngr
 {
@@ -43,6 +44,7 @@ class CTextureDescrMngr
 
     void LoadTHM(pcstr initial, bool listTHM);
     void LoadLTX(pcstr initial, bool listTHM);
+    void ApplyTHM(const xr_string& file_name, const texture_thm_record& rec, Lock& lock);
 
 public:
     ~CTextureDescrMngr();

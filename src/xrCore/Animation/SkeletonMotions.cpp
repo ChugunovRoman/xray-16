@@ -320,6 +320,18 @@ motions_value* motions_container::dock(shared_str key, IReader* data, vecBones* 
     }
     return result;
 }
+motions_value* motions_container::insert(shared_str key, motions_value* loaded)
+{
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt)
+    const auto I = container.find(key);
+    if (I != container.end() && I->second)
+    {
+        xr_delete(loaded);
+        return I->second;
+    }
+    container[key] = loaded;
+    return loaded;
+}
 void motions_container::clean(bool force_destroy)
 {
     auto it = container.begin();
@@ -353,6 +365,17 @@ void motions_container::clean(bool force_destroy)
         }
     }
 }
+void motions_container::stats(size_t& count, size_t& unreferenced) const
+{
+    count = container.size();
+    unreferenced = 0;
+    for (const auto& kv : container)
+    {
+        if (0 == kv.second->m_dwReference)
+            ++unreferenced;
+    }
+}
+
 void motions_container::dump()
 {
     auto it = container.begin();

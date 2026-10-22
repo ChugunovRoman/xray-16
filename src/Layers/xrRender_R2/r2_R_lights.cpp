@@ -720,9 +720,9 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
         {
             const UINT dst_slice = UINT(svp_shadow_page_lights.size());
             // Cap at the spot-page BUDGET, not the atlas slice count: with sun-reuse
-            // (r__svp_sun_mode 1) the atlas tail (slices >= ps_r__svp_smap_pages) holds the
+            // (r__svp_sun_mode 1) the atlas tail (slices >= svp_smap_pages()) holds the
             // copied sun cascades and must never be overwritten by spot pages.
-            if (dst_slice < UINT(ps_r__svp_smap_pages))
+            if (dst_slice < UINT(svp_smap_pages()))
             {
                 ID3D11Texture2D* dst_tex = static_cast<ID3D11Texture2D*>(Target->svp_rt_smap_depth->pSurface);
                 ID3D11Texture2D* src_tex = static_cast<ID3D11Texture2D*>(Target->rt_smap_depth->pSurface);

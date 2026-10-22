@@ -7,6 +7,9 @@
 
 void xrSentry_Initialize(pcstr commandLine);
 void xrSentry_Shutdown();
+// Hardware profile tags (hw.class, hw.ram_gb, hw.commit_gb, hw.disk, hw.vram_mb, hw.cpu, hw.wine): set when Sentry
+// starts and again when the render reports its GPU. No-op when Sentry is not compiled in or not started.
+void xrSentry_UpdateHwTags();
 
 using xrSentry_LuaStackFn = void (*)(xr_string& out);
 // Registered when CScriptEngine is constructed; used from xrDebug::Fail and when CaptureError has no explicit stack.

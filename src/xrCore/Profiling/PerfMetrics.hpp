@@ -179,6 +179,9 @@ XRCORE_API u8& TlFfCaller() noexcept;
 // thread, a running count. CLevel::ProcessGameEvents compares it before and after a spawn group (spawn_cold_models).
 // Counted with or without XR_PERF_METRICS.
 XRCORE_API u32& TlColdModelLoads() noexcept;
+// 50i-stage3-slow-disk-io.md (plans/optimization_mt, plan 50 R6): their time on this thread (the outermost loads, us), a
+// running sum; the time limit of the spawn per frame (the hw policy's spawn_cold_ms). With or without XR_PERF_METRICS.
+XRCORE_API u64& TlColdModelUs() noexcept;
 
 XRCORE_API void AddSlow(Metric m, u64 v) noexcept;
 XRCORE_API void AddTimeSlow(Metric m, u64 ticks) noexcept;
@@ -458,12 +461,179 @@ struct ScopedTimeByThread
     ScopedTimeByThread& operator=(const ScopedTimeByThread&) = delete;
 };
 
+// ---------------------------------------------------------------------------------------------------------------------
+// 50n-frame-spike-report.md (plans/optimization_mt): the frame spike report and the 60 s frame window - always compiled
+// and on (Release and Master Gold too), for the PCs of players and testers without Tracy and without the metrics build.
+//
+// Frame phases: an exclusive breakdown of a frame's wall time. A scope (GW_FRAME_PHASE) switches the phase the calling
+// thread's time goes to until it ends, then the enclosing one resumes: nested scopes give each moment to the innermost
+// one, so the main thread's phases plus "other" add up to the frame. Any thread may carry a scope (the sequential
+// GameThread task runs on a pool worker or on main itself); the time outside any scope is not counted. Cost: one
+// Ticks() and one relaxed atomic add per switch. Read and reset once per frame by Flush() (main thread).
+namespace frame_phase
+{
+constexpr u8 None = 0; // outside any scope: not counted (main: "other" of the report)
+// main thread (the order is the order of the report)
+constexpr u8 Before = 1;        // seqParallelBeforRender, OnFrameBeforePreRender, environment, ModelDeferredClear
+constexpr u8 FrameMove = 2;     // CRenderDevice::FrameMove (seqFrame) outside the level phases below, OnCameraUpdated
+// 50z5-extra-diagnostics.md: the game UI update out of FrameMove (CUIGameCustom::OnFrame: CDialogHolder::OnFrame, the
+// Lua windows, the HUD windows, the messages)
+constexpr u8 Ui = 3;
+constexpr u8 LvlEvents = 4;     // CLevel::ProcessGameEvents: spawns, destroys, hits (frame/level/game_events)
+constexpr u8 LvlObjects = 5;    // IGame_Level::OnFrame: UpdateCL of the objects, destroy and relcase, HUD
+constexpr u8 LvlScript = 6;     // Lua on main in CLevel::OnFrame: script_process, add_call, update_tasks, plugin timers
+constexpr u8 LuaBus = 7;        // the Lua subscribers of the event bus on main (addon_event_bus.cpp), wherever emitted
+constexpr u8 RtSched = 8;       // the real-time scheduler on main (overlap frame: the actor)
+constexpr u8 Prepass = 9;       // the bones prepass
+constexpr u8 GameWait = 10;     // main waits for the Game thread (sequential wait, JoinGameLogic)
+constexpr u8 Render = 11;       // DoRender outside the build / submit / present parts (RenderBegin, ...)
+constexpr u8 RenderBuild = 12;  // PERF_SPLIT(Build): visibility, dsgraph build (render/split/build)
+constexpr u8 RenderSubmit = 13; // PERF_SPLIT(Submit): recording and submitting the draw calls, stats, ImGui
+// 50z5: the game UI drawn on main (CLevel::OnRender -> HUD().RenderUI: the HUD, the windows, the fonts), out of
+// RenderSubmit (render/split/submit with XR_PERF_METRICS still counts it, as before)
+constexpr u8 UiRender = 14;
+constexpr u8 Present = 15;      // RenderEnd: End + PresentFrame (the wait for the GPU / vsync is here)
+constexpr u8 PhysWait = 16;     // the wait for the physics step of the frame
+constexpr u8 PreRenderWait = 17; // the wait for the PreRender task (rain, particles)
+constexpr u8 PhysFlush = 18;    // the deferred physics mutations, the post-join queue
+constexpr u8 FpsSleep = 19;     // the sleep of the fps limit
+constexpr u8 MainEnd = 20;
+// the game logic (the dedicated Game thread of an overlap frame or the sequential GameThread task)
+constexpr u8 GSound = 20;     // SoundEvent_Dispatch (sound perception callbacks)
+constexpr u8 GLogic = 21;     // OnGameLogicFrame: queued NPC sound callbacks, level_on_frame (Lua)
+constexpr u8 GSched = 22;     // the scheduler (NPC Think, Lua binders, ...), outside GAlife
+constexpr u8 GAlife = 23;     // the ALife update inside the scheduler
+constexpr u8 GVision = 24;    // the vision batch after the scheduler
+constexpr u8 GParallel = 25;  // seqParallel
+constexpr u8 GSeqMt = 26;     // seqFrameMT
+constexpr u8 GSoundWait = 27; // the wait for the sound render task
+constexpr u8 GLuaBus = 28;    // the Lua subscribers of the event bus on the game logic side (LuaBus of main there)
+constexpr u8 Count = 29;
+}
+
+XRCORE_API u8 FramePhaseEnter(u8 phase) noexcept; // returns the phase to restore
+XRCORE_API void FramePhaseLeave(u8 prev) noexcept;
+// For the code that runs where the game logic runs (the Lua of the event bus): main_phase on main outside the game
+// logic phases, game_phase elsewhere (the Game thread, the GameThread task on a worker, or on main inside a Wait - a
+// game logic phase is current there). Returns the phase to restore (FramePhaseLeave).
+XRCORE_API u8 FramePhaseEnterLogic(u8 main_phase, u8 game_phase) noexcept;
+
+struct FramePhaseScope
+{
+    u8 prev;
+    explicit FramePhaseScope(u8 phase) noexcept : prev(FramePhaseEnter(phase)) {}
+    FramePhaseScope(u8 main_phase, u8 game_phase) noexcept : prev(FramePhaseEnterLogic(main_phase, game_phase)) {}
+    ~FramePhaseScope() noexcept { FramePhaseLeave(prev); }
+    FramePhaseScope(const FramePhaseScope&) = delete;
+    FramePhaseScope& operator=(const FramePhaseScope&) = delete;
+};
+
+// One span of the game logic (a body of the Game thread / the GameThread task): its wall time and the CPU time of the
+// thread that ran it, summed per frame (two QueryThreadCycleTime calls per span).
+struct GameSpanScope
+{
+    u64 t0;
+    u64 cpu0;
+    XRCORE_API GameSpanScope() noexcept;
+    XRCORE_API ~GameSpanScope() noexcept;
+    GameSpanScope(const GameSpanScope&) = delete;
+    GameSpanScope& operator=(const GameSpanScope&) = delete;
+};
+
+// Always-on event counters of the frame (count + time), incremented where the event happens, on any thread: two
+// relaxed atomic adds. Nested events are counted by each of them (a cold model inside a spawn is in both).
+namespace frame_event
+{
+constexpr u8 ModelCold = 0; // a cold model load on main / Game (CModelPool::Create had to load the ogf); outermost only
+constexpr u8 SoundCold = 1; // a cold sound source load on main / Game (the ogg opened and read on the calling thread)
+constexpr u8 SoundSet = 2;  // a sound set of an object built (CSoundPlayer::add: its cold sources are in SoundCold too)
+constexpr u8 TexSync = 3;   // a texture created synchronously (CResourceManager::_CreateTexture -> CTexture::Load)
+constexpr u8 Spawn = 4;     // a client spawn (CLevel::g_sv_Spawn)
+constexpr u8 LuaGc = 5;     // a Lua GC step of the level (CLevel::script_gc)
+constexpr u8 Destroy = 6;   // the destroy queue: count = objects destroyed, time = the whole batch with the relcase
+constexpr u8 Save = 7;      // a game save (CALifeStorageManager::save)
+constexpr u8 IoWait = 8;    // main / Game wait for a background reader (a sound being read by the "Sound prefetch" thread)
+constexpr u8 LockWait = 9;  // main / Game wait for the model pool lock held by another thread
+// 50r-slow-disk-async-textures.md: textures of the async loading (a slow disk) put in place on main: count + the time
+// of it (created on main from the OS cache, or only swapped in). Their sync fallbacks are TexSync, the waits IoWait.
+constexpr u8 TexAsync = 10;
+// 50z5-extra-diagnostics.md: a shader object created by the resource manager (CResourceManager::CreateShader: the
+// source opened, then the shader cache hit or a compile), any thread
+constexpr u8 ShaderCreate = 11;
+// 50z5: a real HLSL compile (D3D11: CHW::D3DCompile, a shader cache miss; nested in ShaderCreate; nothing on GL)
+constexpr u8 ShaderCompile = 12;
+// 50z5: a render target surface created (CRT::create: the texture and its views; its $user$ texture is a "tex" too)
+constexpr u8 RtCreate = 13;
+constexpr u8 Count = 14;
+}
+
+XRCORE_API void FrameEventAdd(u8 event, u64 ticks, u32 count = 1) noexcept;
+
+// Times its scope as `count` events (Ticks()); `enable` false = inert.
+struct FrameEventScope
+{
+    u64 t0;
+    u32 count;
+    u8 event;
+    bool active;
+    explicit FrameEventScope(u8 e, bool enable = true, u32 n = 1) noexcept
+        : t0(enable ? Ticks() : 0), count(n), event(e), active(enable) {}
+    ~FrameEventScope() noexcept
+    {
+        if (active)
+            FrameEventAdd(event, Ticks() - t0, count);
+    }
+    FrameEventScope(const FrameEventScope&) = delete;
+    FrameEventScope& operator=(const FrameEventScope&) = delete;
+};
+
+// The state of the frame that ends with the next Flush(), set by xrEngine at the end of CRenderDevice::ProcessFrame:
+// in_game - a level frame in play (level ready, window active, no loading / precache / pause); only these frames are
+// judged and counted in the window. session_s - Device.dwTimeGlobal / 1000; game_day_s - the in-game time of day, s.
+XRCORE_API void FrameSetContext(bool in_game, u32 session_s, u32 game_day_s) noexcept;
+// perf_frame_spike_ms (xrEngine cvar, not saved): the absolute threshold of the frame spike report, ms; the frame is a
+// spike when its wall time is >= max(this, 3 x the running median of the last 128 game frames; the median only from 60
+// frames on); 0 = report off (the 60 s window is still collected; the Lua dispatch timing below is off too).
+XRCORE_API extern int g_perf_frame_spike_ms;
+// The 60 s window: one "* [frame] <where>: ..." line with the frames since the previous one (frame time percentiles,
+// spikes, CPU/GPU-bound shares, I/O, the event totals), then the window starts anew. Called next to the [mem] lines
+// (xrGame, stat_memory_lines). Nothing without game frames in the window.
+XRCORE_API void FrameWindowReport(const char* where) noexcept;
+
+// 50n, "Lua events and the spike filter" (50n-frame-spike-report.md, 2026-10-19). Always compiled.
+// The load / exit marks of the frame spike report, any thread, taken by the next Flush(): from Exit (a level change,
+// a disconnect, the start of a load) until LoadEnd (IGame_Persistent::LoadEnd, the level is in play) and then for the
+// first 3 s and 120 game frames of the level (both must pass) a spike is not reported, only counted in the window line
+// ("warmup spikes N, exit spikes M"). LoadEnd also restarts the running median.
+namespace frame_session
+{
+constexpr u8 Exit = 1;
+constexpr u8 LoadEnd = 2;
+}
+XRCORE_API void FrameSessionMark(u8 mark) noexcept;
+
+// The Lua subscribers of the event bus (xrGame addon_event_bus.cpp): with perf_frame_spike_ms > 0 every call of one is
+// timed (two Ticks()); a call of at least LuaDispatchFloorTicks() is named (source:line) and passed to LuaDispatchNote.
+// The floor is the [lua-slow] threshold (LuaSlowTicks(): 0.4 x perf_frame_spike_ms, 20 ms by default) or, lower, 1 ms
+// and then the slowest call of the frame so far: the slowest call goes to the frame's spike line ("lua-slowest"), one
+// of at least the threshold to a "! [lua-slow]" line (10 per 10 s, the rest counted; not during the warmup / exit
+// above). subscribers > 0: the whole dispatch of one event to that many Lua subscribers took at least the threshold
+// while none of its calls did (only the line, subscriber unused). u64(-1) / 0 = off (perf_frame_spike_ms 0).
+XRCORE_API extern std::atomic<u64> g_lua_dispatch_floor_ticks;
+XRCORE_API extern std::atomic<u64> g_lua_slow_ticks;
+inline u64 LuaDispatchFloorTicks() noexcept { return g_lua_dispatch_floor_ticks.load(std::memory_order_relaxed); }
+inline u64 LuaSlowTicks() noexcept { return g_lua_slow_ticks.load(std::memory_order_relaxed); }
+inline bool LuaDispatchTimed() noexcept { return LuaDispatchFloorTicks() != u64(-1); }
+XRCORE_API void LuaDispatchNote(u64 ticks, const char* event, const char* subscriber, u32 subscribers = 0) noexcept;
+
 // C1.0 (plans/optimization_mt/17-c1-semi-pipeline.md): render/split/build and render/split/submit - the main thread's
 // time inside DoRender split along the future hand-off point between building a frame and submitting it. A scope
 // switches the class the main thread's time goes to until it ends, then the enclosing class resumes: nested scopes
 // give each moment to the innermost one, nothing is counted twice and no re-indented blocks are needed. Main thread
 // only - elsewhere (task workers, the Game and SVP threads) it is inert, so a task body may carry one for the case main
 // runs the task itself inside a Wait. See PERF_SPLIT.
+// 50n: always compiled, a frame phase of the main thread (frame_phase::RenderBuild / RenderSubmit; None = GameWait, its
+// only use is the join with the Game thread); render/split/* are counted from these phases with XR_PERF_METRICS.
 namespace split
 {
 constexpr u8 None = 0; // not counted (the join with the Game thread)
@@ -480,7 +650,7 @@ struct ScopedSplit
     bool active;
 
     explicit ScopedSplit(u8 kind) noexcept
-        : active(g_perf_metrics_active && std::this_thread::get_id() == g_main_tid.load(std::memory_order_relaxed))
+        : active(std::this_thread::get_id() == g_main_tid.load(std::memory_order_relaxed))
     {
         if (active)
             prev = SplitEnter(kind);
@@ -541,6 +711,18 @@ XRCORE_API extern u64 g_perf_spike_ticks; // perf_spike_us in Ticks(), latched o
 XRCORE_API extern int g_perf_frame_peak_ms;
 
 inline bool SpikeActive() noexcept { return g_perf_spike_ticks != 0; }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 50n-frame-spike-report.md (plans/optimization_mt): GPU time of an engine frame. Always compiled (Release and Master Gold
+// too), POD only, callable from any thread.
+//   GpuFrameTimeSubmit(frame_id, gpu_ms) - the render (or main) thread stores the GPU time measured for the engine frame
+//       frame_id (= Device.dwFrame of the frame whose GPU work was measured), when its timestamp query result arrives
+//       (usually 1-3 frames later). A later submit for the same frame_id overwrites the earlier one.
+//   GpuFrameTimeGet(frame_id, gpu_ms) - true and the time if that frame's result is still in the ring buffer (the last
+//       16 submitted frames: one lock-free 64-bit slot per frame_id % 16), false if it has not arrived (yet) or was
+//       overwritten. The frame spike report waits up to 3 frames for it, the 60 s summary takes avg / p95 from it.
+XRCORE_API void GpuFrameTimeSubmit(u32 frame_id, float gpu_ms) noexcept;
+XRCORE_API bool GpuFrameTimeGet(u32 frame_id, float& gpu_ms) noexcept;
 
 // A site is registered once (a function-local static, see PERF_SPIKE_SITE_ID); its name is copied into xrCore, so a
 // site of a module that is unloaded later leaves nothing dangling. Returns the site id (u16(-1) when the table is full).
@@ -613,8 +795,6 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 #   define PERF_SCOPE_BY_THREAD(m_main, m_game, m_worker)                                                            \
         ::xray::perf::ScopedTimeByThread CONCATENIZE(_perf_thr_, __LINE__)(::xray::perf::Metric::m_main,               \
             ::xray::perf::Metric::m_game, ::xray::perf::Metric::m_worker)
-// C1.0: the main thread's time until the end of the scope goes to render/split/<kind> (Build / Submit / None).
-#   define PERF_SPLIT(kind) ::xray::perf::ScopedSplit CONCATENIZE(_perf_split_, __LINE__)(::xray::perf::split::kind)
 // Drop-in replacement for ZoneScopedN(name) on an existing hot-path zone: same zone, but perf_metrics bit 2
 // (xray::perf::HideHotZones()) can turn it off for the session without recompiling, because Tracy's
 // ScopedZone/ZoneNamed decide whether to send ZoneBegin/ZoneEnd from the is_active argument at construction.
@@ -626,9 +806,22 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 #   define PERF_SCOPE_IF(cond, m) ((void)0)
 #   define PERF_ADD_IF(cond, m, v) ((void)0)
 #   define PERF_SCOPE_BY_THREAD(m_main, m_game, m_worker) ((void)0)
-#   define PERF_SPLIT(kind) ((void)0)
 #   define PERF_HOT_ZONE(name) ZoneScopedN(name)
 #endif
+
+// C1.0: the main thread's time until the end of the scope goes to render/split/<kind> (Build / Submit / None).
+// 50n: always compiled - also the render phases of the frame spike report (frame_phase::RenderBuild / RenderSubmit).
+#define PERF_SPLIT(kind) ::xray::perf::ScopedSplit CONCATENIZE(_perf_split_, __LINE__)(::xray::perf::split::kind)
+// 50n (always compiled): the frame phase (frame_phase::*) of the calling thread until the end of the scope.
+#define GW_FRAME_PHASE(phase) ::xray::perf::FramePhaseScope CONCATENIZE(_gw_frame_phase_, __LINE__)(::xray::perf::frame_phase::phase)
+// 50n (always compiled): main_phase on main, game_phase on the game logic side (FramePhaseEnterLogic).
+#define GW_FRAME_PHASE_LOGIC(main_phase, game_phase) ::xray::perf::FramePhaseScope CONCATENIZE(_gw_frame_phase_, __LINE__)( \
+    ::xray::perf::frame_phase::main_phase, ::xray::perf::frame_phase::game_phase)
+// 50n (always compiled): the scope is one frame_event::* (count 1 + its time); GW_FRAME_EVENT_IF only when cond is true.
+#define GW_FRAME_EVENT(event) ::xray::perf::FrameEventScope CONCATENIZE(_gw_frame_event_, __LINE__)(::xray::perf::frame_event::event)
+#define GW_FRAME_EVENT_IF(cond, event) ::xray::perf::FrameEventScope CONCATENIZE(_gw_frame_event_, __LINE__)(::xray::perf::frame_event::event, (cond))
+// 50n (always compiled): a span of the game logic (wall + thread CPU time of the Game thread in the report).
+#define GW_GAME_SPAN() ::xray::perf::GameSpanScope CONCATENIZE(_gw_game_span_, __LINE__)
 
 // P19 spike logger (see SpikeScope). Each expansion owns its site (a lambda's static), the name is a string literal.
 //   PERF_SPIKE(name)                 - plain site
@@ -705,3 +898,30 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
             }                                                                                                \
         }                                                                                                    \
     } while (0)
+
+namespace xray::perf
+{
+// ---------------------------------------------------------------------------------------------------------------------
+// 50o-gpu-frame-timing.md (plans/optimization_mt): where the main thread waited for the GPU in an engine frame, and
+// whether the GPU was starved before it. Always compiled (Release and Master Gold too), POD only, callable from any
+// thread; the same scheme as GpuFrameTimeSubmit/Get (16 frames, one lock-free 64-bit slot per frame_id % 16).
+// Submitted by the render's Present (D3D11 and GL), frame_id = Device.dwFrame:
+//   PresentWaitSubmit(frame_id, ms) - CPU time of IDXGISwapChain::Present / SDL_GL_SwapWindow of that frame: high =
+//       the driver's frame queue was full (GPU-bound) or vsync. Submitted in the same frame (no delay).
+//   GpuSyncWaitSubmit(frame_id, ms) - CPU time of the render's GPU sync point (R_sync_point::Wait, main + scope pass)
+//       of that frame. D3D11 waits there for the GPU to reach the previous frame's sync point (the CPU is at most about
+//       one frame ahead), GL for everything submitted so far: in a GPU-bound frame main waits here, not in Present.
+//       Submitted in the same frame; 0 in frames without a level render (menu, loading screen).
+//   GpuIdleGapSubmit(frame_id, ms) - GPU timeline from the previous frame's end timestamp to this frame's begin one
+//       (both frames measured, no disjoint between): the GPU had nothing of ours to do - CPU-bound. Arrives with the
+//       GPU time of the frame (1-3 frames later); absent when the previous frame was not measured.
+// Reading a frame's GpuFrameTimeGet: the span between two timestamps on the GPU timeline, so in a CPU-bound frame it
+// includes the GPU's waits for the commands (an upper bound of the GPU work, close to the CPU submit time); GPU-bound
+// = the waits above are large and gpu_ms is close to the frame time.
+XRCORE_API void PresentWaitSubmit(u32 frame_id, float ms) noexcept;
+XRCORE_API bool PresentWaitGet(u32 frame_id, float& ms) noexcept;
+XRCORE_API void GpuSyncWaitSubmit(u32 frame_id, float ms) noexcept;
+XRCORE_API bool GpuSyncWaitGet(u32 frame_id, float& ms) noexcept;
+XRCORE_API void GpuIdleGapSubmit(u32 frame_id, float ms) noexcept;
+XRCORE_API bool GpuIdleGapGet(u32 frame_id, float& ms) noexcept;
+} // namespace xray::perf

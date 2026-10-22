@@ -69,6 +69,7 @@ void CUIGameCustom::OnFrame()
     // P19b (14-spike-instrumentation.md): the game UI update, once a frame from Device.seqFrame (CHUDManager::
     // OnConnected), hud/ui and its parts hud/ui/* (dialogs: ui/dialog/game)
     PERF_STAGE("hud/ui", hud_ui);
+    GW_FRAME_PHASE(Ui); // 50z5-extra-diagnostics.md: the "ui" phase of the frame report (out of "fm")
     CDialogHolder::OnFrame();
     {
         ZoneScopedN("hud/ui/statics");

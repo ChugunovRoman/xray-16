@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <thread>
 
 class TaskWorker;
 
@@ -102,6 +103,63 @@ public:
     void Wait(const Task& task, bool updateSystemEvents = false) const;
     bool ExecuteOneTask() const;
 
+    // plans/optimization_mt/50g-stage3-threads-power.md, R11: the waits use the bounded spin - the Short spin class
+    // (a small pool, SMT on <= 4 cores, on battery or in battery saver: xray::hw::GetEffectiveSpinClass). Long
+    // otherwise - every wait loop behaves exactly as before then.
+    [[nodiscard]] static bool ShortSpin() noexcept;
+
+    // R11: spins until done() is true, for a wait on work other threads already run (the tails of the render's
+    // parallel parts). Long: std::this_thread::yield() between the checks, as these loops always did. Short: see
+    // ShortSpinStep.
+    template <typename Done>
+    static void SpinUntil(const Done& done)
+    {
+        if (!ShortSpin())
+        {
+            while (!done())
+                std::this_thread::yield();
+            return;
+        }
+        for (u32 misses = 0; !done(); ++misses)
+            ShortSpinStep(misses, done);
+    }
+
+    // R11: as SpinUntil, running queued tasks meanwhile (help-while-waiting, as Wait() does for a Task). Long: a yield
+    // after each check that found no task, as the sound's loops always did.
+    template <typename Done>
+    void HelpUntil(const Done& done) const
+    {
+        if (!ShortSpin())
+        {
+            while (!done())
+            {
+                if (!ExecuteOneTask())
+                    std::this_thread::yield();
+            }
+            return;
+        }
+        for (u32 misses = 0; !done();)
+        {
+            if (ExecuteOneTask())
+                misses = 0;
+            else
+                ShortSpinStep(misses++, done);
+        }
+    }
+
+    // R11, Short spin class: one step of a wait loop after `misses` checks in a row found nothing to do - a CPU pause
+    // (_mm_pause) for the first ones, then a yield of the time slice, then blocking until any task finishes or is
+    // pushed (at most ~1 ms a block, the guard against a missed wake-up). done() is checked again after this thread
+    // announced the block, so a finish right before the block is never lost.
+    template <typename Done>
+    static void ShortSpinStep(u32 misses, const Done& done)
+    {
+        ShortSpinStepImpl(misses, [](const void* context) -> bool { return (*static_cast<const Done*>(context))(); }, &done);
+    }
+
+    using SpinDoneFn = bool(const void* context);
+    static void ShortSpinStepImpl(u32 misses, SpinDoneFn* done, const void* context) noexcept;
+
     // Wake up ALL worker threads. PushTask wakes only one worker per task; after pushing
     // a batch of tasks from one thread they all land in that thread's queue and the rest
     // of the workers stay asleep until they happen to steal. Call this after scheduling
@@ -111,7 +169,12 @@ public:
     void Pause(bool pause) { shouldPause.store(pause, std::memory_order_release); }
 
 public:
+    // All registered threads: main, the pool, and the custom threads registered later (the overlap "Game" thread,
+    // "Physics") - they run tasks only while they wait. Grains of splits.
     [[nodiscard]] size_t GetWorkersCount() const noexcept;
+    // The pool threads only (SpawnThreads; 0 before it): how many helpers a split can count on. Thresholds and part
+    // counts of parallel paths (plans/optimization_mt/50b-stage1-threads-render.md).
+    [[nodiscard]] size_t GetPoolWorkersCount() const noexcept;
     // Upper bound of GetCurrentWorkerID() + 1 for any registered thread, including custom threads registered
     // later (GetWorkersCount() may still grow). For per-worker arrays sized once.
     [[nodiscard]] size_t GetMaxWorkersCount() const noexcept;

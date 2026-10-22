@@ -5,8 +5,12 @@
 #include "StateManager/dx11SamplerStateCache.h"
 #include "dx11TextureUtils.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
+#include "xrCore/Platform/HwProfile.h"
 
 #include <SDL_syswm.h>
+
+#include <chrono>
 
 #if defined(_WIN32)
 #include <process.h>
@@ -16,6 +20,16 @@ namespace xray::render::RENDER_NAMESPACE
 {
 namespace
 {
+// 50z5-extra-diagnostics.md: "shcc" of the frame report - every real HLSL compile (a shader cache miss) goes through
+// CHW::D3DCompile; CreateDevice puts this wrapper there, it times the call to the function chosen before
+CHW::D3DCompileFunc s_d3d_compile_real = nullptr;
+HRESULT WINAPI TimedD3DCompile(LPCVOID src, SIZE_T src_size, LPCSTR source_name, const D3D_SHADER_MACRO* defines,
+    ID3DInclude* include, LPCSTR entry, LPCSTR target, UINT flags1, UINT flags2, ID3DBlob** code, ID3DBlob** errors)
+{
+    GW_FRAME_EVENT(ShaderCompile);
+    return s_d3d_compile_real(src, src_size, source_name, defines, include, entry, target, flags1, flags2, code, errors);
+}
+
 #if defined(_WIN32)
 struct SwapChainThreadData
 {
@@ -24,6 +38,87 @@ struct SwapChainThreadData
     std::pair<bool, bool> out{};
 };
 #endif
+
+// Hardware profile, stage C (plans/optimization_mt/50-smart-engine-hw-profile.md): what the device and DXGI say about
+// the GPU, for the log, the tiers and the policy. Log only - the adapter selection and the device flags do not change.
+void SubmitHwProfileGpu(CHW& hw, const DXGI_ADAPTER_DESC1& desc, bool probe)
+{
+    constexpr u32 kPciVendorMicrosoft = 0x1414; // Microsoft Basic Render Driver (WARP)
+    xray::hw::Gpu gpu{};
+    gpu.size = sizeof(gpu);
+    gpu.api = xray::hw::GpuApi::D3D11;
+    gpu.vendor = desc.VendorId;
+    gpu.device = desc.DeviceId;
+    if (!WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, gpu.name, int(sizeof(gpu.name)), nullptr, nullptr))
+        gpu.name[0] = 0;
+    gpu.software = ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) || desc.VendorId == kPciVendorMicrosoft) ? 1 : 0;
+    gpu.dedicated = desc.DedicatedVideoMemory;
+    gpu.shared = desc.SharedSystemMemory;
+    gpu.feature_level = u16(hw.FeatureLevel);
+
+    // DriverCommandLists = 0: the runtime emulates the deferred contexts (R9); DriverConcurrentCreates = 0: the
+    // resource creation is serialized (R3)
+    D3D11_FEATURE_DATA_THREADING threading{};
+    if (SUCCEEDED(hw.pDevice->CheckFeatureSupport(D3D11_FEATURE_THREADING, &threading, sizeof(threading))))
+    {
+        gpu.driver_cl = threading.DriverCommandLists ? 1 : 0;
+        gpu.driver_cc = threading.DriverConcurrentCreates ? 1 : 0;
+    }
+
+    // Integrated GPU: VRAM is the same RAM. OPTIONS2 needs the Windows 10 runtime; fallback - dedicated <= 512 MB.
+    bool uma_known = false;
+#ifdef HAS_DX11_3
+    D3D11_FEATURE_DATA_D3D11_OPTIONS2 options2{};
+    if (SUCCEEDED(hw.pDevice->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS2, &options2, sizeof(options2))))
+    {
+        gpu.uma = options2.UnifiedMemoryArchitecture ? 1 : 0;
+        uma_known = true;
+    }
+#endif
+    if (!uma_known)
+        gpu.uma = desc.DedicatedVideoMemory <= (u64(512) << 20) ? 1 : 0;
+
+    u64 local_usage = 0, local_budget = 0, nonlocal_usage = 0, nonlocal_budget = 0;
+    if (hw.QueryVideoMemory(local_usage, local_budget, nonlocal_usage, nonlocal_budget))
+        gpu.budget_local_start = local_budget;
+
+    // Laptops with two GPUs: is there a hardware adapter much stronger than the selected one (EnumAdapters1(0))?
+    // Log only (R23); the selection is a separate step.
+    if (hw.m_pFactory)
+    {
+        IDXGIAdapter1* adapter = nullptr;
+        for (UINT i = 0; i < 16 && SUCCEEDED(hw.m_pFactory->EnumAdapters1(i, &adapter)) && adapter; ++i)
+        {
+            DXGI_ADAPTER_DESC1 other{};
+            if (SUCCEEDED(adapter->GetDesc1(&other)) && !(other.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
+                other.VendorId != kPciVendorMicrosoft)
+            {
+                gpu.adapters = u8(std::min<u32>(gpu.adapters + 1u, 255u));
+                const bool same = other.AdapterLuid.LowPart == desc.AdapterLuid.LowPart &&
+                    other.AdapterLuid.HighPart == desc.AdapterLuid.HighPart;
+                if (!same && other.DedicatedVideoMemory >= 2 * desc.DedicatedVideoMemory &&
+                    other.DedicatedVideoMemory >= desc.DedicatedVideoMemory + (u64(1) << 30))
+                {
+                    gpu.better_adapter = 1;
+                    if (!probe)
+                    {
+                        Msg("! [hw] adapter %u '%S' (%u MB) looks stronger than the selected '%S' (%u MB) - "
+                            "log only, the selection is unchanged",
+                            i, other.Description, u32(other.DedicatedVideoMemory >> 20), desc.Description,
+                            u32(desc.DedicatedVideoMemory >> 20));
+                    }
+                }
+            }
+            adapter->Release();
+            adapter = nullptr;
+        }
+    }
+
+    gpu.width = psDeviceMode.Width;
+    gpu.height = psDeviceMode.Height;
+    gpu.refresh = psDeviceMode.RefreshRate;
+    xray::hw::SubmitGpu(gpu, probe);
+}
 } // namespace
 
 #if defined(_WIN32)
@@ -148,9 +243,17 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
     // off the main thread (2026-10-14 A/B in a heavy fight: dynamic draw 1.87 -> 1.26 us, static 0.72 -> 0.44 us,
     // -3..5 ms of submit per frame; plans/optimization_mt/19-part0-submit.md).
     // -d3d11_prevent_internal_threads brings back PREVENT_INTERNAL_THREADING_OPTIMIZATIONS, which was forced since
-    // 2026-04 against 0xC00000FD: EscapeCB / CheckMultiplaneOverlaySupport can run on DXGI/driver threads with a
-    // small default stack, and deep UMD chains (notably NVIDIA) overflowed it even with the game exe's huge /STACK.
+    // 2026-04 against 0xC00000FD on an NVIDIA driver worker thread (nvwgf2umx.dll). The real cause (minidump,
+    // plans/optimization_mt/50z6-nvidia-driver-thread-stack-overflow.md): the driver creates that thread with a
+    // 128 KB stack reserve, and sentry.dll's DllMain(DLL_THREAD_ATTACH) set a 64 KB SetThreadStackGuarantee on every
+    // thread of the process, so the driver overflowed at ~56 KB. Fixed in sentry-native (src/sentry_os.c, patch
+    // plans/optimization_mt/patches/sentry_thread_stack_guarantee.patch): the guarantee is set only on threads with a
+    // stack reserve >= 1 MB. The key stays as an emergency switch.
+    // R10 (plan 50): on <= 4 available logical CPUs (stage A, -hw_cpu / -hw_limit included) the hardware policy forbids
+    // it - the driver thread competes with main there. The keys win over the policy: -d3d11_prevent_internal_threads
+    // forbids it anywhere, -d3d11_allow_internal_threads allows it on a small CPU too (A/B).
     constexpr u32 kPciVendorNvidia = 0x10DE;
+    const xray::hw::Policy& hw_policy = xray::hw::GetPolicy();
     if (strstr(Core.Params, "-d3d11_prevent_internal_threads"))
     {
         createDeviceFlags |= D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
@@ -158,6 +261,14 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
             Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (NVIDIA, -d3d11_prevent_internal_threads)");
         else
             Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (-d3d11_prevent_internal_threads)");
+    }
+    else if (strstr(Core.Params, "-d3d11_allow_internal_threads"))
+        Msg("* D3D11: driver internal threading allowed (-d3d11_allow_internal_threads)");
+    else if (xray::hw::PolicyValid(hw_policy) && hw_policy.prevent_internal_threads)
+    {
+        createDeviceFlags |= D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
+        Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (hw policy: %u CPUs available; "
+            "-d3d11_allow_internal_threads to allow it)", xray::hw::GetProfile().cpu.logical_avail);
     }
     else
         Msg("* D3D11: driver internal threading allowed (-d3d11_prevent_internal_threads to forbid it)");
@@ -242,6 +353,12 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
                 &data, sizeof(data));
             ComputeShadersSupported = data.ComputeShaders_Plus_RawAndStructuredBuffers_Via_Shader_4_x;
         }
+        // 50z5-extra-diagnostics.md: the real compiles in the frame report ("shcc"), see TimedD3DCompile
+        if (D3DCompile && D3DCompile != &TimedD3DCompile)
+        {
+            s_d3d_compile_real = D3DCompile;
+            D3DCompile = &TimedD3DCompile;
+        }
         D3D11_FEATURE_DATA_D3D11_OPTIONS options;
         pDevice->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &options, sizeof(options));
 
@@ -280,6 +397,10 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
         ZoneScopedN("TracyD3D11Context");
         profiler_ctx = TracyD3D11Context(pDevice, get_context(CHW::IMM_CTX_ID));
     }
+
+    // 50o: the GPU frame timer (only the global HW: the startup probe renders no frames)
+    if (ThisInstanceIsGlobal())
+        GpuTimerCreate();
 
     // Create deferred contexts
     if (ThisInstanceIsGlobal())
@@ -390,6 +511,20 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
 
     const auto memory = Desc.DedicatedVideoMemory;
     Msg("*   Texture memory: %d M", memory / (1024 * 1024));
+
+    SubmitHwProfileGpu(*this, Desc, !ThisInstanceIsGlobal());
+
+    // R9: the policy is final now (DriverCommandLists of the real device); the render reads it every frame
+    // (render_graph_main_parallel, BeginSecondVPCalculateParallel). r__main_parallel_parts comes from user.ltx already.
+    if (ThisInstanceIsGlobal())
+    {
+        const int user_parts = std::clamp(ps_r__main_parallel_parts, 2, 12);
+        const u32 parts = xray::hw::EffectiveMainParallelParts(u32(user_parts));
+        const xray::hw::Policy& policy = xray::hw::GetPolicy();
+        Msg("* [hw] render: main parts %u%s (user %d, policy %u), svp worker %s", parts,
+            parts < 2 ? " - sequential" : "", user_parts, policy.main_parallel_parts,
+            xray::hw::SvpWorkerAllowed() ? "on" : "off");
+    }
 }
 
 std::pair<bool, bool> CHW::CreatePrimarySwapChains(HWND hwnd)
@@ -600,6 +735,8 @@ void CHW::DestroyDevice()
     if (profiler_ctx)
         TracyD3D11Destroy(profiler_ctx);
 
+    GpuTimerDestroy();
+
     _RELEASE(pContext1);
     for (int id = 0; id < R__NUM_CONTEXTS; ++id)
     {
@@ -683,6 +820,7 @@ void CHW::BeginScene()
 {
     // The thread that runs the frame owns the immediate context for this frame.
     m_immOwnerThread = u32(GetCurrentThreadId());
+    GpuTimerBegin();
 }
 void CHW::EndScene() { }
 
@@ -746,6 +884,216 @@ void CHW::CheckImmThread(const char* where)
     }
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// 50o (plans/optimization_mt/50o-gpu-frame-timing.md): the GPU frame timer, see CHW::GpuMark.
+namespace
+{
+#if XR_PERF_METRICS
+// render/gpu/* are perf_metrics timers (Ticks()): GPU milliseconds in the calibration perf_metrics uses for its own
+void AddGpuMs(xray::perf::Metric m, double ms)
+{
+    constexpr u64 probe_ticks = u64(1) << 24;
+    const double ms_per_tick = xray::perf::TicksToMilliseconds(probe_ticks) / static_cast<double>(probe_ticks);
+    if (ms_per_tick > 0.0 && ms >= 0.0)
+        xray::perf::AddTimeSlow(m, static_cast<u64>(ms / ms_per_tick));
+}
+#endif
+} // namespace
+
+void CHW::GpuTimerCreate()
+{
+    GpuTimerDestroy();
+
+    // The pass marks only where something reads them (XR_PERF_METRICS); 2 timestamps per frame otherwise
+    constexpr u32 ts_count = XR_PERF_METRICS ? GPU_TIMER_TS : 2;
+    const D3D11_QUERY_DESC disjoint_desc{ D3D11_QUERY_TIMESTAMP_DISJOINT, 0 };
+    const D3D11_QUERY_DESC ts_desc{ D3D11_QUERY_TIMESTAMP, 0 };
+    HRESULT hr = S_OK;
+    for (GpuTimerSet& set : m_gpuSets)
+    {
+        hr = pDevice->CreateQuery(&disjoint_desc, &set.disjoint);
+        for (u32 i = 0; SUCCEEDED(hr) && i < ts_count; ++i)
+            hr = pDevice->CreateQuery(&ts_desc, &set.ts[i]);
+        if (FAILED(hr))
+            break;
+    }
+    if (FAILED(hr))
+    {
+        GpuTimerDestroy();
+        Msg("* [gpu] frame timing: unavailable (D3D11 CreateQuery failed: 0x%08x)", static_cast<u32>(hr));
+        return;
+    }
+    m_gpuTimerOk = true;
+
+    // The tick frequency for the log line: one disjoint query, waited for right here, once at device creation (no
+    // frame ever waits for a query); an idle GPU answers at once, 100 ms at most.
+    ID3D11DeviceContext* ctx = get_context(IMM_CTX_ID);
+    ID3D11Query* probe = m_gpuSets[0].disjoint;
+    ctx->Begin(probe);
+    ctx->End(probe);
+    D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{};
+    const auto t0 = std::chrono::steady_clock::now();
+    while ((hr = ctx->GetData(probe, &dj, sizeof(dj), 0)) == S_FALSE &&
+        std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(100))
+    {
+        SwitchToThread();
+    }
+    if (hr == S_OK && dj.Frequency != 0)
+        Msg("* [gpu] frame timing: D3D11 timestamp queries (freq %.2f MHz)", static_cast<double>(dj.Frequency) / 1e6);
+    else
+        Msg("* [gpu] frame timing: D3D11 timestamp queries (freq not known yet: 0x%08x)", static_cast<u32>(hr));
+}
+
+void CHW::GpuTimerDestroy()
+{
+    for (GpuTimerSet& set : m_gpuSets)
+    {
+        _RELEASE(set.disjoint);
+        for (ID3D11Query*& q : set.ts)
+            _RELEASE(q);
+        set = {};
+    }
+    m_gpuSetOldest = 0;
+    m_gpuSetsUsed = 0;
+    m_gpuSetOpen = false;
+    m_gpuTimerOk = false;
+    m_gpuPrevFrame = u32(-1);
+}
+
+void CHW::GpuTimerBegin()
+{
+    if (!m_gpuTimerOk)
+        return;
+    ID3D11DeviceContext* ctx = get_context(IMM_CTX_ID);
+    if (m_gpuSetOpen)
+    {
+        // A BeginScene without the Present of the previous one: close that set, its result is not a frame
+        GpuTimerSet& open = m_gpuSets[(m_gpuSetOldest + m_gpuSetsUsed - 1) % GPU_TIMER_SETS];
+        ctx->End(open.ts[1]);
+        ctx->End(open.disjoint);
+        open.discard = true;
+        m_gpuSetOpen = false;
+    }
+    if (m_gpuSetsUsed == GPU_TIMER_SETS)
+    {
+        // Every set still waits for its result (the GPU is more than GPU_TIMER_SETS frames behind, or minimised):
+        // this frame goes unmeasured rather than waiting
+        PERF_INC(rgpu_skipped);
+        return;
+    }
+    GpuTimerSet& set = m_gpuSets[(m_gpuSetOldest + m_gpuSetsUsed) % GPU_TIMER_SETS];
+    ++m_gpuSetsUsed;
+    m_gpuSetOpen = true;
+    set.frame = Device.dwFrame;
+    set.marks = 0;
+    set.discard = false;
+    ctx->Begin(set.disjoint);
+    ctx->End(set.ts[0]);
+}
+
+void CHW::GpuTimerEnd()
+{
+    if (!m_gpuSetOpen)
+        return;
+    GpuTimerSet& set = m_gpuSets[(m_gpuSetOldest + m_gpuSetsUsed - 1) % GPU_TIMER_SETS];
+    ID3D11DeviceContext* ctx = get_context(IMM_CTX_ID);
+    ctx->End(set.ts[1]);
+    ctx->End(set.disjoint);
+    m_gpuSetOpen = false;
+}
+
+void CHW::GpuMarkPass(GpuMark mark)
+{
+#if XR_PERF_METRICS
+    if (!m_gpuSetOpen || !xray::perf::g_perf_metrics_active || mark >= GpuMark::Count)
+        return;
+    if (u32(GetCurrentThreadId()) != m_immOwnerThread)
+        return;
+    GpuTimerSet& set = m_gpuSets[(m_gpuSetOldest + m_gpuSetsUsed - 1) % GPU_TIMER_SETS];
+    get_context(IMM_CTX_ID)->End(set.ts[2 + static_cast<u32>(mark)]);
+    set.marks |= 1u << static_cast<u32>(mark);
+#else
+    UNUSED(mark);
+#endif
+}
+
+void CHW::GpuTimerPoll()
+{
+    ID3D11DeviceContext* ctx = get_context(IMM_CTX_ID);
+    // Oldest first; the first set that is not ready ends the poll (the newer ones are not either). DONOTFLUSH: never
+    // a flush or a wait here - Present has just flushed.
+    while (m_gpuSetsUsed > (m_gpuSetOpen ? 1u : 0u))
+    {
+        GpuTimerSet& set = m_gpuSets[m_gpuSetOldest];
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{};
+        HRESULT hr = ctx->GetData(set.disjoint, &dj, sizeof(dj), D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if (hr == S_FALSE)
+            return;
+        bool ok = SUCCEEDED(hr) && !set.discard && !dj.Disjoint && dj.Frequency != 0;
+        u64 t[GPU_TIMER_TS]{};
+        if (ok)
+        {
+            const u32 need = 3u | (set.marks << 2);
+            for (u32 i = 0; i < GPU_TIMER_TS; ++i)
+            {
+                if (!(need & (1u << i)))
+                    continue;
+                hr = ctx->GetData(set.ts[i], &t[i], sizeof(t[i]), D3D11_ASYNC_GETDATA_DONOTFLUSH);
+                if (hr == S_FALSE)
+                    return; // the disjoint query is ready before its timestamps (rare): the next frame then
+                if (FAILED(hr))
+                {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        const double to_ms = ok ? 1000.0 / static_cast<double>(dj.Frequency) : 0.0;
+        const double frame_ms = ok && t[1] >= t[0] ? static_cast<double>(t[1] - t[0]) * to_ms : -1.0;
+        if (frame_ms >= 0.0 && frame_ms < 60000.0)
+        {
+            xray::perf::GpuFrameTimeSubmit(set.frame, static_cast<float>(frame_ms));
+            // The GPU had nothing to do between the previous frame's end and this one's begin
+            const bool gap_ok = m_gpuPrevFrame != u32(-1) && m_gpuPrevFrame + 1 == set.frame &&
+                m_gpuPrevFreq == dj.Frequency && t[0] >= m_gpuPrevEnd;
+            const double gap_ms = gap_ok ? static_cast<double>(t[0] - m_gpuPrevEnd) * to_ms : 0.0;
+            if (gap_ok)
+                xray::perf::GpuIdleGapSubmit(set.frame, static_cast<float>(gap_ms));
+#if XR_PERF_METRICS
+            if (xray::perf::g_perf_metrics_active)
+            {
+                AddGpuMs(xray::perf::Metric::rgpu_frame, frame_ms);
+                if (gap_ok)
+                    AddGpuMs(xray::perf::Metric::rgpu_gap, gap_ms);
+                const auto span = [&](GpuMark from, GpuMark to, xray::perf::Metric m)
+                {
+                    const u32 a = static_cast<u32>(from), b = static_cast<u32>(to);
+                    if ((set.marks >> a & 1u) && (set.marks >> b & 1u) && t[2 + b] >= t[2 + a])
+                        AddGpuMs(m, static_cast<double>(t[2 + b] - t[2 + a]) * to_ms);
+                };
+                span(GpuMark::MainBegin, GpuMark::Lights, xray::perf::Metric::rgpu_gbuffer);
+                span(GpuMark::Lights, GpuMark::Combine, xray::perf::Metric::rgpu_lights);
+                span(GpuMark::Combine, GpuMark::CombineEnd, xray::perf::Metric::rgpu_combine);
+                span(GpuMark::SvpBegin, GpuMark::SvpEnd, xray::perf::Metric::rgpu_svp);
+                xray::perf::UpdateMax(xray::perf::Metric::rgpu_latency, static_cast<s64>(Device.dwFrame - set.frame));
+            }
+#endif
+            m_gpuPrevEnd = t[1];
+            m_gpuPrevFreq = dj.Frequency;
+            m_gpuPrevFrame = set.frame;
+        }
+        else
+        {
+            // Disjoint (clock change, power event), failed or discarded: no value, and no gap for the next frame
+            if (!set.discard)
+                PERF_INC(rgpu_disjoint);
+            m_gpuPrevFrame = u32(-1);
+        }
+        m_gpuSetOldest = (m_gpuSetOldest + 1) % GPU_TIMER_SETS;
+        --m_gpuSetsUsed;
+    }
+}
+
 void CHW::Present()
 {
     // Убрал специально этоусловие чтобы мы не "воровали" кадры для второго вьюпорта, что сильно снижает ФПС!
@@ -754,7 +1102,18 @@ void CHW::Present()
         const bool bUseVSync = psDeviceMode.WindowStyle == rsFullscreen &&
             psDeviceFlags.test(rsVSync); // xxx: weird tearing glitches when VSync turned on for windowed mode in DX11
 
-        switch (m_pSwapChain->Present(bUseVSync ? 1 : 0, 0))
+        // 50o: the frame's GPU work ends here (Present's own copy is not in it); then the CPU time Present blocks -
+        // the driver's frame queue is full (GPU-bound) or vsync
+        GpuTimerEnd();
+        const auto present_t0 = std::chrono::steady_clock::now();
+        HRESULT present_hr;
+        {
+            PERF_SCOPE(rgpu_present_wait);
+            present_hr = m_pSwapChain->Present(bUseVSync ? 1 : 0, 0);
+        }
+        const float present_ms =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - present_t0).count();
+        switch (present_hr)
         {
         case DXGI_STATUS_OCCLUDED:
         case DXGI_ERROR_DEVICE_REMOVED:
@@ -762,6 +1121,19 @@ void CHW::Present()
             break;
         }
     // }
+
+    xray::perf::PresentWaitSubmit(Device.dwFrame, present_ms);
+    xray::perf::GpuSyncWaitSubmit(Device.dwFrame, m_gpuSyncWaitMs);
+    m_gpuSyncWaitMs = 0.f;
+    GpuTimerPoll();
+
+    // 50z5-extra-diagnostics.md: the VRAM of the [frame] pace line, every 32nd frame (DXGI, ~0.6 us)
+    if ((Device.dwFrame & 31) == 0)
+    {
+        u64 local_usage, local_budget, nonlocal_usage, nonlocal_budget;
+        if (QueryVideoMemory(local_usage, local_budget, nonlocal_usage, nonlocal_budget))
+            xray::perf::VramSubmit(local_usage, local_budget, nonlocal_usage, 0);
+    }
 
     CurrentBackBuffer = (CurrentBackBuffer + 1) % BackBufferCount;
 

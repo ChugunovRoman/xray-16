@@ -4,6 +4,8 @@
 #include "xrCore/Threading/Lock.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
 #include "xrCore/Threading/ThreadUtil.h"
+#include "xrCore/Platform/HwProfile.h"
+#include "xrCore/BackgroundIo.h"
 #include "xrEngine/device.h"
 
 #include <atomic>
@@ -12,6 +14,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <unordered_set>
@@ -81,19 +84,20 @@ struct ModelPool_mtlock
     {
         outer = (g_modelpool_lock_depth == 0);
         ++g_modelpool_lock_depth;
-#if XR_PERF_METRICS
         if (!ModelPool_Mutex.TryEnter())
         {
             PERF_INC(modelpool_lock_contend);
-            const bool metrics_active = xray::perf::g_perf_metrics_active;
-            const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
+            const u64 t0 = xray::perf::Ticks();
             ModelPool_Mutex.Enter();
-            if (metrics_active)
-                xray::perf::AddTimeSlow(xray::perf::Metric::modelpool_lock_wait, xray::perf::Ticks() - t0);
-        }
-#else
-        ModelPool_Mutex.Enter();
+            const u64 waited = xray::perf::Ticks() - t0;
+#if XR_PERF_METRICS
+            if (xray::perf::g_perf_metrics_active)
+                xray::perf::AddTimeSlow(xray::perf::Metric::modelpool_lock_wait, waited);
 #endif
+            // 50n: the frame spike report - main / Game waited for the pool held by another thread (a loader)
+            if (xray::perf::CurrentThreadKind() != xray::perf::ThreadKind::Worker)
+                xray::perf::FrameEventAdd(xray::perf::frame_event::LockWait, waited);
+        }
 #if XR_PERF_METRICS
         if (outer && xray::perf::g_perf_metrics_active)
             t_hold0 = xray::perf::Ticks();
@@ -122,12 +126,32 @@ struct ModelColdLoadScope
 {
     ModelColdLoadScope()
     {
-        ++g_modelpool_cold_depth;
+        // 50i-stage3-slow-disk-io.md: the time of the outermost load of this thread goes to TlColdModelUs (the
+        // spawn_cold_ms limit of the spawn per frame)
+        if (g_modelpool_cold_depth++ == 0)
+        {
+            t0 = std::chrono::steady_clock::now();
+            ticks0 = xray::perf::Ticks();
+        }
         ++xray::perf::TlColdModelLoads(); // spawn_cold_models (CLevel::ProcessGameEvents) counts these
     }
-    ~ModelColdLoadScope() { --g_modelpool_cold_depth; }
+    ~ModelColdLoadScope()
+    {
+        if (--g_modelpool_cold_depth == 0)
+        {
+            xray::perf::TlColdModelUs() += static_cast<u64>(
+                std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count());
+            // 50n: the frame spike report - the outermost cold loads of main / Game (not the prefetch threads)
+            if (xray::perf::CurrentThreadKind() != xray::perf::ThreadKind::Worker)
+                xray::perf::FrameEventAdd(xray::perf::frame_event::ModelCold, xray::perf::Ticks() - ticks0);
+        }
+    }
     ModelColdLoadScope(const ModelColdLoadScope&) = delete;
     ModelColdLoadScope& operator=(const ModelColdLoadScope&) = delete;
+
+private:
+    std::chrono::steady_clock::time_point t0{};
+    u64 ticks0{};
 };
 
 // Reading the files of a model into the OS file cache: model_PrefetchFiles (the "Model prefetch" thread) and the
@@ -138,7 +162,102 @@ struct ModelColdLoadScope
 constexpr u64 kWarmMaxModelBytes = 128ull * 1024 * 1024; // all the files of one model
 constexpr size_t kWarmMaxOgfBytes = 64 * 1024 * 1024;
 constexpr size_t kWarmChunk = 256 * 1024;
-constexpr size_t kStartupWarmLead = 256; // start-up warm threads stay at most this many list items ahead of main
+// 50a-stage1-prefetch.md (plans/optimization_mt, plan 50 R4): how far the start-up warm threads read ahead of the loads
+// is in bytes now - PrefetchWarmLimits::lead_bytes over the size estimates of the list (it was 256 list items)
+
+u64 prefetch_now_us()
+{
+    using namespace std::chrono;
+    return static_cast<u64>(duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+// 50a-stage1-prefetch.md (plans/optimization_mt, plan 50 R3): the disk of gamedata measured on the first files of the
+// start-up warm-up, once per process - the summed read speed of the warm threads and the median time to the first
+// chunk of a file. Slower than kDiskSlowMBps or a median above kDiskSlowMedianUs: an HDD / USB / network disk the
+// profile did not recognise (Wine, a USB bridge...) - one warm thread in list order from then on, the loads after it.
+constexpr u32 kDiskProbeFiles = 200;
+constexpr u32 kDiskProbeMinFiles = 20;
+constexpr u64 kDiskProbeUs = 2000000;
+constexpr double kDiskSlowMBps = 80.0;
+constexpr u64 kDiskSlowMedianUs = 4000;
+
+std::atomic_bool s_disk_slow{ false }; // measured slow (the profile's own Slow is read from the profile)
+
+bool disk_slow_by_profile() { return xray::hw::GetProfile().tiers.disk_class == xray::hw::DiskClass::Slow; }
+
+struct WarmDiskProbe
+{
+    std::mutex mutex; // all below
+    xr_vector<u32> first_us; // per file: the open and the first chunk
+    u64 bytes{};
+    u64 read_us{}; // the whole reads, summed over the threads
+    u64 start_us{};
+    u32 threads{};
+    bool decided{};
+    std::atomic_bool wanted{}; // samples are taken (checked before the lock)
+
+    // A stage starts its warm threads
+    void begin(u32 warm_threads)
+    {
+        std::lock_guard<std::mutex> lk(mutex);
+        if (decided)
+            return;
+        threads = std::max(threads, warm_threads);
+        if (!start_us)
+            start_us = prefetch_now_us();
+        wanted.store(true, std::memory_order_relaxed);
+    }
+
+    // One file of a warm thread: the time to its first chunk, the time of the whole read, its bytes
+    void add(u64 first, u64 total, u64 n)
+    {
+        std::lock_guard<std::mutex> lk(mutex);
+        if (decided)
+            return;
+        first_us.push_back(static_cast<u32>(std::min<u64>(first, type_max<u32>)));
+        bytes += n;
+        read_us += total;
+        const size_t files = first_us.size();
+        if (files >= kDiskProbeFiles || (files >= kDiskProbeMinFiles && prefetch_now_us() - start_us >= kDiskProbeUs))
+            decide();
+    }
+
+    // The end of the prefetch: decide on what there is
+    void finish()
+    {
+        std::lock_guard<std::mutex> lk(mutex);
+        if (!decided && !first_us.empty())
+            decide();
+        wanted.store(false, std::memory_order_relaxed);
+    }
+
+private:
+    void decide() // under `mutex`
+    {
+        decided = true;
+        wanted.store(false, std::memory_order_relaxed);
+        const size_t files = first_us.size();
+        std::nth_element(first_us.begin(), first_us.begin() + files / 2, first_us.end());
+        const u64 median_us = first_us[files / 2];
+        // the threads read at the same time: the speed of one of them times their number
+        const double mbps = read_us ? double(bytes) / double(1024 * 1024) / (double(read_us) / 1e6) * threads : 0.0;
+        const bool slow = mbps < kDiskSlowMBps || median_us > kDiskSlowMedianUs;
+        const bool by_profile = disk_slow_by_profile();
+        Msg("* [prefetch] disk: %.0f MB/s, median %.2f ms to the first chunk over %u files (%u warm threads) -> %s%s",
+            mbps, median_us / 1000.0, static_cast<u32>(files), threads, slow ? "slow" : "fast",
+            by_profile ? " (the hw profile says slow)" : "");
+        if (slow && !by_profile)
+        {
+            s_disk_slow.store(true, std::memory_order_relaxed);
+            xray::io::BackgroundIoNoteMeasuredSlow(); // 50i: the in-game readers and the spawns go by it too (R6, R7)
+            Msg("* [hw] disk measured %.0f MB/s, median %.1f ms -> slow: one warm thread in list order, the loads after "
+                "it", mbps, median_us / 1000.0);
+        }
+        first_us.clear();
+        first_us.shrink_to_fit();
+    }
+};
+WarmDiskProbe s_disk_probe;
 
 std::filesystem::path warm_os_path(const xr_string& fs_path)
 {
@@ -182,9 +301,10 @@ struct WarmStats
     u32 missing{};
 };
 
-// The whole file into `out` (at most kWarmMaxOgfBytes). false = no such file.
-bool warm_read_whole(const xr_string& path, xr_vector<u8>& out)
+// The whole file into `out` (at most kWarmMaxOgfBytes). false = no such file. probe: a sample for s_disk_probe.
+bool warm_read_whole(const xr_string& path, xr_vector<u8>& out, bool probe = false)
 {
+    const u64 t0 = probe ? prefetch_now_us() : 0;
     std::ifstream f(warm_os_path(path), std::ios::binary | std::ios::ate);
     if (!f)
         return false;
@@ -194,14 +314,29 @@ bool warm_read_whole(const xr_string& path, xr_vector<u8>& out)
         return true;
     out.resize(std::min(static_cast<size_t>(size), kWarmMaxOgfBytes));
     f.seekg(0);
-    f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(out.size()));
-    out.resize(static_cast<size_t>(std::max<std::streamsize>(f.gcount(), 0)));
+    // 50a-stage1-prefetch.md: the first chunk alone first - its time is the latency of the file for the disk probe
+    const size_t first = std::min(out.size(), kWarmChunk);
+    f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(first));
+    size_t got = static_cast<size_t>(std::max<std::streamsize>(f.gcount(), 0));
+    const u64 t1 = probe ? prefetch_now_us() : 0;
+    if (got == first && out.size() > first)
+    {
+        f.read(reinterpret_cast<char*>(out.data() + first), static_cast<std::streamsize>(out.size() - first));
+        got += static_cast<size_t>(std::max<std::streamsize>(f.gcount(), 0));
+    }
+    out.resize(got);
+    if (probe)
+        s_disk_probe.add(t1 - t0, prefetch_now_us() - t0, got);
     return true;
 }
 
-// Reads the file (at most `limit` bytes) and throws the bytes away. -1 = no such file.
-s64 warm_read_discard(const xr_string& path, xr_vector<u8>& buf, u64 limit, const std::atomic_bool& stop)
+// Reads the file (at most `limit` bytes) and throws the bytes away. -1 = no such file. probe: a sample for
+// s_disk_probe.
+s64 warm_read_discard(const xr_string& path, xr_vector<u8>& buf, u64 limit, const std::atomic_bool& stop,
+    bool probe = false)
 {
+    const u64 t0 = probe ? prefetch_now_us() : 0;
+    u64 t1 = t0;
     std::ifstream f(warm_os_path(path), std::ios::binary);
     if (!f)
         return -1;
@@ -210,10 +345,14 @@ s64 warm_read_discard(const xr_string& path, xr_vector<u8>& buf, u64 limit, cons
     {
         f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
         const std::streamsize n = f.gcount();
+        if (probe && !total)
+            t1 = prefetch_now_us();
         if (n <= 0)
             break;
         total += static_cast<u64>(n);
     }
+    if (probe)
+        s_disk_probe.add(t1 - t0, prefetch_now_us() - t0, total);
     return static_cast<s64>(total);
 }
 
@@ -326,20 +465,26 @@ struct WarmSeen
 // The files of one model (name: lower case, no extension, as the pool key): its ogf ($level$ first, as Instance_Load
 // looks), its LOD ogf, the omf of its motion refs, the partition ltx, the dds of its textures and their bump maps.
 // seen (may be null): the files another call has taken already are skipped. false = the ogf was not found.
+// 50a-stage1-prefetch.md: with_textures - false: no dds (plan 50 R4); quit (may be null): leave after the current
+// file; probe: samples for s_disk_probe.
 bool warm_model_files(const xr_string& name, const WarmRoots& roots, xr_vector<u8>& ogf, xr_vector<u8>& buf,
-    WarmStats& st, const std::atomic_bool& stop, WarmSeen* seen = nullptr)
+    WarmStats& st, const std::atomic_bool& stop, WarmSeen* seen = nullptr, bool with_textures = true,
+    const std::atomic_bool* quit = nullptr, bool probe = false)
 {
+    const auto halted = [&] {
+        return stop.load(std::memory_order_relaxed) || (quit && quit->load(std::memory_order_relaxed));
+    };
     const auto read_model = [&](const xr_string& rel) {
-        if (!roots.level.empty() && warm_read_whole(roots.level + rel, ogf))
+        if (!roots.level.empty() && warm_read_whole(roots.level + rel, ogf, probe))
             return true;
-        return !roots.meshes.empty() && warm_read_whole(roots.meshes + rel, ogf);
+        return !roots.meshes.empty() && warm_read_whole(roots.meshes + rel, ogf, probe);
     };
     const auto discard = [&](const xr_string& path) {
-        if (stop.load(std::memory_order_relaxed) || st.bytes >= kWarmMaxModelBytes)
+        if (halted() || st.bytes >= kWarmMaxModelBytes)
             return true; // nothing more for this model: not counted as missing
         if (seen && !seen->claim(path))
             return true; // read (or found missing) for another model already
-        const s64 n = warm_read_discard(path, buf, kWarmMaxModelBytes - st.bytes, stop);
+        const s64 n = warm_read_discard(path, buf, kWarmMaxModelBytes - st.bytes, stop, probe);
         if (n < 0)
             return false;
         ++st.files;
@@ -356,7 +501,7 @@ bool warm_model_files(const xr_string& name, const WarmRoots& roots, xr_vector<u
     st.bytes += ogf.size();
     OgfRefs refs;
     warm_parse_ogf(ogf, refs, true);
-    if (!refs.lod.empty() && !stop.load(std::memory_order_relaxed))
+    if (!refs.lod.empty() && !halted())
     {
         if (read_model(warm_strip_ext(refs.lod) + ".ogf"))
         {
@@ -379,7 +524,7 @@ bool warm_model_files(const xr_string& name, const WarmRoots& roots, xr_vector<u
         discard(roots.meshes + name + ".ltx"); // CPartition::load; mostly there is none
     std::sort(refs.textures.begin(), refs.textures.end());
     refs.textures.erase(std::unique(refs.textures.begin(), refs.textures.end()), refs.textures.end());
-    if (!roots.textures.empty())
+    if (with_textures && !roots.textures.empty())
     {
         for (const xr_string& t : refs.textures)
         {
@@ -394,28 +539,87 @@ bool warm_model_files(const xr_string& name, const WarmRoots& roots, xr_vector<u
 }
 
 // model_PrefetchFiles: one thread and a queue of model names (each once per session)
+// 50i-stage3-slow-disk-io.md (plans/optimization_mt, plan 50 R5-R7), a slow disk only (xray::io::BackgroundIoSingle):
+// the jobs of spawns (source 1) go ahead of the ALife ones - the first spawn_jobs of the queue, in the order they came;
+// the thread reads in the single background I/O slot shared with the sound prefetch, and no dds (R5). The number of
+// jobs not read yet goes to xray::io (the sound reader waits for 0).
 struct ModelFilePrefetch
 {
     struct Job
     {
         xr_string name;
         xr_string level; // $level$ when it was queued
+        bool spawn{}; // 50l: a job of a spawn (ahead of the ALife ones) - so is its background load
     };
-    std::mutex mutex; // queue, queued, warmed, roots, thread
+    std::mutex mutex; // queue, queued, warmed, roots, thread, current, spawn_jobs, bg_names
     std::condition_variable cv;
     std::deque<Job> queue;
-    std::unordered_set<xr_string> queued;
+    size_t spawn_jobs{}; // 50i: the first ones of `queue` are of spawns (a slow disk only; 0 otherwise)
+    xr_string current; // 50i: the job being read now (empty when none)
+    std::unordered_set<xr_string> queued; // queued (or skipped as loaded already, see PrefetchFiles) once per session
     std::unordered_set<xr_string> warmed; // the thread has gone through these
+    // 50l-weak-cpu-spawn-models.md: the models of creatures (source bit 2) - once read, their base model is loaded on
+    // the "Model bg load" thread (a weak CPU, D3D11)
+    std::unordered_set<xr_string> bg_names;
     WarmRoots roots; // meshes / textures, taken at the first job
+    // 50-smart-engine-hw-profile.md R5 (plans/optimization_mt 49, W5): the omf / ltx / dds read for any model in this
+    // session - by this thread and by the start-up warm threads of Prefetch (StartupWarm::seen points here). The engine
+    // keeps what it has loaded from them (textures, motions), so a file read once is not read again for another model.
+    WarmSeen seen;
     std::thread thread;
     std::atomic_bool stop{};
-    std::atomic_bool used{}; // anything queued yet: only then a cold load looks `warmed` up (metrics)
+    std::atomic_bool used{}; // anything queued yet: only then a cold load looks `warmed` up (metrics) and drops its job
 };
 ModelFilePrefetch* s_file_prefetch = nullptr;
 
+// 50i: the jobs not read yet (queued + the one being read) to the single background I/O queue; under P.mutex, so the
+// values arrive in order
+void file_prefetch_publish(const ModelFilePrefetch& P)
+{
+    xray::io::BackgroundIoSetModelJobs(static_cast<u32>(P.queue.size() + (P.current.empty() ? 0 : 1)));
+}
+
+// 50i: is the job of this model still to be read (queued or being read)? Under P.mutex.
+bool file_prefetch_pending(const ModelFilePrefetch& P, const xr_string& key)
+{
+    if (P.current == key)
+        return true;
+    return std::any_of(
+        P.queue.begin(), P.queue.end(), [&key](const ModelFilePrefetch::Job& j) { return j.name == key; });
+}
+
+// 50l-weak-cpu-spawn-models.md (plans/optimization_mt): the background base loading, defined below (after the parallel
+// prefetch, whose deferred motions parts it reuses)
+bool bgload_enabled();
+void bgload_offer(const xr_string& name, bool spawn);
+bool bgload_pending(const xr_string& name);
+
+// 50i: a spawn asks for a model ALife queued - its job moves behind the spawn jobs (a slow disk only). Under P.mutex.
+// true = moved.
+bool file_prefetch_promote(ModelFilePrefetch& P, const xr_string& key)
+{
+    const auto first_alife = P.queue.begin() + static_cast<std::ptrdiff_t>(P.spawn_jobs);
+    const auto it = std::find_if(
+        first_alife, P.queue.end(), [&key](const ModelFilePrefetch::Job& j) { return j.name == key; });
+    if (it == P.queue.end())
+        return false;
+    ModelFilePrefetch::Job job = std::move(*it);
+    job.spawn = true; // 50l
+    P.queue.erase(it);
+    P.queue.insert(P.queue.begin() + static_cast<std::ptrdiff_t>(P.spawn_jobs), std::move(job));
+    ++P.spawn_jobs;
+    return true;
+}
+
 void file_prefetch_thread(ModelFilePrefetch* P)
 {
+    // 50-smart-engine-hw-profile.md R0 (plans/optimization_mt): below normal CPU priority, and the background mode on
+    // top of it - low I/O priority (these reads queue behind the page faults of main and the Game thread) and low memory
+    // priority (acceptable: the thread only reads files ahead). Where the mode is not there, below normal alone. Not
+    // for the start-up "Model warm" / "Model load" threads: main waits for them on the loading screen.
     Threading::SetCurrentThreadPriorityLevel(Threading::priority_level::below_normal);
+    if (!Threading::SetCurrentThreadBackgroundMode())
+        Msg("~ [model_prefetch] no background mode for the thread, below normal priority only");
     xr_vector<u8> ogf;
     xr_vector<u8> buf(kWarmChunk);
     for (;;)
@@ -430,23 +634,45 @@ void file_prefetch_thread(ModelFilePrefetch* P)
                 return;
             job = std::move(P->queue.front());
             P->queue.pop_front();
+            if (P->spawn_jobs)
+                --P->spawn_jobs;
+            P->current = job.name;
+            file_prefetch_publish(*P);
             pending = P->queue.size();
             roots = P->roots;
         }
         roots.level = job.level;
         xray::perf::SetGauge(xray::perf::Metric::mprefetch_queue, static_cast<s64>(pending));
         {
+            // 50i (R7): on a slow disk one background reader at a time - this job waits for the sound file being read
+            // (the sound reader waits for all the model jobs). R5: no dds there - ogf, LOD ogf, omf, partition ltx.
+            xray::io::BackgroundIoScope io;
+#if XR_PERF_METRICS
+            const u64 t_io = xray::perf::g_perf_metrics_active ? xray::perf::Ticks() : 0;
+#endif
+            if (!io.enter(xray::io::BackgroundIoClient::Model, [P] { return P->stop.load(std::memory_order_relaxed); }))
+                return; // shutting down (file_prefetch_shutdown reports 0 jobs)
+#if XR_PERF_METRICS
+            if (io.taken() && t_io)
+                xray::perf::AddTimeSlow(xray::perf::Metric::mprefetch_io_wait, xray::perf::Ticks() - t_io);
+#endif
             ZoneScopedN("model_prefetch_files");
             ZoneText(job.name.c_str(), job.name.size());
             PERF_SCOPE(mprefetch_time);
             WarmStats st;
-            warm_model_files(job.name, roots, ogf, buf, st, P->stop);
+            warm_model_files(job.name, roots, ogf, buf, st, P->stop, &P->seen, !io.taken());
             PERF_ADD(mprefetch_files, st.files);
             PERF_ADD(mprefetch_kb, (st.bytes + 1023) / 1024);
             PERF_ADD(mprefetch_missing, st.missing);
         }
         std::lock_guard<std::mutex> lk(P->mutex);
         P->warmed.insert(job.name);
+        // 50l-weak-cpu-spawn-models.md: a creature's model - its base model is loaded next, off the main thread. Under
+        // P->mutex, so PrefetchPending sees the job either here or there.
+        if (P->bg_names.count(job.name))
+            bgload_offer(job.name, job.spawn);
+        P->current.clear();
+        file_prefetch_publish(*P);
     }
 }
 
@@ -459,57 +685,378 @@ void file_prefetch_shutdown()
         std::lock_guard<std::mutex> lk(P.mutex);
         P.stop.store(true, std::memory_order_relaxed);
         P.queue.clear();
+        P.spawn_jobs = 0;
     }
     P.cv.notify_all();
     if (P.thread.joinable())
         P.thread.join(); // waits for one file read at most: the thread checks `stop` between chunks
     xr_delete(s_file_prefetch);
+    xray::io::BackgroundIoSetModelJobs(0); // 50i: the sound reader no longer waits for this thread
     xray::perf::SetGauge(xray::perf::Metric::mprefetch_queue, 0);
 }
 
-// The start-up warm threads of Prefetch (one per hardware thread but main's): they take the items of the prefetch list in order, up
-// to kStartupWarmLead items ahead of main, and skip the ones main has already passed
+// 50-smart-engine-hw-profile.md R5 (plans/optimization_mt): the bases are freed (models_Clear(true), the end of a
+// game) - a new session for the "Model prefetch" thread: the names asked and the files read before may be needed again
+void file_prefetch_reset()
+{
+    if (!s_file_prefetch)
+        return;
+    ModelFilePrefetch& P = *s_file_prefetch;
+    {
+        std::lock_guard<std::mutex> lk(P.mutex);
+        P.queue.clear();
+        P.spawn_jobs = 0;
+        P.queued.clear();
+        P.warmed.clear();
+        P.bg_names.clear(); // 50l
+        file_prefetch_publish(P); // 50i: the job being read, if any
+    }
+    {
+        std::lock_guard<std::mutex> lk(P.seen.mutex);
+        P.seen.paths.clear();
+    }
+    xray::perf::SetGauge(xray::perf::Metric::mprefetch_queue, 0);
+}
+
+// The start-up warm threads of Prefetch (the number from the hw policy, plan 50 R3): they take the items of the prefetch
+// list in order, up to lead_bytes of the list estimates ahead of the loads (R4), and skip the ones the loads have
+// already passed. On a slow disk the loads wait for them instead (wait_warmed): one reader, in list order.
 struct StartupWarm
 {
     xr_vector<xr_string> names;
     WarmRoots roots;
     std::atomic<size_t> next{0};
-    std::atomic<size_t> main_pos{0};
+    std::atomic<size_t> main_pos{0}; // the furthest item the loads (or main) have taken
     std::atomic_bool stop{};
     std::atomic<u32> files{0};
     std::atomic<u32> missing{0};
     std::atomic<u32> behind{0}; // items main had passed before a warm thread got to them
     std::atomic<u64> bytes{0};
-    WarmSeen seen; // the omf / ltx / dds taken by any of the threads
+    WarmSeen own_seen; // used when there is no ModelFilePrefetch (not expected)
+    WarmSeen* seen{ &own_seen }; // the omf / ltx / dds taken by any of the threads; ModelFilePrefetch::seen
+
+    // 50a-stage1-prefetch.md (plans/optimization_mt, plan 50 R3 / R4)
+    xr_vector<u64> cum; // cum[i] - the size estimates of the items [0, i)
+    u64 lead_bytes{};
+    bool with_textures{ true };
+    bool slow_start{}; // the hw profile says the disk is slow
+    std::unique_ptr<std::atomic<u8>[]> warmed; // per item: a warm thread is through with it (read or skipped)
+    xr_vector<u8> loaded_already; // per item: a pool hit or a repeat, nothing to load (read only on a slow disk)
+    std::atomic<u32> running{0}; // warm threads not finished
+    std::atomic<u32> thread_ids{0};
+    std::atomic<u64> waited_us{0}; // the loads (or main) waiting for the warm-up on a slow disk
+    // 50k-slow-disk-early-prefetch.md: per item - read at the menu by the early warm-up, `warmed` already (empty: none)
+    xr_vector<u8> early;
+
+    bool slow() const { return slow_start || s_disk_slow.load(std::memory_order_relaxed); }
+
+    // The loads (or main): item `pos` is taken now. main_pos only grows: several load threads report
+    void note_main(size_t pos)
+    {
+        size_t cur = main_pos.load(std::memory_order_relaxed);
+        while (cur < pos && !main_pos.compare_exchange_weak(cur, pos, std::memory_order_relaxed))
+        {
+        }
+    }
+
+    // Item i is further than lead_bytes ahead of the loads (the next item after theirs is always allowed)
+    bool ahead_too_far(size_t i) const
+    {
+        const size_t m = main_pos.load(std::memory_order_relaxed);
+        return i > m + 1 && cum[i + 1] - cum[m + 1] > lead_bytes;
+    }
+
+    void mark(size_t i)
+    {
+        if (warmed)
+            warmed[i].store(1, std::memory_order_release);
+    }
+
+    // A slow disk: the load of item `pos` (a load thread or main) reads its files after the warm thread - one reader in
+    // list order instead of a seek per load thread. No deadlock: the item is not ahead of the loads (note_main first),
+    // so the warm thread that has it, or takes it, does not wait for the lead.
+    void wait_warmed(size_t pos)
+    {
+        if (!warmed || !slow() || loaded_already[pos] || warmed[pos].load(std::memory_order_acquire))
+            return;
+        ZoneScopedN("model_prefetch_warm_wait");
+        const u64 t0 = prefetch_now_us();
+        while (!warmed[pos].load(std::memory_order_acquire) && running.load(std::memory_order_acquire) > 0 &&
+            !stop.load(std::memory_order_relaxed))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        waited_us.fetch_add(prefetch_now_us() - t0, std::memory_order_relaxed);
+    }
 };
 
 void startup_warm_thread(StartupWarm* W)
 {
+    // 50a-stage1-prefetch.md (plan 50 R3): on a disk measured slow the first thread goes on alone, in list order, the
+    // others leave after their current file
+    const u32 id = W->thread_ids.fetch_add(1, std::memory_order_relaxed);
+    const std::atomic_bool* quit = id ? &s_disk_slow : nullptr;
     xr_vector<u8> ogf;
     xr_vector<u8> buf(kWarmChunk);
     for (;;)
     {
+        if (quit && quit->load(std::memory_order_relaxed))
+            break;
         const size_t i = W->next.fetch_add(1, std::memory_order_relaxed);
         if (i >= W->names.size() || W->stop.load(std::memory_order_relaxed))
-            return;
-        if (i < W->main_pos.load(std::memory_order_relaxed))
+            break;
+        if (!W->early.empty() && W->early[i]) // 50k-slow-disk-early-prefetch.md: read at the menu
+            continue;
+        if (!W->slow() && i < W->main_pos.load(std::memory_order_relaxed)) // on a slow disk the load waits for it
         {
             W->behind.fetch_add(1, std::memory_order_relaxed);
+            W->mark(i);
             continue;
         }
-        while (!W->stop.load(std::memory_order_relaxed) &&
-            i > W->main_pos.load(std::memory_order_relaxed) + kStartupWarmLead)
+        if (W->slow() && W->loaded_already[i]) // a slow disk: no read for a model nobody loads
+        {
+            W->mark(i);
+            continue;
+        }
+        while (!W->stop.load(std::memory_order_relaxed) && !(quit && quit->load(std::memory_order_relaxed)) &&
+            W->ahead_too_far(i))
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        if (W->stop.load(std::memory_order_relaxed))
-            return;
-        ZoneScopedN("model_warm");
-        ZoneText(W->names[i].c_str(), W->names[i].size());
-        WarmStats st;
-        warm_model_files(W->names[i], W->roots, ogf, buf, st, W->stop, &W->seen);
-        W->files.fetch_add(st.files, std::memory_order_relaxed);
-        W->missing.fetch_add(st.missing, std::memory_order_relaxed);
-        W->bytes.fetch_add(st.bytes, std::memory_order_relaxed);
+        if (W->stop.load(std::memory_order_relaxed) || (quit && quit->load(std::memory_order_relaxed)))
+        {
+            W->mark(i);
+            break;
+        }
+        {
+            ZoneScopedN("model_warm");
+            ZoneText(W->names[i].c_str(), W->names[i].size());
+            WarmStats st;
+            warm_model_files(W->names[i], W->roots, ogf, buf, st, W->stop, W->seen, W->with_textures, quit,
+                s_disk_probe.wanted.load(std::memory_order_relaxed));
+            W->files.fetch_add(st.files, std::memory_order_relaxed);
+            W->missing.fetch_add(st.missing, std::memory_order_relaxed);
+            W->bytes.fetch_add(st.bytes, std::memory_order_relaxed);
+        }
+        W->mark(i);
     }
+    W->running.fetch_sub(1, std::memory_order_release);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 50k-slow-disk-early-prefetch.md (plans/optimization_mt): the early warm-up of a slow disk (the hw profile: HDD, USB,
+// network). The engine starts it at the main menu (armed in IGame_Persistent::OnAppStart, started when the menu has
+// settled - 50z3-startup-slow-disk-io.md) with the prefix of both prefetch lists the budget takes, in the order the
+// prefetch stages load it - the visuals of the objects, then the models. One thread reads the files of each model
+// (warm_model_files, in the slot of the single background I/O queue, after the foreground reads of the menu) into the
+// OS cache while the player is in the menu: at most the warm-up lead of the list estimates (R4: nothing
+// loads the files before the level load, so the lead counts from the start of the list), and not on once the RAM
+// available falls below the limit the lead was taken for. The first level load stops it (KERNEL:start, before
+// PreStart); the warm-up of that prefetch skips the models it has read, and the files it took go into the session set
+// (ModelFilePrefetch::seen - models_Clear(true) of PreStart empties that one in between, so they are kept apart until
+// the prefetch). Main thread, except early_warm_thread.
+struct EarlyWarm
+{
+    xr_vector<xr_string> names; // the pool keys of the list, each once, in its order
+    xr_vector<u64> cum; // cum[i] - the estimates of the names [0, i)
+    WarmRoots roots;
+    PrefetchEarlyWarmParams params{};
+    WarmSeen seen; // the omf / ltx / dds taken, until early_warm_merge
+    std::thread thread;
+    std::atomic_bool stop{};
+    // the thread's, read after the join
+    xr_vector<u8> done; // per name: read through (a model whose ogf is not there too)
+    u32 files{};
+    u32 missing{};
+    u64 bytes{};
+    u64 start_us{};
+    u64 end_us{};
+    PrefetchEarlyWarmEnd end{ PrefetchEarlyWarmEnd::Stopped };
+    // main, from the stop on
+    bool stopped{};
+    bool merged{}; // `seen` went into the session set
+    bool released{}; // the first level load is over: nothing skips the models any more
+    std::unordered_set<xr_string> done_set;
+    u32 skipped{}; // the prefetch warm-up found these models read
+    u64 waited_us{}; // the loads waiting for the prefetch warm-up in the stages since the stop
+};
+EarlyWarm* s_early_warm = nullptr;
+
+// The RAM available now is below the limit the warm-up lead was taken for (-hw_ram / -hw_profile: capped as the
+// prefetch caps it). Any thread.
+bool early_warm_ram_low(const PrefetchEarlyWarmParams& params)
+{
+    u64 avail = 0, commit = 0;
+    xray::hw::QueryMemoryNow(avail, commit);
+    if (!avail)
+        return false; // no live value on this platform: the limit of the start holds
+    if (params.ram_cap)
+        avail = std::min(avail, params.ram_cap);
+    return avail < params.ram_floor;
+}
+
+void early_warm_thread(EarlyWarm* E)
+{
+    // Below normal CPU priority and EcoQoS (plan 50 R0, R15), but - 50z3-startup-slow-disk-io.md - not the background
+    // mode: the normal I/O and memory priority. The menu's own reads go first by the slot now (the Warm client waits
+    // until no foreground read for kForegroundQuietMs, model by model), so the very low I/O priority only cost speed in
+    // the quiet gaps (the laptop on a USB HDD: ~2.8 MB/s against 20). The normal memory priority keeps the pages it
+    // reads minutes before the level load in the OS cache longer (the background mode would give them the low one).
+    Threading::SetCurrentThreadPriorityLevel(Threading::priority_level::below_normal);
+    Threading::SetCurrentThreadEcoQos();
+    xr_vector<u8> ogf;
+    xr_vector<u8> buf(kWarmChunk);
+    const auto halted = [E] { return E->stop.load(std::memory_order_relaxed); };
+    E->end = PrefetchEarlyWarmEnd::ListEnd;
+    for (size_t i = 0; i < E->names.size(); ++i)
+    {
+        if (halted())
+        {
+            E->end = PrefetchEarlyWarmEnd::Stopped;
+            break;
+        }
+        if (i > 0 && E->cum[i + 1] > E->params.lead_bytes) // the first model is always allowed, as with the loads
+        {
+            E->end = PrefetchEarlyWarmEnd::Lead;
+            break;
+        }
+        if (early_warm_ram_low(E->params))
+        {
+            E->end = PrefetchEarlyWarmEnd::LowRam;
+            break;
+        }
+        // 50i (R7): one background reader at a time on a slow disk; in the game this thread is gone. In the menu others
+        // read too: 50r-slow-disk-async-textures.md - the "Texture async" thread, the textures of a menu window go first
+        // (Warm waits while texture jobs are pending); 50z3-startup-slow-disk-io.md - main and the workers (the menu
+        // itself, the preview cache, the scripts: Warm waits until none has opened a file for kForegroundQuietMs), the
+        // deferred sounds of the start-up and the smart terrain map (the slot, one at a time)
+        xray::io::BackgroundIoScope io;
+        if (!io.enter(xray::io::BackgroundIoClient::Warm, halted))
+        {
+            E->end = PrefetchEarlyWarmEnd::Stopped;
+            break;
+        }
+        ZoneScopedN("model_early_warm");
+        ZoneText(E->names[i].c_str(), E->names[i].size());
+        WarmStats st;
+        warm_model_files(E->names[i], E->roots, ogf, buf, st, E->stop, &E->seen, E->params.with_textures, nullptr,
+            s_disk_probe.wanted.load(std::memory_order_relaxed));
+        E->files += st.files;
+        E->missing += st.missing;
+        E->bytes += st.bytes;
+        if (halted())
+        {
+            E->end = PrefetchEarlyWarmEnd::Stopped; // this model may be cut short: the prefetch reads it again
+            break;
+        }
+        E->done[i] = 1;
+    }
+    E->end_us = prefetch_now_us();
+    xray::io::BackgroundIoSetMenuWarmPending(false); // 50z3: over (done, stopped) - a menu reader may go on
+    if (E->end != PrefetchEarlyWarmEnd::Stopped) // done at the menu: from now on a level load loses nothing
+    {
+        u32 read = 0;
+        for (const u8 d : E->done)
+            read += d;
+        Msg("* [prefetch] early warm-up: done at the menu in %.1f s, %u files / %u MB, %u of %u models (%s)",
+            (E->end_us - E->start_us) / 1e6, E->files, static_cast<u32>(E->bytes / (1024 * 1024)), read,
+            static_cast<u32>(E->names.size()),
+            E->end == PrefetchEarlyWarmEnd::ListEnd ? "the whole list" :
+            E->end == PrefetchEarlyWarmEnd::Lead    ? "the warm-up lead reached" :
+                                                      "little RAM available");
+    }
+}
+
+// Stops the thread (it leaves after the chunk being read) and waits for it; the first time also the set of the models
+// read
+void early_warm_join(EarlyWarm& E)
+{
+    if (E.thread.joinable())
+    {
+        E.stop.store(true, std::memory_order_relaxed);
+        E.thread.join();
+    }
+    if (E.stopped)
+        return;
+    E.stopped = true;
+    for (size_t i = 0; i < E.names.size(); ++i)
+    {
+        if (E.done[i])
+            E.done_set.insert(E.names[i]);
+    }
+}
+
+// After PreStart of the first level load (its models_Clear(true) empties the session set): the files the early warm-up
+// took are the session's - the prefetch warm-up and the "Model prefetch" thread do not read them again
+void early_warm_merge(EarlyWarm& E)
+{
+    if (E.merged || !E.stopped)
+        return;
+    E.merged = true;
+    if (s_file_prefetch)
+    {
+        std::lock_guard<std::mutex> lk(s_file_prefetch->seen.mutex);
+        s_file_prefetch->seen.paths.insert(E.seen.paths.begin(), E.seen.paths.end());
+    }
+    E.seen.paths.clear(); // the thread is gone: no lock
+}
+
+// PrefetchItems (main): the items of W the early warm-up has read are through - the warm threads skip them, the loads
+// do not wait for them. Not when this warm-up reads the dds and the early one went without them. The number of them.
+u32 early_warm_take(StartupWarm& W)
+{
+    EarlyWarm* E = s_early_warm;
+    if (!E || E->released)
+        return 0;
+    early_warm_join(*E); // a prefetch with no KERNEL:start before it: the hand-off is here
+    early_warm_merge(*E);
+    if (E->done_set.empty() || (W.with_textures && !E->params.with_textures))
+        return 0;
+    W.early.assign(W.names.size(), 0);
+    u32 n = 0;
+    for (size_t i = 0; i < W.names.size(); ++i)
+    {
+        if (!E->done_set.count(W.names[i]))
+            continue;
+        W.early[i] = 1;
+        W.warmed[i].store(1, std::memory_order_relaxed); // the threads start after this
+        ++n;
+    }
+    E->skipped += n;
+    return n;
+}
+
+// PrefetchItems (main), a stage of the first level load after the stop: how long its loads waited for the warm-up
+void early_warm_note(u64 waited_us)
+{
+    if (s_early_warm && s_early_warm->stopped && !s_early_warm->released)
+        s_early_warm->waited_us += waited_us;
+}
+
+void early_warm_stats(const EarlyWarm& E, PrefetchEarlyWarmStats& st)
+{
+    st = {};
+    st.models = static_cast<u32>(E.names.size());
+    for (size_t i = 0; i < E.names.size(); ++i)
+    {
+        if (!E.done[i])
+            continue;
+        ++st.models_read;
+        st.estimate_read += E.cum[i + 1] - E.cum[i];
+    }
+    st.estimate = E.cum.back();
+    st.files = E.files;
+    st.missing = E.missing;
+    st.bytes = E.bytes;
+    st.read_ms = static_cast<u32>((E.end_us > E.start_us ? E.end_us - E.start_us : 0) / 1000);
+    st.end = E.end;
+    st.skipped = E.skipped;
+    st.waited_ms = static_cast<u32>(E.waited_us / 1000);
+}
+
+// ~CModelPool: the exit from the menu or the render going away
+void early_warm_shutdown()
+{
+    if (!s_early_warm)
+        return;
+    early_warm_join(*s_early_warm); // waits for one chunk (or one file open) at most
+    xr_delete(s_early_warm);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -520,12 +1067,6 @@ void startup_warm_thread(StartupWarm* W)
 Lock s_motions_lock;
 
 constexpr u32 kPrefetchMaxLoadThreads = 8; // the serialized parts (shader creation, motions) limit the gain beyond it
-
-u64 prefetch_now_us()
-{
-    using namespace std::chrono;
-    return static_cast<u64>(duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count());
-}
 
 // How far the loads may run ahead of the motions chain (each deferred motions part keeps its ogf open until it runs)
 constexpr size_t kPrefetchMaxMotionsLag = 512;
@@ -555,6 +1096,9 @@ struct PrefetchTop
     };
     xr_vector<Reader> readers; // a stack
     xr_vector<PrefetchMotionsPart> parts;
+    // 50l-weak-cpu-spawn-models.md: a load of the "Model bg load" thread (in play), not of the parallel prefetch - the
+    // parts run on the main thread when it takes the model (bgload_complete)
+    bool background{};
 };
 thread_local PrefetchTop* tl_prefetch_top = nullptr;
 
@@ -582,7 +1126,7 @@ struct ParallelPrefetch
     CModelPool* pool{};
     xr_vector<Load> loads; // in the order of the list
     std::atomic<size_t> next{0}; // the next load a thread takes
-    std::atomic<size_t>* warm_pos{}; // StartupWarm::main_pos: the warm threads read ahead of the loads taken
+    StartupWarm* warm{}; // the warm threads read ahead of the loads taken (null: no warm-up)
 
     std::mutex mutex; // loaded, done, motions_pos, motions_busy, the fields of Load under it
     std::condition_variable cv;
@@ -693,8 +1237,11 @@ void prefetch_load_thread(ParallelPrefetch* P)
             return;
         P->wait_lag(i);
         const ParallelPrefetch::Load& L = P->loads[i]; // key, name, suffix, item: not changed while the threads run
-        if (P->warm_pos)
-            P->warm_pos->store(L.item, std::memory_order_relaxed);
+        if (P->warm)
+        {
+            P->warm->note_main(L.item);
+            P->warm->wait_warmed(L.item); // 50a-stage1-prefetch.md: a slow disk - after the warm-up
+        }
         dxRender_Visual* V;
         PrefetchTop top;
         {
@@ -715,6 +1262,431 @@ void prefetch_load_thread(ParallelPrefetch* P)
     }
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// 50l-weak-cpu-spawn-models.md (plans/optimization_mt): the background base loading, a weak CPU (the hw policy's
+// model_bg_load: cpu tier low / potato, D3D11 with DriverConcurrentCreates). A cold model load costs 100-350 ms of the
+// main thread there, mostly CPU (skin, geometry, shaders, motions). The "Model prefetch" thread reads the files of a
+// creature about to come online (ALife near the online distance, a spawn) and hands its name over to the "Model bg
+// load" thread, which loads the base model the way a load thread of the parallel prefetch does (plan 40): Instance_Load
+// not registered, the motions parts of the model and of its LOD deferred (ModelMotionsDefer).
+//
+// The motions part never runs on that thread: it works on data the live models share - the reference counts of the
+// docked motions (Instance_Duplicate and the destruction of an instance change them under the pool lock, not under the
+// motions lock) and the shared partition (CPartition::load rewrites it, the animation of other models reads it). The
+// thread only docks the omf the model refers to (PreloadMotions: the costly parse of the keys outside the motions lock,
+// the insert under it). The main thread runs the motions part (then cheap) and registers the base at its next
+// DeleteQueue (ModelDeferredClear: before PreRender and FrameMove, no game or render thread runs then), or in the Create
+// that needs the model first. The spawn finds the base in the pool and makes only a copy.
+//
+// Locks: the thread holds no lock across a model. Inside the load it takes what a load thread of the parallel prefetch
+// takes, each for one resource: the pool lock for the search of a child (CreateChild), m_create_lock per shader,
+// m_textures_lock per texture, v_geoms_lock, the FS lock, the motions lock for a lookup / an insert, the smem / LZ /
+// stats locks. On a slow disk the dds of the model are read into the OS cache first, outside every lock, so a texture
+// load under its lock does not wait for the disk. The deletes of the shader registries take m_create_lock now too
+// (ResourceManager). The main thread waits for this thread only in a flush (ClearPool, a device reset, the shutdown): at
+// most one model. Normal priority on purpose, not the background mode / EcoQoS of the file reader: a starved holder of
+// a lock the main thread takes would make main wait (priority inversion on a busy 4-core CPU).
+constexpr u64 kBgLoadFinishUs = 2000; // DeleteQueue: the time for the motions parts and registrations (one at least)
+
+struct BgLoadReady
+{
+    xr_string key; // the pool key (lower case, no extension, no suffix)
+    dxRender_Visual* model{};
+    xr_vector<PrefetchMotionsPart> motions; // the deferred motions parts, in the order the load deferred them
+};
+
+struct ModelBgLoad
+{
+    CModelPool* pool{};
+    std::mutex mutex; // all below. A leaf: taken under ModelFilePrefetch::mutex and ModelPool_Mutex, never the reverse
+    std::condition_variable cv; // the thread: a job or `stop`; a flush / pause: `busy` cleared
+    std::deque<xr_string> queue;
+    size_t spawn_jobs{}; // the first ones of `queue` are of spawns
+    std::unordered_set<xr_string> taken; // queued once (until a flush)
+    xr_string current; // being loaded
+    bool busy{};
+    u32 paused{}; // device resets in progress: no new job
+    xr_vector<BgLoadReady> ready; // loaded, for the main thread to finish
+    std::atomic_bool any_ready{}; // `ready` is not empty (looked at before the lock)
+    std::thread thread;
+    std::atomic_bool stop{};
+};
+ModelBgLoad* s_bgload = nullptr;
+// The bases the thread loaded, registered on the main thread and not used yet (modelpool/bgload/used). ModelPool_Mutex.
+std::unordered_set<xr_string> s_bgload_bases;
+
+bool bgload_enabled()
+{
+#if defined(USE_DX11)
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    return xray::hw::PolicyValid(policy) && policy.model_bg_load != 0;
+#else
+    return false; // GL: the objects of the context are made on its thread only - the files are read ahead, no more
+#endif
+}
+
+void bgload_publish(const ModelBgLoad& B) // under B.mutex
+{
+    xray::perf::SetGauge(xray::perf::Metric::mbg_queue, static_cast<s64>(B.queue.size() + (B.busy ? 1 : 0)));
+}
+
+void bgload_thread(ModelBgLoad* B);
+
+// The "Model prefetch" thread has read the files of a creature's model (under its mutex), or PrefetchFiles asks for one
+// read before. Each name once until a flush; a spawn's job goes ahead of the ALife ones.
+void bgload_offer(const xr_string& name, bool spawn)
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B || B->stop.load(std::memory_order_relaxed) || !bgload_enabled())
+        return;
+    {
+        std::lock_guard<std::mutex> lk(B->mutex);
+        if (B->stop.load(std::memory_order_relaxed))
+            return; // shutting down: no new thread
+        if (!B->taken.insert(name).second)
+        {
+            if (!spawn)
+                return;
+            // a spawn asks for one ALife queued: ahead of the ALife jobs
+            const auto it = std::find(B->queue.begin() + static_cast<std::ptrdiff_t>(B->spawn_jobs), B->queue.end(), name);
+            if (it == B->queue.end())
+                return; // being loaded, loaded or skipped
+            B->queue.erase(it);
+            B->queue.insert(B->queue.begin() + static_cast<std::ptrdiff_t>(B->spawn_jobs), name);
+            ++B->spawn_jobs;
+            return;
+        }
+        if (spawn)
+        {
+            B->queue.insert(B->queue.begin() + static_cast<std::ptrdiff_t>(B->spawn_jobs), name);
+            ++B->spawn_jobs;
+        }
+        else
+            B->queue.push_back(name);
+        bgload_publish(*B);
+        if (!B->thread.joinable())
+            B->thread = Threading::RunThread("Model bg load", &bgload_thread, static_cast<ModelBgLoad*>(B));
+    }
+    B->cv.notify_all();
+}
+
+// Is the base model of this name still to come from the thread (queued, being loaded, or loaded and not registered)?
+bool bgload_pending(const xr_string& name)
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B)
+        return false;
+    std::lock_guard<std::mutex> lk(B->mutex);
+    if (B->current == name || std::find(B->queue.begin(), B->queue.end(), name) != B->queue.end())
+        return true;
+    return std::any_of(B->ready.begin(), B->ready.end(), [&name](const BgLoadReady& r) { return r.key == name; });
+}
+
+// A cold load of the model on another thread (Create): its job is of no use any more. true = the thread had it
+// (queued, being loaded or loaded) - the background load came too late
+bool bgload_cold(const xr_string& name)
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B)
+        return false;
+    std::lock_guard<std::mutex> lk(B->mutex);
+    const auto it = std::find(B->queue.begin(), B->queue.end(), name);
+    if (it != B->queue.end())
+    {
+        if (static_cast<size_t>(it - B->queue.begin()) < B->spawn_jobs)
+            --B->spawn_jobs;
+        B->queue.erase(it);
+        bgload_publish(*B);
+        return true;
+    }
+    return B->current == name ||
+        std::any_of(B->ready.begin(), B->ready.end(), [&name](const BgLoadReady& r) { return r.key == name; });
+}
+
+// A deferred motions part that will not run (or has run): its reader closed
+void bgload_close_part(PrefetchMotionsPart& part)
+{
+    if (!part.copied)
+        FS.r_close(part.data);
+    else
+        xr_delete(part.data);
+    part.data = nullptr;
+}
+
+// The main thread: a loaded model nobody takes - the readers of its motions parts closed, the model released (its
+// motions part never ran: it holds no motions)
+void bgload_free(BgLoadReady& entry)
+{
+    for (PrefetchMotionsPart& part : entry.motions)
+        bgload_close_part(part);
+    entry.motions.clear();
+    if (entry.model)
+    {
+        entry.model->Release();
+        xr_delete(entry.model);
+    }
+}
+
+// The main thread (DeleteQueue) or the thread of the Create that needs the model: its motions parts here (their omf are
+// docked already, PreloadMotions), then the base is registered. nullptr = it became a base meanwhile (loaded cold on
+// another thread): freed.
+dxRender_Visual* bgload_complete(CModelPool& pool, BgLoadReady& entry)
+{
+    ModelPool_mtlock lock;
+    if (pool.Instance_Find(entry.key.c_str()))
+    {
+        bgload_free(entry);
+        PERF_INC(mbg_discarded);
+        return nullptr;
+    }
+    {
+        ZoneScopedN("model_bg_finish");
+        ZoneText(entry.key.c_str(), entry.key.size());
+        PERF_SCOPE(mbg_finish);
+        for (PrefetchMotionsPart& part : entry.motions)
+        {
+            part.model->LoadMotions(part.name.c_str(), part.data); // ModelMotionsScope inside: pool lock -> motions lock
+            bgload_close_part(part);
+        }
+        entry.motions.clear();
+        pool.Instance_Register(entry.key.c_str(), entry.model);
+    }
+    s_bgload_bases.insert(entry.key);
+    dxRender_Visual* V = entry.model;
+    entry.model = nullptr;
+    return V;
+}
+
+// Create (under ModelPool_Mutex), a base not in the pool: the thread's model of this key, finished here
+dxRender_Visual* bgload_take(CModelPool& pool, pcstr key)
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B || !B->any_ready.load(std::memory_order_acquire))
+        return nullptr;
+    BgLoadReady entry;
+    {
+        std::lock_guard<std::mutex> lk(B->mutex);
+        const auto it =
+            std::find_if(B->ready.begin(), B->ready.end(), [key](const BgLoadReady& r) { return r.key == key; });
+        if (it == B->ready.end())
+            return nullptr;
+        entry = std::move(*it);
+        B->ready.erase(it);
+        B->any_ready.store(!B->ready.empty(), std::memory_order_release);
+    }
+    return bgload_complete(pool, entry);
+}
+
+// DeleteQueue (the main thread, ModelDeferredClear): the loaded models, in the order they came, for up to
+// kBgLoadFinishUs (one at least)
+void bgload_finish(CModelPool& pool)
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B || !B->any_ready.load(std::memory_order_acquire))
+        return;
+    const u64 t0 = prefetch_now_us();
+    for (;;)
+    {
+        BgLoadReady entry;
+        {
+            std::lock_guard<std::mutex> lk(B->mutex);
+            if (B->ready.empty())
+                return;
+            entry = std::move(B->ready.front());
+            B->ready.erase(B->ready.begin());
+            B->any_ready.store(!B->ready.empty(), std::memory_order_release);
+        }
+        bgload_complete(pool, entry);
+        if (prefetch_now_us() - t0 >= kBgLoadFinishUs)
+            return;
+    }
+}
+
+// The main thread, no lock of the render held: waits for the load in progress (one model at most), drops the queue and
+// frees the loaded models not finished yet. ClearPool: a level unload, the end of a game.
+void bgload_flush()
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B)
+        return;
+    xr_vector<BgLoadReady> ready;
+    {
+        std::unique_lock<std::mutex> lk(B->mutex);
+        B->cv.wait(lk, [B] { return !B->busy; }); // no new job while the lock is held, none queued after it
+        B->queue.clear();
+        B->spawn_jobs = 0;
+        B->taken.clear(); // the next level may want them again
+        ready.swap(B->ready);
+        B->any_ready.store(false, std::memory_order_release);
+        bgload_publish(*B);
+    }
+    for (BgLoadReady& entry : ready)
+    {
+        bgload_free(entry);
+        PERF_INC(mbg_discarded);
+    }
+}
+
+// A device reset (CRender::reset_begin / reset_end): no load across it. on: waits for the load in progress.
+void bgload_pause(bool on)
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B)
+        return;
+    std::unique_lock<std::mutex> lk(B->mutex);
+    if (on)
+    {
+        ++B->paused;
+        B->cv.wait(lk, [B] { return !B->busy; });
+        return;
+    }
+    if (B->paused)
+        --B->paused;
+    lk.unlock();
+    B->cv.notify_all();
+}
+
+// ~CModelPool, in two steps: the thread first (it reads the session set of the file reader), the state after the file
+// reader, which hands it the models (bgload_offer ignores them once `stop` is set)
+void bgload_shutdown()
+{
+    ModelBgLoad* B = s_bgload;
+    if (!B)
+        return;
+    {
+        std::lock_guard<std::mutex> lk(B->mutex);
+        B->stop.store(true, std::memory_order_relaxed);
+        B->queue.clear();
+        B->spawn_jobs = 0;
+        bgload_publish(*B);
+    }
+    B->cv.notify_all();
+    if (B->thread.joinable())
+        B->thread.join(); // one model at most
+    for (BgLoadReady& entry : B->ready)
+        bgload_free(entry);
+    B->ready.clear();
+    B->any_ready.store(false, std::memory_order_release);
+}
+
+void bgload_delete() { xr_delete(s_bgload); }
+
+// A slow disk: the dds of the model and of its LOD not loaded yet, read into the OS cache before the load (the "Model
+// prefetch" thread reads no dds there, 50i R5) - outside every lock, in the single background I/O slot taken per file
+// (the jobs of the "Model prefetch" thread get in between: a creature's dds are tens of MB, a second and more on a USB
+// HDD); the texture loads of the shader creation then do not wait for the disk under m_textures_lock / m_create_lock
+void bgload_warm_textures(const ModelBgLoad& B, const xr_string& name)
+{
+    const WarmRoots roots = warm_roots_now();
+    if (roots.textures.empty())
+        return;
+    xr_vector<u8> ogf;
+    const auto read_model = [&](const xr_string& rel) {
+        if (!roots.level.empty() && warm_read_whole(roots.level + rel, ogf))
+            return true;
+        return !roots.meshes.empty() && warm_read_whole(roots.meshes + rel, ogf);
+    };
+    if (!read_model(name + ".ogf")) // the "Model prefetch" thread has just read it: from the OS cache
+        return;
+    OgfRefs refs;
+    warm_parse_ogf(ogf, refs, true);
+    if (!refs.lod.empty() && read_model(warm_strip_ext(refs.lod) + ".ogf"))
+        warm_parse_ogf(ogf, refs, false);
+    std::sort(refs.textures.begin(), refs.textures.end());
+    refs.textures.erase(std::unique(refs.textures.begin(), refs.textures.end()), refs.textures.end());
+    WarmSeen* seen = s_file_prefetch ? &s_file_prefetch->seen : nullptr;
+    xr_vector<u8> buf(kWarmChunk);
+    for (const xr_string& t : refs.textures)
+    {
+        if (RImplementation.Resources->_TextureRegistered(t.c_str()))
+            continue; // loaded already: the load finds it
+        const xr_string base = roots.textures + warm_strip_ext(t);
+        for (pcstr ext : { ".dds", "_bump.dds", "_bump#.dds" })
+        {
+            const xr_string path = base + ext;
+            if (seen && !seen->claim(path))
+                continue; // read for another model in this session
+            xray::io::BackgroundIoScope io;
+            if (!io.enter(xray::io::BackgroundIoClient::Model, [&B] { return B.stop.load(std::memory_order_relaxed); }))
+                return; // shutting down
+            warm_read_discard(path, buf, kWarmMaxModelBytes, B.stop);
+        }
+    }
+}
+
+// One job of the thread: the base model of `name` into `out` (out.model stays null when there is nothing to load)
+void bgload_one(ModelBgLoad& B, const xr_string& name, BgLoadReady& out)
+{
+    CModelPool& pool = *B.pool;
+    if (pool.InPool(name.c_str()))
+        return; // a base or a free instance already (loaded meanwhile)
+    // Instance_Load is fatal without the ogf: none - nothing here, the spawn reports it as before
+    string_path file, fn;
+    strconcat(sizeof(file), file, name.c_str(), ".ogf");
+    if (!FS.exist(fn, "$level$", file) && !FS.exist(fn, "$game_meshes$", file))
+        return;
+    ZoneScopedN("model_bg_load");
+    ZoneText(name.c_str(), name.size());
+    PERF_SCOPE(mbg_time);
+    if (xray::io::BackgroundIoSingle())
+        bgload_warm_textures(B, name);
+    PrefetchTop top;
+    top.background = true;
+    tl_prefetch_top = &top;
+    dxRender_Visual* V = pool.Instance_Load(name.c_str(), "", FALSE);
+    tl_prefetch_top = nullptr;
+    out.key = name;
+    out.model = V;
+    out.motions = std::move(top.parts);
+    if (!V)
+        return; // the ogf could not be opened (no motions part deferred then)
+    for (PrefetchMotionsPart& part : out.motions)
+        part.model->PreloadMotions(part.name.c_str(), part.data);
+    PERF_INC(mbg_loaded);
+}
+
+void bgload_thread(ModelBgLoad* B)
+{
+    for (;;)
+    {
+        xr_string name;
+        {
+            std::unique_lock<std::mutex> lk(B->mutex);
+            B->cv.wait(lk, [B] { return B->stop.load(std::memory_order_relaxed) || (!B->paused && !B->queue.empty()); });
+            if (B->stop.load(std::memory_order_relaxed))
+                return;
+            // Not on the loading screen: the prefetch and the preload of the level run then (the main thread, the load
+            // threads); the jobs wait for the play
+            if (modelpool_loading())
+            {
+                B->cv.wait_for(lk, std::chrono::milliseconds(50));
+                continue;
+            }
+            name = std::move(B->queue.front());
+            B->queue.pop_front();
+            if (B->spawn_jobs)
+                --B->spawn_jobs;
+            B->current = name;
+            B->busy = true;
+            bgload_publish(*B);
+        }
+        BgLoadReady entry;
+        bgload_one(*B, name, entry);
+        {
+            std::lock_guard<std::mutex> lk(B->mutex);
+            B->busy = false;
+            B->current.clear();
+            if (entry.model)
+            {
+                B->ready.push_back(std::move(entry));
+                B->any_ready.store(true, std::memory_order_release);
+            }
+            bgload_publish(*B);
+        }
+        B->cv.notify_all(); // a flush / pause waits for `busy` cleared
+    }
+}
+
 // The pool key of a model name: lower case, no extension (as Create builds low_name)
 void model_key(pcstr name, string_path& out)
 {
@@ -728,6 +1700,18 @@ std::string_view model_name_view(const shared_str& name) { return std::string_vi
 } // namespace
 
 bool ModelPoolColdLoad() { return g_modelpool_cold_depth > 0; }
+
+// 50a-stage1-prefetch.md (plans/optimization_mt, plan 50 R3)
+bool ModelPoolDiskSlow() { return disk_slow_by_profile() || s_disk_slow.load(std::memory_order_relaxed); }
+
+bool ModelPoolWarmFile(pcstr path)
+{
+    if (!path || !path[0])
+        return false;
+    static const std::atomic_bool never_stop{ false };
+    xr_vector<u8> buf(kWarmChunk);
+    return warm_read_discard(xr_string(path), buf, type_max<u64>, never_stop) >= 0;
+}
 
 // 40-parallel-prefetch.md
 ModelMotionsScope::ModelMotionsScope()
@@ -748,8 +1732,10 @@ bool ModelMotionsDefer(CKinematicsAnimated* K, pcstr N, IReader* data)
     // before the ones after it. A model loaded from its own ogf (the reader of the innermost Instance_Load(name) on
     // the thread): Instance_Load leaves the ogf open, the chain closes it. A model loaded from a chunk of another file
     // (Instance_Load with a reader, its owner closes the chunk right after): the part reads a copy of the chunk.
+    // 50l-weak-cpu-spawn-models.md: also every motions part of a load of the "Model bg load" thread - the main thread
+    // runs them when it takes the model (bgload_complete)
     PrefetchTop* top = tl_prefetch_top;
-    if (!top || !s_parallel_prefetch || !data)
+    if (!top || !data || (!top->background && !s_parallel_prefetch))
         return false;
     PrefetchMotionsPart part;
     part.model = K;
@@ -769,7 +1755,7 @@ bool ModelMotionsDefer(CKinematicsAnimated* K, pcstr N, IReader* data)
         part.data = xr_new<IReader>(part.copy.data(), part.copy.size(), 0);
         part.copied = true;
     }
-    if (top->readers.size() > 1 || part.copied)
+    if (!top->background && (top->readers.size() > 1 || part.copied))
         s_parallel_prefetch->deferred_nested.fetch_add(1, std::memory_order_relaxed);
     top->parts.push_back(std::move(part));
     return true;
@@ -1036,6 +2022,8 @@ void CModelPool::Destroy()
 
     Models.clear();
     ModelsIndex.clear(); // 36-spawn-model-load.md
+    s_bgload_bases.clear(); // 50l-weak-cpu-spawn-models.md
+    InstanceBytes.clear(); // 50c-commit-growth-analysis.md
 
     // cleanup motions container
     g_pMotionsContainer->clean(false);
@@ -1048,11 +2036,19 @@ CModelPool::CModelPool()
     g_pMotionsContainer = xr_new<motions_container>();
     if (!s_file_prefetch)
         s_file_prefetch = xr_new<ModelFilePrefetch>(); // 36-spawn-model-load.md: the thread starts at the first model
+    if (!s_bgload)
+    {
+        s_bgload = xr_new<ModelBgLoad>(); // 50l-weak-cpu-spawn-models.md: the thread starts at the first model
+        s_bgload->pool = this;
+    }
 }
 
 CModelPool::~CModelPool()
 {
+    early_warm_shutdown(); // 50k-slow-disk-early-prefetch.md: before the session set it may merge into goes
+    bgload_shutdown(); // 50l-weak-cpu-spawn-models.md: its thread before the file reader (it reads its session set)
     file_prefetch_shutdown(); // 36-spawn-model-load.md
+    bgload_delete(); // 50l: after the file reader, which hands it the models
     Destroy();
     xr_delete(g_pMotionsContainer);
 }
@@ -1115,6 +2111,17 @@ dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
             Base = Instance_Find(low_name_suffix);
         }
 
+        // 50l-weak-cpu-spawn-models.md: a base the "Model bg load" thread made - the first use (a spawn found it ready)
+        if (Base && !s_bgload_bases.empty() && s_bgload_bases.erase(low_name_suffix))
+            PERF_INC(mbg_used);
+        // ... or one it has loaded and the main thread has not finished yet (DeleteQueue): finished here, no cold load
+        if (nullptr == Base && !data && !suffix[0])
+        {
+            Base = bgload_take(*this, low_name);
+            if (Base && s_bgload_bases.erase(low_name_suffix))
+                PERF_INC(mbg_used);
+        }
+
         if (nullptr == Base)
         {
             // 2. If not found: a cold load of the ogf (under ModelPool_Mutex), in play / inside a client spawn apart
@@ -1125,17 +2132,48 @@ dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
             PERF_SCOPE_IF(xray::perf::TlSpawn() != 0, modelpool_instance_load_spawn);
             PERF_SCOPE_IF(xray::perf::TlGameEvent() != 0, ge_cold_model_load); // 30-game-events.md
             ModelColdLoadScope cold_scope; // 36-spawn-model-load.md: modelpool/load/*, TlColdModelLoads
-            if (xray::perf::g_perf_metrics_active && s_file_prefetch &&
-                s_file_prefetch->used.load(std::memory_order_relaxed))
+            // 50l: the cold loads in play while the background loading is on; late = the thread had the model
+            if (s_bgload && bgload_enabled() && !modelpool_loading())
             {
-                // 36-spawn-model-load.md: had the "Model prefetch" thread read the files of this model?
-                bool warmed;
+                PERF_INC(mbg_cold);
+                if (bgload_cold(xr_string(low_name)))
+                    PERF_INC(mbg_late);
+            }
+            if (s_file_prefetch && s_file_prefetch->used.load(std::memory_order_relaxed))
+            {
+                // 36-spawn-model-load.md: had the "Model prefetch" thread read the files of this model? (metrics)
+                // 50-smart-engine-hw-profile.md R5: the model is loaded now, its job still in the queue is of no use -
+                // dropped. Without metrics the lock of the queue is not waited for (the thread holds it for a pop only):
+                // when busy the job stays, a needless read but no wait here.
+                ModelFilePrefetch& FP = *s_file_prefetch;
+                const bool metrics = xray::perf::g_perf_metrics_active;
+                std::unique_lock<std::mutex> lk(FP.mutex, std::defer_lock);
+                if (metrics)
+                    lk.lock();
+                else
+                    (void)lk.try_lock();
+                if (lk.owns_lock())
                 {
-                    std::lock_guard<std::mutex> lk(s_file_prefetch->mutex);
-                    warmed = s_file_prefetch->warmed.count(xr_string(low_name)) != 0;
+                    const xr_string key(low_name);
+                    const bool warmed = metrics && FP.warmed.count(key) != 0;
+                    const auto job = std::find_if(FP.queue.begin(), FP.queue.end(),
+                        [&key](const ModelFilePrefetch::Job& j) { return j.name == key; });
+                    const bool dropped = job != FP.queue.end();
+                    if (dropped)
+                    {
+                        if (static_cast<size_t>(job - FP.queue.begin()) < FP.spawn_jobs)
+                            --FP.spawn_jobs; // 50i: one of the spawn jobs at the head
+                        FP.queue.erase(job);
+                        file_prefetch_publish(FP);
+                    }
+                    const size_t pending = FP.queue.size();
+                    lk.unlock();
+                    PERF_ADD_IF(metrics && warmed, mprefetch_cold_warm, 1);
+                    PERF_ADD_IF(metrics && !warmed, mprefetch_cold_miss, 1);
+                    PERF_ADD_IF(dropped, mprefetch_dropped, 1);
+                    if (dropped)
+                        xray::perf::SetGauge(xray::perf::Metric::mprefetch_queue, static_cast<s64>(pending));
                 }
-                PERF_ADD_IF(warmed, mprefetch_cold_warm, 1);
-                PERF_ADD_IF(!warmed, mprefetch_cold_miss, 1);
             }
             if (data)
                 Base = Instance_Load(low_name, suffix, data, TRUE);
@@ -1270,6 +2308,9 @@ void CModelPool::DeleteQueue()
         for (auto& [visual, discard] : local)
             DeleteInternal(visual, discard);
     }
+    // 50l-weak-cpu-spawn-models.md: ModelDeferredClear - the main thread, nothing else runs: the base models the "Model
+    // bg load" thread has loaded get their motions part and go into the pool
+    bgload_finish(*this);
 }
 
 void CModelPool::Discard(dxRender_Visual*& V, BOOL b_complete)
@@ -1333,16 +2374,20 @@ void CModelPool::Prefetch()
     // prefetch visuals
     string256 section;
     strconcat(sizeof(section), section, "prefetch_visuals_", g_pGamePersistent->m_game_params.m_game_type);
-    const CInifile::Sect& sect = pSettings->r_section(section);
+    // 50a-stage1-prefetch.md (plans/optimization_mt): in the global priority order, the models of the prefix that
+    // Prefetch() took from both lists by the budget (plan 50 R1; PrefetchMode::Full - all of it)
+    xr_vector<PrefetchListItem> list;
+    PrefetchListRead(section, list);
+    PrefetchListTake("models", list);
 
     // The pool keys of the list
     xr_vector<ModelPrefetchItem> items;
-    items.reserve(sect.Data.size());
-    for (const CInifile::Item& item : sect.Data)
+    items.reserve(list.size());
+    for (const PrefetchListItem& item : list)
     {
         string_path key;
-        model_key(item.first.c_str(), key);
-        items.push_back({ key, "" });
+        model_key(item.name.c_str(), key);
+        items.push_back({ key, "", item.bytes });
     }
     PrefetchItems(items, "models", true);
     Logging(TRUE);
@@ -1351,21 +2396,72 @@ void CModelPool::Prefetch()
 // 40-parallel-prefetch.md (plans/optimization_mt): IGame_ObjectPool::prefetch - the visuals the Load of the prefetch
 // objects creates, before it, on the load threads. Where the prefetch is sequential (GL) nothing:
 // Load creates them on main, as before.
-void CModelPool::PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals)
+void CModelPool::PrefetchList(const xr_vector<PrefetchModel>& visuals)
 {
     if (visuals.empty())
         return;
     xr_vector<ModelPrefetchItem> items;
     items.reserve(visuals.size());
-    for (const auto& [name, suffix] : visuals)
+    for (const PrefetchModel& visual : visuals)
     {
-        if (!name.size())
+        if (!visual.name.size())
             continue;
         string_path key;
-        model_key(name.c_str(), key);
-        items.push_back({ key, suffix.size() ? suffix.c_str() : "" });
+        model_key(visual.name.c_str(), key);
+        items.push_back({ key, visual.suffix.size() ? visual.suffix.c_str() : "", visual.bytes });
     }
     PrefetchItems(items, "objects", false);
+}
+
+// 50k-slow-disk-early-prefetch.md (plans/optimization_mt): the early warm-up of a slow disk, see EarlyWarm. Main thread.
+bool CModelPool::EarlyWarmStart(const xr_vector<PrefetchModel>& models, const PrefetchEarlyWarmParams& params)
+{
+    if (s_early_warm || models.empty() || !params.lead_bytes)
+        return false; // once per process
+    EarlyWarm* E = xr_new<EarlyWarm>();
+    E->params = params;
+    E->cum.push_back(0);
+    std::unordered_set<xr_string> taken; // a visual of an object can be a line of the model list too
+    for (const PrefetchModel& model : models)
+    {
+        if (!model.name.size())
+            continue;
+        string_path key;
+        model_key(model.name.c_str(), key);
+        if (!key[0] || !taken.insert(xr_string(key)).second)
+            continue;
+        E->names.emplace_back(key);
+        E->cum.push_back(E->cum.back() + model.bytes);
+    }
+    if (E->names.empty())
+    {
+        xr_delete(E);
+        return false;
+    }
+    EarlyWarm& early = *E;
+    early.done.assign(early.names.size(), 0);
+    early.roots = warm_roots_now(); // the prefetch of the first level load takes the same ($level$ is set after it)
+    early.start_us = prefetch_now_us();
+    s_disk_probe.begin(1); // the disk measured by the early reads: the prefetch would find them in the OS cache
+    s_early_warm = E;
+    early.thread = Threading::RunThread("Model early warm", &early_warm_thread, &early);
+    return true;
+}
+
+bool CModelPool::EarlyWarmStop(PrefetchEarlyWarmStats& stats, bool release)
+{
+    stats = {};
+    EarlyWarm* E = s_early_warm;
+    if (!E)
+        return false;
+    early_warm_join(*E);
+    if (release && !E->released)
+    {
+        early_warm_merge(*E); // no prefetch took them (or it did already): the files are the session's all the same
+        E->released = true;
+    }
+    early_warm_stats(*E, stats);
+    return true;
 }
 
 // Loads the models of the list into the pool (for each item: Create(name, suffix) + Delete, an instance stays in Pool).
@@ -1373,11 +2469,13 @@ void CModelPool::PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>
 void CModelPool::PrefetchItems(const xr_vector<ModelPrefetchItem>& items, pcstr label, bool sequential_too)
 {
     ZoneScoped;
-    const int hw_threads = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
 
     // 40-parallel-prefetch.md (plans/optimization_mt): threads that load the models of the list (D3D11 creates its
     // resources free-threaded; on GL the objects of the context are made on its thread only, the load stays
     // sequential). Always on since 2026-10-18 (r__prefetch_mt removed, see plan 41).
+    // 50a-stage1-prefetch.md (plan 50 R3): their number from the hw policy - min(worker pool, 8), none below 2 or
+    // without D3D11 DriverConcurrentCreates (the tester: 8, as min(hw - 1, 8) gave before)
 #if defined(USE_DX11)
     constexpr bool parallel_load_supported = true;
 #else
@@ -1385,7 +2483,7 @@ void CModelPool::PrefetchItems(const xr_vector<ModelPrefetchItem>& items, pcstr 
 #endif
     u32 load_n = 0;
     if (parallel_load_supported)
-        load_n = static_cast<u32>(std::min<int>(hw_threads - 1, static_cast<int>(kPrefetchMaxLoadThreads)));
+        load_n = std::min<u32>(policy.load_threads, kPrefetchMaxLoadThreads);
     if (load_n < 2)
         load_n = 0;
     if (!load_n && !sequential_too)
@@ -1424,17 +2522,61 @@ void CModelPool::PrefetchItems(const xr_vector<ModelPrefetchItem>& items, pcstr 
         }
     }
 
-    // 36-spawn-model-load.md: threads that read the files of the list into the OS cache ahead of the load below, one
-    // per hardware thread but main's and the load threads'. They touch no engine state (see warm_model_files).
+    // 36-spawn-model-load.md: threads that read the files of the list into the OS cache ahead of the load below. They
+    // touch no engine state (see warm_model_files).
+    // 50a-stage1-prefetch.md (plans/optimization_mt): their number from the hw policy (plan 50 R3) - by the disk of
+    // gamedata: NVMe as before (hw - 1 - load threads, at most 16), SATA 4, HDD / USB / network 1 in list order with
+    // the loads after it; one after the warm-up measured the disk slow. How far ahead they read and whether they read
+    // the dds - from the RAM available at the start of the prefetch (R4); no warm-up at all when it is short.
+    const PrefetchWarmLimits limits = PrefetchWarmLimitsNow();
+    const bool slow_profile = disk_slow_by_profile();
+    int warm_n = limits.lead_bytes ? std::max(1, static_cast<int>(policy.warm_threads)) : 0;
+    if (warm_n > 1 && (slow_profile || s_disk_slow.load(std::memory_order_relaxed)))
+        warm_n = 1;
     StartupWarm warm;
+    u32 early_n = 0; // 50k-slow-disk-early-prefetch.md: items the early warm-up read at the menu
     xr_vector<std::thread> warm_threads;
-    const int warm_n = std::max(1, hw_threads - 1 - static_cast<int>(load_n));
     if (warm_n > 0)
     {
+        if (s_file_prefetch)
+            warm.seen = &s_file_prefetch->seen; // 50-smart-engine-hw-profile.md R5: one set for the whole session
         warm.roots = warm_roots_now();
         warm.names.reserve(items.size());
-        for (const ModelPrefetchItem& item : items)
-            warm.names.push_back(item.name);
+        warm.cum.resize(items.size() + 1);
+        warm.cum[0] = 0;
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            warm.names.push_back(items[i].name);
+            warm.cum[i + 1] = warm.cum[i] + items[i].bytes;
+        }
+        warm.lead_bytes = limits.lead_bytes;
+        warm.with_textures = limits.with_textures;
+        warm.slow_start = slow_profile;
+        warm.warmed.reset(new std::atomic<u8>[items.size() + 1]);
+        for (size_t i = 0; i <= items.size(); ++i)
+            warm.warmed[i].store(0, std::memory_order_relaxed);
+        // what nobody loads: with the load threads - no load of theirs; sequential - a repeat or already in the pool
+        warm.loaded_already.assign(items.size() + 1, 0);
+        if (load_n)
+        {
+            for (size_t i = 0; i < items.size(); ++i)
+                warm.loaded_already[i] = item_load[i] < 0 ? 1 : 0;
+        }
+        else
+        {
+            ModelPool_mtlock lock;
+            std::unordered_set<xr_string> taken;
+            for (size_t i = 0; i < items.size(); ++i)
+            {
+                pcstr key = keys[i].c_str();
+                if (!items[i].name.size() || !taken.insert(keys[i]).second || Pool.find(key) != Pool.end() ||
+                    Instance_Find(key))
+                    warm.loaded_already[i] = 1;
+            }
+        }
+        early_n = early_warm_take(warm); // 50k-slow-disk-early-prefetch.md: read at the menu
+        warm.running.store(static_cast<u32>(warm_n), std::memory_order_release);
+        s_disk_probe.begin(static_cast<u32>(warm_n));
         for (int t = 0; t < warm_n; ++t)
             warm_threads.emplace_back(Threading::RunThread("Model warm", &startup_warm_thread, &warm));
     }
@@ -1447,7 +2589,7 @@ void CModelPool::PrefetchItems(const xr_vector<ModelPrefetchItem>& items, pcstr 
     if (load_n)
     {
         P.pool = this;
-        P.warm_pos = &warm.main_pos;
+        P.warm = warm_n > 0 ? &warm : nullptr;
         P.loaded.assign(P.loads.size(), 0);
         P.done.assign(P.loads.size(), 0);
         s_parallel_prefetch = &P;
@@ -1458,8 +2600,11 @@ void CModelPool::PrefetchItems(const xr_vector<ModelPrefetchItem>& items, pcstr 
     u64 main_wait_us = 0;
     for (size_t pos = 0; pos < items.size(); ++pos)
     {
-        if (!load_n)
-            warm.main_pos.store(pos, std::memory_order_relaxed); // with the load threads they move it
+        if (!load_n && warm_n > 0)
+        {
+            warm.note_main(pos); // with the load threads they move it
+            warm.wait_warmed(pos); // 50a-stage1-prefetch.md: a slow disk - after the warm-up
+        }
 
         // 40-parallel-prefetch.md: the model a load thread loaded for this item becomes the base now, in the order of
         // the list, and Create below makes the instance from it - as the sequential load did after its own load
@@ -1521,7 +2666,25 @@ void CModelPool::PrefetchItems(const xr_vector<ModelPrefetchItem>& items, pcstr 
         Msg("* [prefetch] %s: %d warm threads read %u files, %u MB (%u missing); %u items %s got to first", label,
             warm_n, warm.files.load(), static_cast<u32>(warm.bytes.load() / (1024 * 1024)), warm.missing.load(),
             warm.behind.load(), load_n ? "the load threads" : "main");
+        // 50a-stage1-prefetch.md: the warm-up limits (plan 50 R3 / R4) and, on a slow disk, how long the loads waited
+        Msg("* [prefetch] %s: warm lead %u MB of %u MB listed, dds %s, disk %s; loads waited for the warm-up %u ms",
+            label, static_cast<u32>(warm.lead_bytes / (1024 * 1024)), static_cast<u32>(warm.cum.back() / (1024 * 1024)),
+            warm.with_textures ? "on" : "off",
+            !warm.slow() ? "fast" : warm.slow_start ? "slow (hw profile), 1 warm thread" :
+                                                      "measured slow, 1 warm thread from then on",
+            static_cast<u32>(warm.waited_us.load() / 1000));
+        // 50k-slow-disk-early-prefetch.md: the part of the stage the early warm-up read at the menu
+        early_warm_note(warm.waited_us.load());
+        if (early_n)
+        {
+            Msg("* [prefetch] %s: %u of %u items were read at the menu by the early warm-up", label, early_n,
+                static_cast<u32>(items.size()));
+        }
     }
+    else
+        Msg("* [prefetch] %s: no warm-up (little RAM available, see the [prefetch] mode line)", label);
+    if (sequential_too)
+        s_disk_probe.finish(); // the last stage of the prefetch: decide on the files read so far
 }
 
 // 36-spawn-model-load.md: main thread. Loads the model into the pool unless it is there (a base or a free instance) or
@@ -1552,24 +2715,84 @@ bool CModelPool::Preload(LPCSTR name)
 }
 
 // 36-spawn-model-load.md: any thread. Queues the files of the model for the "Model prefetch" thread, once per session.
-void CModelPool::PrefetchFiles(LPCSTR name, u32 source)
+// 50-smart-engine-hw-profile.md R5 (plans/optimization_mt 49, W5): not a model with a base or a free instance in the
+// pool - its files were read when it was loaded (the thread used to read 1.7-2.8 GB of such models per session).
+// 50i-stage3-slow-disk-io.md (R6, R7): on a slow disk the job of a spawn (source 1) goes ahead of the ALife jobs, and a
+// spawn asking for a model ALife queued moves its job there. false = put off, the pool lock was held (asked again).
+bool CModelPool::PrefetchFiles(LPCSTR name, u32 source)
 {
     if (!name || !name[0] || !s_file_prefetch)
-        return;
+        return true;
     string_path low_name;
     model_key(name, low_name);
     ModelFilePrefetch& P = *s_file_prefetch;
+    // 50l-weak-cpu-spawn-models.md: source bit 2 - a creature's model, its base model may be loaded in the background
+    // (a weak CPU, D3D11; not a '#' name - ClearPool(FALSE) frees those bases); the spawn jobs go first there too
+    const bool from_spawn = (source & 1) != 0;
+    const bool bg_load = (source & 2) != 0 && bgload_enabled() && !strchr(low_name, '#');
+    const bool spawn_first = from_spawn && (xray::io::BackgroundIoSingle() || bgload_enabled());
+    {
+        std::lock_guard<std::mutex> lk(P.mutex);
+        if (P.stop.load(std::memory_order_relaxed))
+            return true;
+        if (P.queued.count(xr_string(low_name)))
+        {
+            if (spawn_first && file_prefetch_promote(P, xr_string(low_name)))
+                PERF_INC(mprefetch_spawn_first);
+            if (bg_load)
+            {
+                // 50l: read before (as an item, or before a level change dropped its background load): now
+                P.bg_names.insert(xr_string(low_name));
+                if (P.warmed.count(xr_string(low_name)))
+                    bgload_offer(xr_string(low_name), from_spawn);
+            }
+            return true; // asked before: queued, read or skipped
+        }
+    }
+
+    // In the pool? Its lock is not waited for: it is held over a whole cold load (tens of ms) on main or the Game
+    // thread, and this runs in the ALife update and in ProcessGameEvents. When busy nothing now - the callers ask
+    // again (ALife on every update of an object within the margin, ProcessGameEvents on every frame a spawn stays
+    // deferred). A thread holding it already gets it (recursive).
+    const shared_str pool_key(low_name); // made outside the lock
+    if (!ModelPool_Mutex.TryEnter())
+    {
+        PERF_INC(mprefetch_busy);
+        return false;
+    }
+    const bool loaded = Pool.find(pool_key) != Pool.end() || Instance_Find(low_name);
+    ModelPool_Mutex.Leave();
+
     size_t pending;
     {
         std::lock_guard<std::mutex> lk(P.mutex);
+        // A loaded model goes to `queued` too: a base stays in the pool for the session as a rule (ClearPool(FALSE)
+        // frees the bases of the '#' names only), it is not looked up in the pool on every ask
         if (P.stop.load(std::memory_order_relaxed) || !P.queued.insert(xr_string(low_name)).second)
-            return;
+            return true;
+        if (loaded)
+        {
+            PERF_INC(mprefetch_skipped);
+            return true;
+        }
         if (P.roots.meshes.empty())
             P.roots = warm_roots_now();
         ModelFilePrefetch::Job job;
         job.name = low_name;
         job.level = warm_root("$level$");
-        P.queue.push_back(std::move(job));
+        job.spawn = spawn_first;
+        if (bg_load)
+            P.bg_names.insert(job.name); // 50l: loaded in the background once read
+        if (spawn_first)
+        {
+            // 50i: behind the spawn jobs queued before, ahead of the ALife ones
+            P.queue.insert(P.queue.begin() + static_cast<std::ptrdiff_t>(P.spawn_jobs), std::move(job));
+            ++P.spawn_jobs;
+            PERF_INC(mprefetch_spawn_first);
+        }
+        else
+            P.queue.push_back(std::move(job));
+        file_prefetch_publish(P);
         pending = P.queue.size();
         if (!P.thread.joinable())
             P.thread = Threading::RunThread("Model prefetch", &file_prefetch_thread, &P);
@@ -1577,17 +2800,63 @@ void CModelPool::PrefetchFiles(LPCSTR name, u32 source)
     }
     P.cv.notify_one();
     PERF_INC(mprefetch_queued);
-    PERF_ADD_IF(source == 0, mprefetch_alife, 1);
-    PERF_ADD_IF(source == 1, mprefetch_deferred, 1);
+    PERF_ADD_IF(!from_spawn, mprefetch_alife, 1);
+    PERF_ADD_IF(from_spawn, mprefetch_deferred, 1);
     xray::perf::SetGauge(xray::perf::Metric::mprefetch_queue, static_cast<s64>(pending));
+    return true;
 }
+
+// 50i-stage3-slow-disk-io.md (plans/optimization_mt, plan 50 R6): main, a slow disk. Asks as a spawn does (source 1:
+// ahead of the ALife jobs) and tells whether the files of the model are still to be read by the "Model prefetch"
+// thread. true = queued or being read, or the pool lock was held and it is not known yet (the caller asks again next
+// frame); false = in the pool, read already, its job dropped, or no prefetch thread.
+bool CModelPool::PrefetchPending(LPCSTR name)
+{
+    if (!name || !name[0] || !s_file_prefetch)
+        return false;
+    if (!PrefetchFiles(name, 1))
+        return true;
+    string_path low_name;
+    model_key(name, low_name);
+    const xr_string key(low_name);
+    ModelFilePrefetch& P = *s_file_prefetch;
+    std::lock_guard<std::mutex> lk(P.mutex);
+    if (P.stop.load(std::memory_order_relaxed))
+        return false;
+    if (file_prefetch_pending(P, key))
+        return true;
+    // 50l-weak-cpu-spawn-models.md: a creature's model - and until its base model is in the pool (the background
+    // loading; ModelFilePrefetch::mutex -> the loader's mutex, the order the reader hands models over in)
+    return P.bg_names.count(key) != 0 && bgload_pending(key);
+}
+
+// 50l-weak-cpu-spawn-models.md: any thread; a base or a free instance of the key (lower case, no extension + suffix)
+bool CModelPool::InPool(LPCSTR key)
+{
+    if (!key || !key[0])
+        return false;
+    ModelPool_mtlock lock;
+    return Pool.find(key) != Pool.end() || Instance_Find(key);
+}
+
+// 50l: the main thread, a device reset (CRender::reset_begin / reset_end) - no background model load across it
+void CModelPool::BackgroundLoadPause(bool on) { bgload_pause(on); }
 
 void CModelPool::ClearPool(BOOL b_complete)
 {
-    ModelPool_mtlock lock;
-    for (auto& v : Pool)
-        Discard(v.second, b_complete);
-    Pool.clear();
+    // 50l-weak-cpu-spawn-models.md: the background loading stops for the unload (the load in progress ends first,
+    // outside the pool lock - it may need it); what it has loaded and the main thread has not finished is freed
+    bgload_flush();
+    {
+        ModelPool_mtlock lock;
+        for (auto& v : Pool)
+            Discard(v.second, b_complete);
+        Pool.clear();
+        if (b_complete)
+            s_bgload_bases.clear();
+    }
+    if (b_complete)
+        file_prefetch_reset(); // 50-smart-engine-hw-profile.md R5
 }
 
 dxRender_Visual* CModelPool::CreatePE(PS::CPEDef* source)
@@ -1661,6 +2930,157 @@ void CModelPool::memory_stats(u32& vb_mem_video, u32& vb_mem_system, u32& ib_mem
         vb_mem_video += vis_ptr->m_fast->p_rm_Vertices->GetVideoMemoryUsage();
         vb_mem_system += vis_ptr->m_fast->p_rm_Vertices->GetSystemMemoryUsage();
     }
+}
+
+namespace
+{
+// 50c-commit-growth-analysis.md (plans/optimization_mt): the estimated bytes one instance of the visual holds - what
+// Instance_Duplicate allocates for it (the same for a base model and for each of its duplicates):
+// - the object: sizeof of the class Instance_Create makes for its type;
+// - CKinematics: the bone instances (bones x sizeof(CBoneInstance)); CKinematicsAnimated also the blend instances
+//   (bones x sizeof(CBlendInstance)) and its copy of the motion slots (slots x (the slot + bones x a MotionVec
+//   pointer));
+// - a hierarchy: the child pointers and the children, duplicated as well; a skeleton: its LOD, duplicated too.
+// Not counted: the shared data (geometry, VB / IB, bones, motions, user data), the wallmarks and additional bone
+// transforms of a live instance, the allocator rounding of each block, the Registry / Pool nodes. CKinematics::mem_usage
+// is no help: sizeof twice for an animated one, no children, no blend instances.
+size_t modelpool_instance_bytes(dxRender_Visual* V, u32 depth)
+{
+    if (!V || depth > 8)
+        return 0;
+    size_t bytes;
+    bool hierarchy = false;
+    switch (V->Type)
+    {
+    case MT_NORMAL: bytes = sizeof(Fvisual); break;
+    case MT_HIERRARHY:
+        bytes = sizeof(FHierrarhyVisual);
+        hierarchy = true;
+        break;
+    case MT_PROGRESSIVE: bytes = sizeof(FProgressive); break;
+    case MT_SKELETON_ANIM:
+        bytes = sizeof(CKinematicsAnimated);
+        hierarchy = true;
+        break;
+    case MT_SKELETON_RIGID:
+        bytes = sizeof(CKinematics);
+        hierarchy = true;
+        break;
+    case MT_SKELETON_GEOMDEF_PM: bytes = sizeof(CSkeletonX_PM); break;
+    case MT_SKELETON_GEOMDEF_ST: bytes = sizeof(CSkeletonX_ST); break;
+    case MT_PARTICLE_EFFECT: bytes = sizeof(PS::CParticleEffect); break;
+    case MT_PARTICLE_GROUP: bytes = sizeof(PS::CParticleGroup); break;
+#ifndef _EDITOR
+    case MT_LOD:
+        bytes = sizeof(FLOD);
+        hierarchy = true;
+        break;
+    case MT_TREE_ST: bytes = sizeof(FTreeVisual_ST); break;
+    case MT_TREE_PM: bytes = sizeof(FTreeVisual_PM); break;
+#endif
+    default: bytes = sizeof(dxRender_Visual); break;
+    }
+    if (hierarchy)
+    {
+        const FHierrarhyVisual* H = static_cast<const FHierrarhyVisual*>(V); // Instance_Create made it by the type
+        bytes += H->children.size() * sizeof(dxRender_Visual*);
+        for (dxRender_Visual* child : H->children)
+            bytes += modelpool_instance_bytes(child, depth + 1);
+    }
+    if (CKinematics* K = PCKinematics(V))
+    {
+        const size_t bone_count = K->LL_BoneCount();
+        bytes += bone_count * sizeof(CBoneInstance);
+        if (CKinematicsAnimated* A = PKinematicsAnimated(V))
+        {
+            bytes += bone_count * sizeof(CBlendInstance);
+            bytes += A->LL_MotionsSlotCount() *
+                (sizeof(shared_motions) + sizeof(BoneMotionsVec) + bone_count * sizeof(MotionVec*));
+        }
+        bytes += modelpool_instance_bytes(K->m_lod, depth + 1);
+    }
+    return bytes;
+}
+} // namespace
+
+void CModelPool::memory_counts(RenderMemoryStats& stats, bool no_wait)
+{
+    CTimer timer;
+    timer.Start();
+    // Under ModelPool_Mutex. The bytes of an instance per model name, cached (InstanceBytes): the first count of a
+    // model walks one instance (its base or a free one), later counts only look it up - per call a pass over Models
+    // (a vector), a lookup per base with instances and per run of one name in Pool (a multimap sorted by name)
+    const auto count = [&]
+    {
+        const auto instance_bytes = [this](const shared_str& name, dxRender_Visual* V) -> u64
+        {
+            const auto [it, inserted] = InstanceBytes.try_emplace(name, 0);
+            if (inserted)
+                it->second = static_cast<u32>(modelpool_instance_bytes(V, 0));
+            return it->second;
+        };
+        stats.models_valid = true;
+        stats.model_bases = static_cast<u32>(Models.size());
+        stats.model_bases_unref = 0;
+        stats.model_instance_refs = 0;
+        stats.model_instance_bytes = 0;
+        for (const ModelDef& md : Models)
+        {
+            if (0 == md.refs)
+            {
+                ++stats.model_bases_unref;
+                continue;
+            }
+            // refs: the duplicates of this base still in Registry (Instance_Duplicate adds one, Discard takes it)
+            stats.model_instance_refs += md.refs;
+            stats.model_instance_bytes += md.refs * instance_bytes(md.name, md.model);
+        }
+        stats.model_pool = static_cast<u32>(Pool.size());
+        stats.model_instances = static_cast<u32>(Registry.size());
+        stats.model_pool_bytes = 0;
+        const str_value* run_name = nullptr;
+        u64 run_bytes = 0;
+        for (const auto& [name, visual] : Pool)
+        {
+            if (name._get() != run_name)
+            {
+                run_name = name._get();
+                run_bytes = instance_bytes(name, visual);
+            }
+            stats.model_pool_bytes += run_bytes;
+        }
+
+        size_t motions = 0, motions_unref = 0;
+        if (g_pMotionsContainer)
+        {
+            // dock() of a prefetch load thread
+            if (!no_wait)
+                s_motions_lock.Enter();
+            else if (!s_motions_lock.TryEnter())
+                return;
+            g_pMotionsContainer->stats(motions, motions_unref);
+            s_motions_lock.Leave();
+        }
+        stats.motions_valid = true;
+        stats.motions = static_cast<u32>(motions);
+        stats.motions_unref = static_cast<u32>(motions_unref);
+    };
+    if (no_wait)
+    {
+        // The [mem] line in play: the pool lock is held over a whole cold load (tens of ms, main or the Game thread) -
+        // when busy no model fields this time rather than a wait on main. Recursive: a thread holding it gets it.
+        if (ModelPool_Mutex.TryEnter())
+        {
+            count();
+            ModelPool_Mutex.Leave();
+        }
+    }
+    else
+    {
+        ModelPool_mtlock lock;
+        count();
+    }
+    stats.models_ms = timer.GetElapsed_sec() * 1000.f;
 }
 
 #ifdef _EDITOR

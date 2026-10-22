@@ -21,12 +21,65 @@
 #include "xrCore/Threading/Lock.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
 #include "Crypto/trivial_encryptor.h"
+#include "xrCore/Platform/HwProfile_impl.h"
+#include "xrCore/Profiling/StartupMarks.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
+
+#include <atomic>
 
 constexpr size_t VFS_STANDARD_FILE = std::numeric_limits<size_t>::max();
 
 const u32 BIG_FILE_READER_WINDOW_SIZE = 1024 * 1024;
 
 xr_unique_ptr<CLocatorAPI> xr_FS;
+
+namespace
+{
+// 50z1 (plans/optimization_mt/50z1-startup-markers-fs-index.md): appdata subfolders the startup scan leaves out
+// (thousands of files and hundreds of folders: on a USB HDD every folder costs a seek). Who reads them (the journal
+// lists every call):
+//  shaders_cache_oxr   - FS.exist (Virtual) per shader, then r_open: served by lazy_register
+//  cached_dyn_textures - FS.exist (Any), r_open, w_close; dir_delete on a cache reset: served by lazy_scan
+//  cdb_cache           - FS.exist (Virtual) per level, then r_open: lazy_register
+//  crashreports, captures, cache (plugin shadow copies) - direct OS / std::filesystem calls only
+constexpr pcstr LAZY_APPDATA_DIRS[] = { "shaders_cache_oxr", "cached_dyn_textures", "cdb_cache", "crashreports",
+    "captures", "cache" };
+constexpr size_t LAZY_ROOTS_MAX = std::size(LAZY_APPDATA_DIRS);
+
+// The spelling Register stores names in
+void NormalizeIndexName(string_path& dest, pcstr name)
+{
+    xr_strcpy(dest, sizeof dest, name);
+    xr_fs_strlwr(dest);
+    restore_path_separators(dest);
+}
+} // namespace
+
+// An appdata cache the startup scan left out
+struct CLocatorAPI::LazyRoot
+{
+    string_path path{}; // as the index names it: lower case (Windows), '\' separators, the trailing delimiter
+    size_t length{};
+    // Enumerated in full (lazy_scan, a rescan): from then on the index knows the folder like any other
+    std::atomic<bool> scanned{ false };
+};
+
+struct CLocatorAPI::IndexState
+{
+    // Directories the fsgame.ltx pass of _initialize has enumerated: name -> enumerated with the subfolders.
+    // Only while that pass runs (initializing).
+    xr_map<xr_string, bool> enumerated;
+    bool initializing{};
+
+    LazyRoot lazy[LAZY_ROOTS_MAX];
+    size_t lazy_count{}; // set in _initialize before any other thread uses FS, read-only afterwards
+
+    // For the "FS: index ..." line
+    u32 dirs_enumerated{};
+    u32 dirs_repeated{};
+    u32 dirs_lazy{};
+};
 
 #ifdef _EDITOR
 static constexpr pcstr FSLTX = "fs.ltx"
@@ -179,6 +232,7 @@ CLocatorAPI::CLocatorAPI() :
 #endif
     m_iLockRescan = 0;
     dwOpenCounter = 0;
+    m_index_state = xr_new<IndexState>();
 }
 
 CLocatorAPI::~CLocatorAPI()
@@ -186,6 +240,7 @@ CLocatorAPI::~CLocatorAPI()
     VERIFY(0 == m_iLockRescan);
     xr_delete(m_auth_lock);
     xr_delete(m_files_lock);
+    xr_delete(m_index_state);
 }
 
 const CLocatorAPI::file* CLocatorAPI::RegisterExternal(pcstr name)
@@ -225,6 +280,11 @@ const CLocatorAPI::file* CLocatorAPI::Register(
     if (I != m_files.end())
     {
         //. Msg("-- file already scanned [%s]", I->name);
+        // 50z1: an archive entry over a loose one. Walking that loose folder again would put the loose one back, so
+        // the walks already done must not be skipped any more (Recurse).
+        if (m_index_state->initializing && vfs != VFS_STANDARD_FILE && I->vfs == VFS_STANDARD_FILE)
+            m_index_state->enumerated.clear();
+
         desc.name = I->name;
 
         // sad but true, performance option
@@ -249,7 +309,7 @@ const CLocatorAPI::file* CLocatorAPI::Register(
     {
         _splitpath(temp, path, folder, nullptr, nullptr);
         xr_strcat(path, folder);
-        if (!exist(path))
+        if (file_find_it(path) == m_files.end()) // exist(path) without the lazy lookup of 50z1
         {
             desc.name = xr_strdup(path);
             desc.vfs = VFS_STANDARD_FILE;
@@ -702,12 +762,46 @@ bool CLocatorAPI::Recurse(pcstr path)
 {
     ZoneScoped;
 
+    IndexState& state = *m_index_state;
+    string_path key; // the directory as the index names it
+    NormalizeIndexName(key, path);
+
+    LazyRoot* lazy = find_lazy_root(key);
+    if (lazy && state.initializing)
+    {
+        // 50z1: an appdata cache, enumerated on demand (lazy_register / lazy_scan). Only the folder itself, the way
+        // the walk leaves it ("insert self" below).
+        ++state.dirs_lazy;
+        if (path[0] != '\0')
+            Register(path, VFS_STANDARD_FILE, 0, 0, 0, 0, 0);
+        return true;
+    }
+
+    if (state.initializing)
+    {
+        // 50z1: already enumerated through another alias of fsgame.ltx (textures, meshes, sounds... under
+        // $game_data$). The second walk would register the same entries with the same data: the loose files of a
+        // folder do not change between two lines of fsgame.ltx, an archive entry over a loose one clears the memo
+        // (Register), and the folder entries end up as "insert self" either way.
+        const auto it = state.enumerated.find(key);
+        if (it != state.enumerated.end() && (it->second || bNoRecurse))
+        {
+            ++state.dirs_repeated;
+            return true;
+        }
+    }
+
     string_path scanPath = { 0 };
+#if !defined(XR_PLATFORM_WINDOWS)
     xr_strcpy(scanPath, sizeof scanPath, path);
     xr_strcat(scanPath, ".xrignore");
     struct stat buffer;
     if (!stat(scanPath, &buffer))
         return true;
+#endif
+    // Windows: .xrignore is looked for in the enumeration below instead of a stat per folder (one more lookup on
+    // the disk for every folder, a miss almost always)
+    bool xrignore = false;
     xr_strcpy(scanPath, sizeof scanPath, path);
     xr_strcat(scanPath, "*");
     xr_finddata_t findData;
@@ -772,6 +866,10 @@ bool CLocatorAPI::Recurse(pcstr path)
 #else
 #   error Select or add implementation for your platform
 #endif
+#ifdef XR_PLATFORM_WINDOWS
+        if (0 == xr_stricmp(findData.name, ".xrignore"))
+            xrignore = true;
+#endif
         string1024 fullPath;
         bool ignore = false;
         if (m_Flags.test(flNeedCheck))
@@ -808,6 +906,15 @@ bool CLocatorAPI::Recurse(pcstr path)
 #else
 #   error Select or add implementation for your platform
 #endif
+    if (xrignore)
+    {
+        // The folder asks to be left out: nothing of it is registered, the folder itself either
+        rec_files.erase(rec_files.begin() + oldSize, rec_files.end());
+        return true;
+    }
+    if (state.initializing)
+        ++state.dirs_enumerated;
+
     size_t newSize = rec_files.size();
     if (newSize > oldSize)
     {
@@ -823,7 +930,150 @@ bool CLocatorAPI::Recurse(pcstr path)
     if (path[0] != '\0')
         Register(path, VFS_STANDARD_FILE, 0, 0, 0, 0, 0);
 
+    if (state.initializing)
+    {
+        bool& recursive = state.enumerated[key];
+        recursive = recursive || !bNoRecurse;
+    }
+    else if (lazy && !bNoRecurse && 0 == xr_strcmp(key, lazy->path))
+    {
+        // A lazy appdata cache walked in full (lazy_scan, rescan_path): the index has all of it now
+        lazy->scanned.store(true, std::memory_order_release);
+    }
+
     return true;
+}
+
+CLocatorAPI::LazyRoot* CLocatorAPI::find_lazy_root(pcstr normalized_name) const
+{
+    for (size_t i = 0; i < m_index_state->lazy_count; ++i)
+    {
+        LazyRoot& root = m_index_state->lazy[i];
+        if (root.scanned.load(std::memory_order_acquire))
+            continue;
+        if (0 == strncmp(normalized_name, root.path, root.length))
+            return &root;
+    }
+    return nullptr;
+}
+
+// 50z1: an index miss inside an appdata cache the startup scan left out. Asks the OS about this one name and
+// registers what the startup walk would have registered for it (a visible file or folder, the same size and time:
+// the same CRT call on Windows, the same stat on the other platforms). True when the name is in the index now.
+// Not seen here, unlike the walk: a .xrignore or a hidden folder between the cache root and the name.
+bool CLocatorAPI::lazy_register(pcstr name)
+{
+    if (0 == m_index_state->lazy_count || !name || !name[0])
+        return false;
+    // Every miss of FS.exist comes here (textures are looked for in several aliases): the cheap test first
+    if (!find_lazy_root(name))
+        return false;
+
+    string_path normalized;
+    NormalizeIndexName(normalized, name);
+    if (0 != xr_strcmp(normalized, name))
+        return false; // the index would not have matched this spelling either
+    if (ignore_name(normalized))
+        return false; // ProcessOne drops these
+
+    const size_t length = xr_strlen(normalized);
+    const bool folder_name = normalized[length - 1] == _DELIMITER;
+    string_path os_name;
+    xr_strcpy(os_name, sizeof os_name, normalized);
+    if (folder_name)
+        os_name[length - 1] = '\0';
+
+#if defined(XR_PLATFORM_WINDOWS)
+    _wfinddata64i32_t data{};
+    const intptr_t handle = _wfindfirst(XRay::Utf8::ToWide(os_name).c_str(), &data);
+    if (handle == -1)
+        return false;
+    _findclose(handle);
+    if (data.attrib & _A_HIDDEN)
+        return false;
+    const bool folder = (data.attrib & _A_SUBDIR) != 0;
+    const u32 size = static_cast<_fsize_t>(data.size);
+    const u32 time_write = (u32)data.time_write;
+#elif defined(XR_PLATFORM_POSIX)
+    convert_path_separators(os_name);
+    struct stat fi;
+    if (0 != stat(os_name, &fi))
+        return false;
+    if ((fi.st_mode & S_IFMT) != S_IFDIR && (fi.st_mode & S_IFMT) != S_IFREG)
+        return false; // "hidden" for the walk
+    const bool folder = (fi.st_mode & S_IFMT) == S_IFDIR;
+    const u32 size = static_cast<_fsize_t>(fi.st_size);
+#   ifdef XR_PLATFORM_APPLE
+    const u32 time_write = (u32)fi.st_mtimespec.tv_sec;
+#   else
+    const u32 time_write = (u32)fi.st_mtim.tv_sec;
+#   endif
+#else
+#   error Select or add implementation for your platform
+#endif
+
+    if (folder != folder_name)
+        return false; // a folder is named with the trailing delimiter in the index, a file without
+
+    // The folders between the cache root and the name first, as the walk leaves them ("insert self"): Register would
+    // add the missing ones with another modif
+    const LazyRoot* root = find_lazy_root(normalized);
+    for (size_t pos = root ? root->length : length; pos + 1 < length; ++pos)
+    {
+        if (normalized[pos] != _DELIMITER)
+            continue;
+        string_path parent;
+        xr_strcpy(parent, sizeof parent, normalized);
+        parent[pos + 1] = '\0';
+        Register(parent, VFS_STANDARD_FILE, 0, 0, 0, 0, 0);
+    }
+
+    if (folder)
+        Register(normalized, VFS_STANDARD_FILE, 0, 0, 0, 0, 0); // "insert self" of the walk
+    else
+        Register(normalized, VFS_STANDARD_FILE, 0, 0, size, size, time_write); // ProcessOne
+    return true;
+}
+
+// 50z1: a listing over (or inside) an appdata cache the startup scan left out: the cache is enumerated now, once,
+// so the listing sees what the startup index would have had.
+void CLocatorAPI::lazy_scan(pcstr path, bool root_only)
+{
+    if (0 == m_index_state->lazy_count || !path)
+        return;
+
+    string_path normalized;
+    NormalizeIndexName(normalized, path);
+    const size_t length = xr_strlen(normalized);
+
+    for (size_t i = 0; i < m_index_state->lazy_count; ++i)
+    {
+        LazyRoot& root = m_index_state->lazy[i];
+        if (root.scanned.load(std::memory_order_acquire))
+            continue;
+        // The listing is inside the cache, or the cache is inside the listed tree (a listing matches entries by
+        // the prefix). A root-only listing above the cache sees only its folder entry, which is registered.
+        const bool inside = 0 == strncmp(normalized, root.path, root.length);
+        const bool above = !root_only && length < root.length && 0 == strncmp(normalized, root.path, length);
+        if (!inside && !above)
+            continue;
+
+        ScopeLock files_scope(m_files_lock); // Recurse -> Register locks it again: recursive
+        if (root.scanned.load(std::memory_order_acquire))
+            continue; // another thread was first
+        const bool no_recurse = bNoRecurse;
+        bNoRecurse = false;
+        Recurse(root.path); // sets root.scanned when the folder is there
+        bNoRecurse = no_recurse;
+    }
+}
+
+CLocatorAPI::files_it CLocatorAPI::file_find_it_lazy(pcstr n)
+{
+    files_it it = file_find_it(n);
+    if (it == m_files.end() && lazy_register(n))
+        it = file_find_it(n);
+    return it;
 }
 
 bool file_handle_internal(pcstr file_name, size_t& size, int& file_handle);
@@ -999,6 +1249,7 @@ void CLocatorAPI::_initialize(u32 flags, pcstr target_folder, pcstr fs_name)
     {
         ZoneScopedN("Process FS ltx");
         IReader* pFSltx = setup_fs_ltx(fs_name);
+        m_index_state->initializing = true; // 50z1: Recurse skips the folders already enumerated
 
         // append all pathes
         string_path id, root, add, def, capt;
@@ -1047,6 +1298,22 @@ void CLocatorAPI::_initialize(u32 flags, pcstr target_folder, pcstr fs_name)
 
             FS_Path* P = xr_new<FS_Path>(p_it != m_paths.end() ? p_it->second->m_Path : root, lp_add, lp_def, lp_capt, fl);
             bNoRecurse = !(fl & FS_Path::flRecurse);
+            if (0 == xr_strcmp(id, "$app_data_root$") && (fl & FS_Path::flRecurse))
+            {
+                // 50z1: the appdata caches are indexed on demand (LAZY_APPDATA_DIRS). Only when appdata is indexed
+                // recursively: otherwise the index never had them and nothing changes.
+                IndexState& state = *m_index_state;
+                state.lazy_count = 0;
+                for (pcstr dir : LAZY_APPDATA_DIRS)
+                {
+                    LazyRoot& lazy = state.lazy[state.lazy_count++];
+                    string_path lazy_path;
+                    strconcat(sizeof lazy_path, lazy_path, P->m_Path, dir, DELIMITER);
+                    NormalizeIndexName(lazy.path, lazy_path);
+                    lazy.length = xr_strlen(lazy.path);
+                    lazy.scanned.store(false, std::memory_order_relaxed);
+                }
+            }
             VerifyPath(P->m_Path);
             Recurse(P->m_Path);
             auto I = m_paths.emplace(xr_strdup(id), P);
@@ -1060,14 +1327,22 @@ void CLocatorAPI::_initialize(u32 flags, pcstr target_folder, pcstr fs_name)
         }
         r_close(pFSltx);
         R_ASSERT(path_exist("$app_data_root$"));
+
+        IndexState& state = *m_index_state;
+        state.initializing = false;
+        state.enumerated.clear();
+        Msg("FS: index - %u folders enumerated, %u repeated walks skipped, %u walks into appdata caches left for "
+            "the lookups", state.dirs_enumerated, state.dirs_repeated, state.dirs_lazy);
     };
 
     const size_t M2 = Memory.mem_usage();
     Msg("FS: %zu files cached %zu archives, %zuKb memory used.", m_files.size(), m_archives.size(), (M2 - M1) / 1024);
+    xray::hw::detail::NoteFsCounters(u32(m_files.size()), u32(m_archives.size())); // for the "* [hw] disk" line
 
     m_Flags.set(flReady, true);
 
     Msg("Init FileSystem %f sec", t.GetElapsed_sec());
+    xray::StartupMark("fs_index");
     //-----------------------------------------------------------
     if (strstr(Core.Params, "-overlaypath"))
     {
@@ -1091,6 +1366,7 @@ void CLocatorAPI::_initialize(u32 flags, pcstr target_folder, pcstr fs_name)
     //-----------------------------------------------------------
 
     CreateLog(nullptr != strstr(Core.Params, "-nolog"));
+    xray::StartupMark("log_open"); // with the history of the previous runs (-log_history)
     xrDebug::OnFilesystemInitialized();
 
     if (strstr(Core.Params, "-checks"))
@@ -1133,11 +1409,11 @@ void CLocatorAPI::_destroy()
 const CLocatorAPI::file* CLocatorAPI::GetFileDesc(pcstr path)
 {
     string_path temp;
-    auto it = file_find_it(path);
+    auto it = file_find_it_lazy(path);
     if (path[0] == '$')
     {
         update_path(temp, path, "");
-        it = file_find_it(temp);
+        it = file_find_it_lazy(temp);
     }
     return it != m_files.end() ? &*it : nullptr;
 }
@@ -1149,7 +1425,7 @@ FileStatus CLocatorAPI::exist(pcstr fn, FSType fsType /*= FSType::Virtual*/)
     // (Virtual|External) always fell through and never found any file.
     if ((fsType & FSType::Virtual) == FSType::Virtual)
     {
-        auto it = file_find_it(fn);
+        auto it = file_find_it_lazy(fn); // 50z1: an appdata cache answers from the disk on a miss
         if (it != m_files.end())
             return FileStatus(true, false);
     }
@@ -1203,6 +1479,7 @@ xr_vector<pstr>* CLocatorAPI::file_list_open(pcstr _path, u32 flags)
         update_path(N, _path, "");
     else
         xr_strcpy(N, sizeof N, _path);
+    lazy_scan(N, (flags & FS_RootOnly) != 0); // 50z1
 
     file desc;
     desc.name = N;
@@ -1272,6 +1549,7 @@ size_t CLocatorAPI::file_list(FS_FileSet& dest, pcstr path, u32 flags /*= FS_Lis
         update_path(N, path, "");
     else
         xr_strcpy(N, sizeof N, path);
+    lazy_scan(N, (flags & FS_RootOnly) != 0); // 50z1
 
     file desc;
     desc.name = N;
@@ -1635,6 +1913,11 @@ bool CLocatorAPI::check_for_file(pcstr path, pcstr _fname, string_path& fname, c
         ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
         I = m_files.find(desc_f);
     }
+    if (I == m_files.end() && lazy_register(fname)) // 50z1: an appdata cache left out of the startup scan
+    {
+        ScopeLock files_scope(m_files_lock);
+        I = m_files.find(desc_f);
+    }
     if (I == m_files.end())
     {
         if (!exist(fname, FSType::External))
@@ -1662,10 +1945,17 @@ T* CLocatorAPI::r_open_impl(pcstr path, pcstr _fname)
         return nullptr;
 
     // OK, analyse
+    const u64 io_t0 = xray::perf::Ticks(); // 50z5-extra-diagnostics.md: the read latency of the [io] lines
     if (VFS_STANDARD_FILE == desc->vfs)
         file_from_cache(R, fname, sizeof fname, *desc, source_name);
     else
         file_from_archive(R, fname, *desc);
+
+    if (R)
+        xray::startup_detail::NoteFileOpen(desc->size_real); // 50z1: files / MB of the "* [startup]" lines
+    if (R)
+        xray::perf::IoOpenNote(xray::perf::Ticks() - io_t0, desc->size_real, VFS_STANDARD_FILE != desc->vfs,
+            desc->size_compressed != desc->size_real, std::is_same_v<T, CStreamReader>);
 
 #ifdef DEBUG
     if (R && m_Flags.is(flBuildCopy | flReady))
@@ -1777,6 +2067,7 @@ bool CLocatorAPI::dir_delete(pcstr initial, pcstr nm, bool remove_files)
         update_path(fpath, initial, nm);
     else
         xr_strcpy(fpath, sizeof fpath, nm);
+    lazy_scan(fpath, false); // 50z1: it deletes what the index knows
 
     ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
     files_set folders;
@@ -1836,7 +2127,7 @@ void CLocatorAPI::file_delete(pcstr path, pcstr nm)
         xr_strcpy(fname, sizeof fname, nm);
 
     ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
-    const files_it I = file_find_it(fname);
+    const files_it I = file_find_it_lazy(fname); // 50z1
     if (I != m_files.end())
     {
         // remove file
@@ -1874,10 +2165,10 @@ void CLocatorAPI::file_copy(pcstr src, pcstr dest)
 void CLocatorAPI::file_rename(pcstr src, pcstr dest, bool overwrite)
 {
     ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
-    files_it S = file_find_it(src);
+    files_it S = file_find_it_lazy(src); // 50z1
     if (S != m_files.end())
     {
-        files_it D = file_find_it(dest);
+        files_it D = file_find_it_lazy(dest);
         if (D != m_files.end())
         {
             if (!overwrite)
@@ -1920,7 +2211,7 @@ void CLocatorAPI::file_rename(pcstr src, pcstr dest, bool overwrite)
 
 int CLocatorAPI::file_length(pcstr src)
 {
-    files_it it = file_find_it(src);
+    files_it it = file_find_it_lazy(src); // 50z1 (the stat below does not take a UTF-8 path on Windows)
     if (it != m_files.end())
         return it->size_real;
     struct stat buffer;
@@ -1988,7 +2279,7 @@ u32 CLocatorAPI::get_file_age(pcstr nm)
 {
     check_pathes();
 
-    files_it I = file_find_it(nm);
+    files_it I = file_find_it_lazy(nm); // 50z1
     return I != m_files.end() ? I->modif : u32(-1);
 }
 

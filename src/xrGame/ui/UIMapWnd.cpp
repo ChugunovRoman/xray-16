@@ -1489,6 +1489,8 @@ void CUIMapWnd::Update()
 
     if (UsingExternalDataSource() && m_externalDataSource)
     {
+        if (IsShown())
+            m_externalDataSource->RequestData(); // 50z3-startup-slow-disk-io.md: a deferred loading starts now
         const u32 revision = m_externalDataSource->GetDataRevision();
         if (revision != m_externalDataRevision)
         {

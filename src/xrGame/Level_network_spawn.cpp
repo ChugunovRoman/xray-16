@@ -404,6 +404,7 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
     ZoneNamedN(___tracy_spawn_item, "g_sv_Spawn[item]", category == ClientSpawnCategory::Item);
     ZoneNamedN(___tracy_spawn_other, "g_sv_Spawn[other]", category == ClientSpawnCategory::Other);
     PERF_SCOPE(spawn_total);
+    GW_FRAME_EVENT(Spawn); // 50n: the frame spike report
     PERF_SPIKE_NAMED(spawn_spike, "spawn", E, &describe_spawn_spike, false);
     PERF_SPAWN_TAG();
     const bool loading = spawn_while_loading();

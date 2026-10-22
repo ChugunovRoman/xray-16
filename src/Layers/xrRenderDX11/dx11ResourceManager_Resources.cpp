@@ -79,8 +79,14 @@ void CResourceManager::_DeleteVS(const SVS* vs)
     // unregister from vertex layouts.
     if (!vs->signature._get())
         return;
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): the shader maps (m_vs, m_ps...), the input signatures and
+    // the declarations are deleted under the locks they are created under - in play the background base loading
+    // creates shaders (m_create_lock) and geometry (v_geoms_lock) while the main thread may release the last
+    // reference of one. Order: m_create_lock -> v_geoms_lock -> the layout lock.
+    ScopeLock scope(&m_create_lock);
     if (DestroyShader(vs))
     {
+        ScopeLock geoms_scope(&v_geoms_lock); // v_declarations
         // Layouts of this signature are released below: drop the cached pairs of CBackend::ApplyVertexLayout.
         g_dx11_input_layout_epoch.fetch_add(1, std::memory_order_relaxed);
         std::unique_lock<std::shared_mutex> layout_lock{ g_dx11_input_layout_lock };
@@ -133,21 +139,41 @@ SPS* CResourceManager::_CreatePS(LPCSTR _name)
     return CreateShader<SPS>(name, _name);
 }
 
-void CResourceManager::_DeletePS(const SPS* ps) { DestroyShader(ps); }
+void CResourceManager::_DeletePS(const SPS* ps)
+{
+    ScopeLock scope(&m_create_lock); // 50l-weak-cpu-spawn-models.md: see _DeleteVS
+    DestroyShader(ps);
+}
 
 //--------------------------------------------------------------------------------------------------------------
 SGS* CResourceManager::_CreateGS(LPCSTR Name) { return CreateShader<SGS>(Name); }
-void CResourceManager::_DeleteGS(const SGS* GS) { DestroyShader(GS); }
+void CResourceManager::_DeleteGS(const SGS* GS)
+{
+    ScopeLock scope(&m_create_lock); // 50l
+    DestroyShader(GS);
+}
 
 #ifdef USE_DX11
 SHS* CResourceManager::_CreateHS(LPCSTR Name) { return CreateShader<SHS>(Name); }
-void CResourceManager::_DeleteHS(const SHS* HS) { DestroyShader(HS); }
+void CResourceManager::_DeleteHS(const SHS* HS)
+{
+    ScopeLock scope(&m_create_lock); // 50l
+    DestroyShader(HS);
+}
 
 SDS* CResourceManager::_CreateDS(LPCSTR Name) { return CreateShader<SDS>(Name); }
-void CResourceManager::_DeleteDS(const SDS* DS) { DestroyShader(DS); }
+void CResourceManager::_DeleteDS(const SDS* DS)
+{
+    ScopeLock scope(&m_create_lock); // 50l
+    DestroyShader(DS);
+}
 
 SCS* CResourceManager::_CreateCS(LPCSTR Name) { return CreateShader<SCS>(Name); }
-void CResourceManager::_DeleteCS(const SCS* CS) { DestroyShader(CS); }
+void CResourceManager::_DeleteCS(const SCS* CS)
+{
+    ScopeLock scope(&m_create_lock); // 50l
+    DestroyShader(CS);
+}
 #endif
 
 //--------------------------------------------------------------------------------------------------------------
@@ -265,6 +291,7 @@ void CResourceManager::_DeleteInputSignature(const SInputSignature* pSignature)
 {
     if (0 == (pSignature->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 50l: see _DeleteVS
     if (reclaim(v_input_signature, pSignature))
         return;
 #ifndef MASTER_GOLD

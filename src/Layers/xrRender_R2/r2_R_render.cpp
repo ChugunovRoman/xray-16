@@ -14,6 +14,7 @@
 #include "Layers/xrRender/FBasicVisual.h"
 #include "Layers/xrRender/xrRender_console.h"
 
+#include <chrono>
 #include <cmath>
 
 namespace xray::render::RENDER_NAMESPACE
@@ -358,6 +359,9 @@ void CRender::Render()
     g_r = 1;
 
     const bool svp_pass = m_SecondViewportPass;
+    // 50o (50o-gpu-frame-timing.md): render/gpu/gbuffer starts here (a no-op without XR_PERF_METRICS / perf_metrics)
+    if (!svp_pass)
+        HW.GpuMarkPass(CHW::GpuMark::MainBegin);
 
     if (!svp_pass)
         dbg_render_state_audit("world");
@@ -521,7 +525,12 @@ void CRender::Render()
         PERF_SCOPE_IF(svp_pass, rsvp_pass_sync_point); // 31-svp-scope.md (M): render/svp/pass/* - the scope pass
         BasicStats.WaitS.Begin();
         {
+            // 50o: the CPU waits here for the GPU to reach the previous frame's sync point (D3D11; GL: everything
+            // submitted so far) - in a GPU-bound frame this, not Present, is where main waits. Always on.
+            const auto sync_t0 = std::chrono::steady_clock::now();
             q_sync_point.Wait(ps_r2_wait_sleep, ps_r2_wait_timeout);
+            HW.AddGpuSyncWait(
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - sync_t0).count());
         }
         BasicStats.WaitS.End();
         q_sync_point.End();
@@ -908,6 +917,9 @@ void CRender::Render()
     }
 
     // Directional light - fucking sun
+    // 50o: render/gpu/gbuffer ends, render/gpu/lights (sun, its cascades, then the shadowed lights) starts
+    if (!svp_pass)
+        HW.GpuMarkPass(CHW::GpuMark::Lights);
     {
         ZoneScopedN("Render/Sun");
         PERF_SCOPE_IF(!svp_pass, rpass_sun);
@@ -946,7 +958,7 @@ void CRender::Render()
             // segment's submit (same pattern as accum_direct_blend).
             if (Target->svp_publish_smap_atlas(true))
             {
-                const u32 sun_base = u32(ps_r__svp_smap_pages);
+                const u32 sun_base = svp_smap_pages();
                 for (u32 i = 0; i < R__NUM_SUN_CASCADES; ++i)
                 {
                     Target->rt_smap_depth->pTexture->set_slice(int(sun_base + i));
@@ -975,7 +987,7 @@ void CRender::Render()
             Target->svp_rt_smap_depth->pSurface && Target->rt_smap_depth &&
             Target->rt_smap_depth->pSurface)
         {
-            const UINT sun_base = UINT(ps_r__svp_smap_pages);
+            const UINT sun_base = UINT(svp_smap_pages());
             if (Target->svp_rt_smap_depth->n_slices >= sun_base + R__NUM_SUN_CASCADES)
             {
                 ID3D11Texture2D* dst_tex = static_cast<ID3D11Texture2D*>(Target->svp_rt_smap_depth->pSurface);
@@ -1143,7 +1155,12 @@ void CRender::Render()
         [[maybe_unused]] const u32 perf_draws0 = RCache.stat.render.calls;
 #endif
         PIX_EVENT(DEFER_LIGHT_COMBINE);
+        // 50o: render/gpu/combine (forward, sorted, distort, postprocess)
+        if (!svp_pass)
+            HW.GpuMarkPass(CHW::GpuMark::Combine);
         Target->phase_combine();
+        if (!svp_pass)
+            HW.GpuMarkPass(CHW::GpuMark::CombineEnd);
         PERF_ADD_IF(!svp_pass, rcomb_draws, RCache.stat.render.calls - perf_draws0);
     }
 
@@ -1246,12 +1263,22 @@ void CRender::BindBackbufferForUI()
     RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth), float(Device.dwHeight), 0.f, 1.f });
 }
 
+void CRender::svp_target_size(u32& w, u32& h) const
+{
+    // Read on every scope frame: whatever r__second_vp_render_scale holds now (manual or the effective auto value)
+    // sizes the next (re)creation of the twins - SVPTargetsEnsure recreates them on any size change.
+    const float sc = clampr(ps_r__second_vp_render_scale, 0.05f, 1.f);
+    w = _max(1u, (u32)iFloor(float(Device.dwWidth) * sc + 0.5f));
+    h = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
+}
+
 void CRender::RenderSecondViewport()
 {
     // Invoked by IGame_Level::OnRender on scope (SVP) frames.
-    const float sc = clampr(ps_r__second_vp_render_scale, 0.05f, 1.f);
-    const u32 sw = _max(1u, (u32)iFloor(float(Device.dwWidth) * sc + 0.5f));
-    const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
+    // 50o: render/gpu/svp - the whole scope pass (its deferred list is executed inside, by its phase_combine)
+    HW.GpuMarkPass(CHW::GpuMark::SvpBegin);
+    u32 sw, sh;
+    svp_target_size(sw, sh);
     Target->ResizeSecondVPRT(sw, sh);
 
     // Реальный размер rt_secondVP -> шейдер линзы (m_svp_rt_capture.y/.w). При
@@ -1269,7 +1296,21 @@ void CRender::RenderSecondViewport()
     // depth/stencil/accumulator state was already consumed by the main pass, and the lens
     // output collapses to gray. At scale 1.0 the twins are simply full-size (extra VRAM, but
     // correct); silently falls back to the main-surface chain if the target set cannot be created.
+    // R12: the twins (and the atlas, on the worker path) may have been freed by the idle check; the worker path
+    // recreated them already in BeginSecondVPCalculateParallel, the sequential one does it here.
+    svp_vram_mark_used();
+    CTimer svp_vram_timer;
+    if (svp_vram_released)
+        svp_vram_timer.Start();
     const bool scaled_pipeline = Target->SVPTargetsEnsure(sw, sh);
+    if (svp_vram_released)
+    {
+        svp_vram_recreate_ms += svp_vram_timer.GetElapsed_sec() * 1000.f;
+        svp_vram_released = false;
+        Msg("* [hw] svp: resources recreated in %.2f ms (~%u MB)", svp_vram_recreate_ms,
+            u32(Target->SVPResourcesBytes() >> 20));
+        svp_vram_recreate_ms = 0.f;
+    }
     if (scaled_pipeline)
         Target->SVPPipelineBegin();
 
@@ -1319,6 +1360,8 @@ void CRender::RenderSecondViewport()
     // Restore main-view postprocess parameters after second viewport render.
     if (g_pGameLevel)
         g_pGameLevel->Cameras().ApplyDevice();
+
+    HW.GpuMarkPass(CHW::GpuMark::SvpEnd);
 }
 
 void CRender::render_forward()

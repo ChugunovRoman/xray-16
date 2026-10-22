@@ -68,12 +68,12 @@ void CSoundRender_Core::_clear()
 {
     bReady = false;
 
-    // 34-sound-cold-load.md: the prefetch thread is stopped and its queue dropped (the next level reads its folders
-    // anew)
-    prefetch_shutdown();
-
     // remove sources
     ScopeLock scope(&s_sources_lock);
+    // 34-sound-cold-load.md: the prefetch thread is stopped and its queue dropped (the next level reads its folders
+    // anew). 50j-slow-disk-async-sound.md: under s_sources_lock - a deferred source is queued under it too, so no
+    // thread reads one of the sources freed below (the order s_sources_lock -> the prefetch mutex, as there)
+    prefetch_shutdown();
     for (auto& kv : s_sources)
     {
         xr_delete(kv.second);
@@ -141,6 +141,41 @@ CSound* CSoundRender_Core::create(pcstr fName, esound_type sound_type, u32 game_
     return snd;
 }
 
+// plans/optimization_mt/50j-slow-disk-async-sound.md
+CSound* CSoundRender_Core::create_deferred(pcstr fName, esound_type sound_type, u32 game_type)
+{
+    if (!bPresent)
+        return nullptr;
+
+    string_path fn;
+    xr_strcpy(fn, fName);
+    if (strext(fn))
+        *strext(fn) = 0;
+
+    CSoundRender_Source* handle = i_create_source(fn, true);
+    if (!handle)
+        return nullptr;
+
+    auto* snd = xr_new<CSound>(handle);
+    snd->s_type = sound_type;
+    if (handle->load_state() == SoundSourceState::Ready)
+    {
+        snd->g_type = game_type == sg_SourceType ? handle->game_type() : game_type;
+        snd->dwBytesTotal = handle->bytes_total();
+        snd->fTimeTotal = handle->length_sec();
+    }
+    else
+    {
+        // filled by clone() / the start of a play / resolve_deferred; 50z3-startup-slow-disk-io.md: the source's own
+        // type (sg_SourceType, the material library and the weather ambients) comes with them
+        snd->deferred = true;
+        snd->deferred_g_type = game_type == sg_SourceType;
+        snd->g_type = snd->deferred_g_type ? sg_Undefined : game_type;
+    }
+
+    return snd;
+}
+
 void CSoundRender_Core::attach_tail(CSound& snd, pcstr fName)
 {
     if (!bPresent)
@@ -156,6 +191,9 @@ void CSoundRender_Core::attach_tail(CSound& snd, pcstr fName)
 #endif
         return;
     }
+
+    if (!i_resolve_deferred(snd)) // 50j: the lengths below add to those of the sound's own source
+        return;
 
     const u32 idx = snd.fn_attached[0].empty() ? 0 : 1;
 
@@ -224,12 +262,24 @@ void CSoundRender_Core::update_listener(const Fvector& P, const Fvector& D, cons
     m_effects->commit();
 }
 
+void CSoundRender_Core::memory_stats(size_t& sources, size_t& pcm_cached_bytes)
+{
+    {
+        ScopeLock sources_lock(&s_sources_lock); // i_create_source of another thread may insert meanwhile
+        sources = s_sources.size();
+    }
+    pcm_cached_bytes = CSoundRender_Source::cached_pcm_bytes_total();
+}
+
 void CSoundRender_Core::refresh_sources()
 {
     ScopeLock lock(&m_emitters_lock); // no play() between the stop and the reload
     stop_emitters();
 
     ScopeLock sources_lock(&s_sources_lock); // i_create_source of another thread may insert meanwhile
+    // 50j-slow-disk-async-sound.md: no deferred source is read in the background meanwhile; the pending ones are read
+    // below with the others
+    prefetch_shutdown();
     for (const auto& kv : s_sources)
     {
         CSoundRender_Source* s = kv.second;

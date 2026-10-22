@@ -4,6 +4,8 @@
 #include "xrEngine/CustomHUD.h"
 #include "xrEngine/FDemoRecord.h"
 #include "xrEngine/FDemoPlay.h"
+#include "xrCore/Profiling/PerfMetrics.hpp" // 50n: xray::perf::FrameWindowReport
+#include "xrCore/Profiling/SysDiag.hpp" // 50z5: the [load] timeline
 #include "xrMessages.h"
 #include "xrServer.h"
 #include "Level.h"
@@ -72,6 +74,8 @@
 #include "xrEngine/Feel_Vision.h"
 #include "map_spot_cvars.h"
 #include "weapon_inv_icon.h"
+#include "alife_object_registry.h"
+#include "xrCore/Platform/HwProfile.h"
 
 #ifdef DEBUG
 #include "PHDebug.h"
@@ -366,16 +370,139 @@ const xr_token lua_gc_method_token[] =
 
 CUIOptConCom g_OptConCom;
 
-static void full_memory_stats()
+// 50c-commit-growth-analysis.md (plans/optimization_mt): the [mem] lines - what holds the process commit; the fields
+// show which part grows. At the end of stat_memory (the end of a load, before a save, before loading a save, the main
+// menu) and after a level is destroyed (CGamePersistent::DestroyLevel). Not per frame: the model pool is counted under
+// its lock.
+// mi_collect(true) only after a level is destroyed (collect): there it gives 0.5-1.7 GB back to the OS in 50-150 ms of
+// the unload; at the other points it returned ~0 for 2-36 ms (36 ms at opening the menu), so it is not called there.
+// The commit before and after it is printed.
+// The same lines once a minute in play, label "tick" (stat_memory_tick): the locks of the model pool, the motions and
+// the textures only tried (a busy one: "busy" instead of its fields).
+static std::atomic<u32> s_mem_line_time{0}; // Device.dwTimeContinual of the last [mem] lines (the ticks count from it)
+
+static void stat_memory_lines(pcstr where, bool tick, bool collect_heap)
+{
+    constexpr u64 mb = 1024 * 1024;
+    const u64 commit_before = Memory.mem_usage();
+    string128 collect;
+    if (!collect_heap)
+        collect[0] = 0;
+    else
+    {
+        CTimer collect_timer;
+        collect_timer.Start();
+        Memory.mem_collect(true);
+        const float collect_ms = collect_timer.GetElapsed_sec() * 1000.f;
+        const u64 commit_after = Memory.mem_usage();
+        const s64 collect_delta_mb =
+            (static_cast<s64>(commit_after) - static_cast<s64>(commit_before)) / static_cast<s64>(mb);
+        xr_sprintf(collect, " (mi_collect %+lld MB, %.1f ms)", collect_delta_mb, collect_ms);
+    }
+
+    CTimer stats_timer;
+    stats_timer.Start();
+    u64 avail_phys = 0, commit_avail = 0;
+    xray::hw::QueryMemoryNow(avail_phys, commit_avail);
+
+    RenderMemoryStats rs;
+    if (GEnv.Render)
+        GEnv.Render->GetMemoryStats(rs, tick);
+    size_t snd_sources = 0, snd_pcm_bytes = 0;
+    if (GEnv.Sound)
+        GEnv.Sound->memory_stats(snd_sources, snd_pcm_bytes);
+    int lua_kb = 0;
+    if (GEnv.ScriptEngine)
+    {
+        if (lua_State* L = GEnv.ScriptEngine->lua())
+            lua_kb = lua_gc(L, LUA_GCCOUNT, 0);
+    }
+    const CALifeSimulator* alife = g_ai_space ? g_ai_space->get_alife() : nullptr;
+    const u32 alife_objects = alife ? static_cast<u32>(alife->objects().objects().size()) : 0;
+    const u32 client_objects = g_pGameLevel ? Level().Objects.o_count() : 0;
+    const float stats_ms = stats_timer.GetElapsed_sec() * 1000.f;
+
+    string128 vram;
+    if (rs.vram_valid)
+        xr_sprintf(vram, "vram local %llu/%llu MB, nonlocal %llu MB", rs.vram_local_usage / mb,
+            rs.vram_local_budget / mb, rs.vram_nonlocal_usage / mb);
+    else
+        xr_strcpy(vram, "vram n/a");
+    // pool / inst: the estimated bytes of the free / all instances (CModelPool::memory_counts); refs only when the
+    // instance counts of the bases (the bytes are counted by them) differ from Registry
+    string256 models;
+    if (rs.models_valid)
+    {
+        string32 refs;
+        if (rs.model_instance_refs != rs.model_instances)
+            xr_sprintf(refs, ", refs %u", rs.model_instance_refs);
+        else
+            refs[0] = 0;
+        xr_sprintf(models, "models %u bases (unref %u), pool %u (%llu MB), inst %u (%llu MB%s)", rs.model_bases,
+            rs.model_bases_unref, rs.model_pool, rs.model_pool_bytes / mb, rs.model_instances,
+            rs.model_instance_bytes / mb, refs);
+    }
+    else
+        xr_strcpy(models, "models busy");
+    string64 motions;
+    if (rs.motions_valid)
+        xr_sprintf(motions, "motions %u (unref %u)", rs.motions, rs.motions_unref);
+    else
+        xr_strcpy(motions, "motions busy");
+    string64 tex;
+    if (rs.tex_valid)
+        xr_sprintf(tex, "tex %u (%llu MB)", rs.tex_count, rs.tex_bytes / mb);
+    else
+        xr_strcpy(tex, "tex busy");
+
+    Msg("* [mem] %s: commit %llu MB%s, sys commit avail %llu MB, ram avail %llu MB, %s", where, commit_before / mb,
+        collect, commit_avail / mb, avail_phys / mb, vram);
+    Msg("* [mem] %s: %s, %s, host vb/ib %llu/%llu MB, %s, snd src %llu, pcm %llu MB, lua %d MB, objects alife %u "
+        "client %u, time %u s (%.1f ms, models %.2f ms)",
+        where, models, motions, rs.host_vb_bytes / mb, rs.host_ib_bytes / mb, tex, static_cast<u64>(snd_sources),
+        static_cast<u64>(snd_pcm_bytes) / mb, lua_kb / 1024, alife_objects, client_objects,
+        Device.dwTimeGlobal / 1000, stats_ms, rs.models_ms);
+    // 50n-frame-spike-report.md: the "* [frame]" window lines (the frames since the previous [mem] lines), printed by
+    // the next frame's xray::perf::Flush()
+    xray::perf::FrameWindowReport(where);
+    s_mem_line_time.store(Device.dwTimeContinual, std::memory_order_relaxed);
+}
+
+void stat_memory_line(pcstr where) { stat_memory_lines(where, false, false); }
+
+// CGamePersistent::DestroyLevel: the lines after the unload, with mi_collect(true) - the memory the allocator kept after
+// the level went back to the OS
+void stat_memory_level_destroyed()
+{
+    stat_memory_lines("level destroyed", false, true);
+    xray::perf::LoadMark("level_destroyed"); // 50z5-extra-diagnostics.md: the level deleted, its memory returned
+}
+
+// CGamePersistent::OnFrame (main, a level loaded and ready, not paused - the main menu has its own line): the [mem]
+// lines once per mem_tick_interval_ms of Device.dwTimeContinual (real time without the time the app was inactive)
+// since the last ones of any label
+void stat_memory_tick()
+{
+    constexpr u32 mem_tick_interval_ms = 60 * 1000;
+    // signed: a line of another thread (a save from Lua) may store a time a little ahead of this one
+    const s32 since = static_cast<s32>(Device.dwTimeContinual - s_mem_line_time.load(std::memory_order_relaxed));
+    if (since < static_cast<s32>(mem_tick_interval_ms))
+        return;
+    stat_memory_lines("tick", true, false);
+}
+
+// mem_line_where: the label of the [mem] lines, null = without them (the out of memory handler: they take locks)
+static void full_memory_stats(pcstr mem_line_where)
 {
     Memory.mem_compact();
-    u32 m_base = 0, c_base = 0, m_lmaps = 0, c_lmaps = 0;
+    u64 m_base = 0, m_lmaps = 0;
+    u32 c_base = 0, c_lmaps = 0;
     GEnv.Render->ResourcesGetMemoryUsage(m_base, c_base, m_lmaps, c_lmaps);
     log_vminfo();
     size_t _process_heap = ::Memory.mem_usage();
     const auto [_eco_strings_bytes, _eco_strings_count] = g_pStringContainer->stat_economy();
     int _eco_smem = (int)g_pSharedMemoryContainer->stat_economy();
-    Msg("* [ render ]: textures[%d K]", (m_base + m_lmaps) / 1024);
+    Msg("* [ render ]: textures[%llu K]", (m_base + m_lmaps) / 1024);
     Msg("* [ x-ray  ]: process heap[%u K]", _process_heap / 1024);
     Msg("* [ x-ray  ]: shared strings: memory[%ld K], count[%lu]", _eco_strings_bytes / 1024, _eco_strings_count);
     Msg("* [ x-ray  ]: shared memory[%ld K]", _eco_smem);
@@ -383,7 +510,11 @@ static void full_memory_stats()
     Msg("* [ x-ray  ]: file mapping: memory[%d K], count[%d]", g_file_mapped_memory / 1024, g_file_mapped_count);
     dump_file_mappings();
 #endif
+    if (mem_line_where)
+        stat_memory_line(mem_line_where);
 }
+
+static void full_memory_stats_oom() { full_memory_stats(nullptr); }
 
 class CCC_MemStats : public IConsole_Command
 {
@@ -391,9 +522,16 @@ public:
     CCC_MemStats(LPCSTR N) : IConsole_Command(N)
     {
         bEmptyArgsHandled = TRUE;
-        xrDebug::SetOutOfMemoryCallback(full_memory_stats);
+        xrDebug::SetOutOfMemoryCallback(full_memory_stats_oom);
     };
-    virtual void Execute(LPCSTR args) { full_memory_stats(); }
+    // args: the label of the [mem] lines (the callers in xrGame pass where they are). No args: the end of a load
+    // (IGame_Persistent::LoadEnd runs it before the level counts as loaded) or the console
+    virtual void Execute(LPCSTR args)
+    {
+        pcstr where = args && args[0] ? args :
+            (g_pGameLevel && g_pGamePersistent && !g_pGamePersistent->IsLoaded() ? "load end" : "console");
+        full_memory_stats(where);
+    }
 };
 
 class CCC_GameDifficulty : public CCC_Token
@@ -991,7 +1129,7 @@ public:
             return;
         }
 
-        Console->Execute("stat_memory");
+        Console->Execute("stat_memory save");
 
         string_path S, S1;
         S[0] = 0;
@@ -1114,7 +1252,8 @@ public:
         if (MainMenu()->IsActive())
             MainMenu()->Activate(false);
 
-        Console->Execute("stat_memory");
+        Console->Execute("stat_memory load save");
+        xray::perf::LoadMarkBegin("load_save"); // 50z5-extra-diagnostics.md: the [load] timeline
 
         if (Device.Paused())
             Device.Pause(FALSE, TRUE, TRUE, "CCC_ALifeLoadFrom");
@@ -3005,9 +3144,54 @@ public:
     void Save(IWriter*) override {}
 };
 
+// The ranges of the not saved tunables that start from the hardware policy (below)
+constexpr int kLuaGcPacedMulMin = 10, kLuaGcPacedMulMax = 1000;
+constexpr int kModelPrefetchMarginMin = 0, kModelPrefetchMarginMax = 300;
+
+// plans/optimization_mt/50-smart-engine-hw-profile.md, 5.2 (50h-stage3-game-budgets.md): the not saved tunables start
+// at the value of the hardware policy - R17 lua_gc_paced_mul (<= 4 physical cores 100, else 200), R5
+// model_prefetch_margin (slow disk 50, else 25); the console changes them for the session as before. The CPU and disk
+// fields of the policy are final here (stages A and B run in xrCore::Initialize, before the game module registers its
+// commands). No policy (stage A never ran): the defaults of the code stay
+static void InitTunablesFromPolicy()
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    if (!xray::hw::PolicyValid(policy))
+        return;
+    if (policy.lua_paced_mul)
+        gw::lua_spike::g_paced_mul = std::clamp(int(policy.lua_paced_mul), kLuaGcPacedMulMin, kLuaGcPacedMulMax);
+    g_model_prefetch_margin =
+        std::clamp(int(policy.model_prefetch_margin), kModelPrefetchMarginMin, kModelPrefetchMarginMax);
+}
+
+// One "* [hw] tunables" line after the registration: the start values of the tunables above, the base of the scheduler
+// budget (R16, its cap; the scheduler takes min(shed_budget_ms, it) and logs the result at its first pass) and the time
+// limit of cold model loads of the spawn per frame (R6, read from the policy by the spawn queue; 0 = wait for the
+// background warm-up of the models)
+static void LogTunables()
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    if (!xray::hw::PolicyValid(policy))
+    {
+        Msg("* [hw] tunables: lua_gc_paced_mul %d, model_prefetch_margin %d (defaults, no policy)",
+            gw::lua_spike::g_paced_mul, g_model_prefetch_margin);
+        return;
+    }
+    string32 spawn_cold;
+    if (policy.spawn_cold_ms)
+        xr_sprintf(spawn_cold, "%u ms", u32(policy.spawn_cold_ms));
+    else
+        xr_strcpy(spawn_cold, "wait");
+    Msg("* [hw] tunables: lua_gc_paced_mul %d, shed budget %u ms, model_prefetch_margin %d, spawn cold %s (policy)",
+        gw::lua_spike::g_paced_mul, u32(policy.shed_budget_ms), g_model_prefetch_margin, spawn_cold);
+}
+
 void CCC_RegisterCommands()
 {
     ZoneScoped;
+
+    // 50-smart-engine-hw-profile.md, 5.2: before the commands of these variables are registered
+    InitTunablesFromPolicy();
 
     // options
     g_OptConCom.Init();
@@ -3117,8 +3301,9 @@ void CCC_RegisterCommands()
     // heap before/after and whether the atomic phase of the GC ran inside it; 0 = off
     CMD4(CCC_IntegerNotSaved, "npc_perf_lua_spike_us", &gw::lua_spike::g_threshold_us, 0, 1000000);
     // With lua_gc_method gc_step the GC always works only in script_gc, paced by the allocations of the frame (the
-    // implicit steps inside random Lua calls are held off): % of the LuaJIT pace (one step per KB)
-    CMD4(CCC_IntegerNotSaved, "lua_gc_paced_mul", &gw::lua_spike::g_paced_mul, 10, 1000);
+    // implicit steps inside random Lua calls are held off): % of the LuaJIT pace (one step per KB); starts at the
+    // hardware policy (R17, InitTunablesFromPolicy)
+    CMD4(CCC_IntegerNotSaved, "lua_gc_paced_mul", &gw::lua_spike::g_paced_mul, kLuaGcPacedMulMin, kLuaGcPacedMulMax);
     // 26-framemove-game-next.md, package 2-A. Temporary A/B switches, not saved, 0 = as before.
     // K2a: > 0 - the paced GC steps of a frame stop after this many us, the rest of the debt goes to the next frames
     // (a debt over ~16 MB of allocations is paid off uncapped); one step (the atomic phase) is never cut
@@ -3491,9 +3676,11 @@ void CCC_RegisterCommands()
     // next spawn group after this many cold model loads. model_prefetch_margin: the model files of objects near the
     // online distance (+ this %) are read ahead on a thread. The model prefetch itself (the level's creatures and all
     // monster visuals into the pool on the loading screen, the files read ahead) is always on since 2026-10-18
-    // (model_prefetch removed, see plan 41).
+    // (model_prefetch removed, see plan 41). model_prefetch_margin starts at the hardware policy (R5,
+    // InitTunablesFromPolicy).
     CMD4(CCC_IntegerNotSaved, "spawn_cold_models", &g_spawn_cold_models, 0, 64);
-    CMD4(CCC_IntegerNotSaved, "model_prefetch_margin", &g_model_prefetch_margin, 0, 300);
+    CMD4(CCC_IntegerNotSaved, "model_prefetch_margin", &g_model_prefetch_margin, kModelPrefetchMarginMin,
+        kModelPrefetchMarginMax);
 
 #ifdef DEBUG
     CMD1(CCC_PHGravity, "ph_gravity");
@@ -3869,4 +4056,6 @@ void CCC_RegisterCommands()
     // since 2026-10-18 (npc_ik_in_bones, wpn_npc_dead_owner_skip)
 
     register_mp_console_commands();
+
+    LogTunables(); // 50-smart-engine-hw-profile.md, 5.2
 }

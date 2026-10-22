@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 u32 GetFVFVertexSize(u32 FVF);
@@ -28,6 +30,12 @@ void SetGLVertexPointer(SDeclaration* decl);
 namespace BufferUtils
 {
 HRESULT CreateConstantBuffer(ConstantBufferHandle* ppBuffer, u32 DataSize);
+
+// 50c-commit-growth-analysis.md (plans/optimization_mt): the bytes of the host (RAM) copies the staging buffers hold
+// now - a push once buffer until its Unmap, a read back one (the VB of the skinned models, read by the wallmarks; the IB
+// of the models) as long as it lives. For the [mem] line of stat_memory (IRender::GetMemoryStats). Any thread
+inline std::atomic<s64> g_host_vb_bytes{0};
+inline std::atomic<s64> g_host_ib_bytes{0};
 };
 
 /**

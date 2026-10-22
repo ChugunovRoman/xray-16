@@ -134,7 +134,9 @@ struct str_container_impl
             while (value)
             {
                 ++count;
-                bytes += (value->dwReference - 1) * (value->dwLength + 1);
+                // a string with 0 references (released, clean() not run yet) saves nothing: u32 (0 - 1) wrapped to ~4 GB
+                if (value->dwReference > 1)
+                    bytes += size_t(value->dwReference - 1) * (value->dwLength + 1);
                 value = value->next;
             }
         }

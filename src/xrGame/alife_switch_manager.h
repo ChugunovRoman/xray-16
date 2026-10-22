@@ -75,6 +75,11 @@ bool model_prefetch_in_margin(float distance, float online_distance);
 void model_prefetch_object(CSE_ALifeDynamicObject* object);
 // main (CLevel::ProcessGameEvents): the same for the object of an M_SPAWN the spawn budget left in the queue
 void model_prefetch_spawn(u16 id);
+// 50i-stage3-slow-disk-io.md (plans/optimization_mt, plan 50 R6), main (CLevel::ProcessGameEvents), a slow disk: the
+// same for the object of an M_SPAWN of a group about to materialize (its jobs ahead of the ALife ones); true = the
+// "Model prefetch" thread has not read the files of some of its models yet. 50l-weak-cpu-spawn-models.md: a weak CPU with
+// the background base loading too - or a creature's base model is still to come from it
+bool model_prefetch_spawn_pending(u16 id);
 // main, loading screen (CLevel::net_start_client5): the creatures of the level and all monster visuals into the pool
 void model_preload_level();
 

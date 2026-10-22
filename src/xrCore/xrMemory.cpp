@@ -197,6 +197,15 @@ void xrMemory::mem_compact()
 #endif
 }
 
+void xrMemory::mem_collect(bool force)
+{
+#if defined(USE_MIMALLOC)
+    mi_collect(force);
+#else
+    (void)force;
+#endif
+}
+
 void* xrMemory::mem_alloc(size_t size)
 {
     const auto result = xr_internal_malloc(size);

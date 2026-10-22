@@ -59,8 +59,11 @@ public:
 
         CSoundCollection(const CSoundCollectionParams& params);
         ~CSoundCollection();
-        IC ref_sound* add(ESoundTypes type, LPCSTR name) const;
+        IC ref_sound* add(ESoundTypes type, LPCSTR name, bool deferred) const;
         const ref_sound& random(u32 id);
+        // 50j-slow-disk-async-sound.md: picked if its source is not pending, otherwise a sound of the collection that
+        // is ready (picked when none is)
+        const ref_sound& ready_alternative(const ref_sound& picked);
     };
 
     struct CSoundSingle : public CSoundParams
@@ -68,7 +71,11 @@ public:
         ref_sound* m_sound;
         u32 m_start_time;
         u32 m_stop_time;
+        u32 m_stop_extra{}; // 50j: the random part of m_stop_time, for a sound that waits for its source
         bool m_started;
+        // 50j-slow-disk-async-sound.md: its source is still read in the background (a slow disk): it starts when the
+        // source is ready (m_stop_time is set then), at most snd_deferred_max_delay_ms after m_start_time
+        bool m_source_wait{};
         u16 m_bone_id;
 
         CSoundSingle() { m_started = false; }
@@ -120,6 +127,7 @@ private:
     IC Fvector compute_sound_point(const CSoundSingle& sound);
     void remove_inappropriate_sounds(u32 sound_mask);
     void update_playing_sounds();
+    bool source_wait_done(CSoundSingle& sound); // 50j: true = start it now; false = it waits, or it is dropped
     bool check_sound_legacy(u32 internal_type) const;
 
 public:

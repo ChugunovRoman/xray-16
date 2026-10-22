@@ -21,6 +21,8 @@
 
 #include "xrCore/Compression/miniz/miniz.h"
 #include "LocatorAPI.h"
+#include "xrCore/Platform/HwProfile.h"
+#include "xrCore/Profiling/SysDiag.hpp"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include <Windows.h>
@@ -507,6 +509,12 @@ void append_memory_stats(xr_string& out)
         }
     }
 
+    // 50z5-extra-diagnostics.md: the frame number, the phase of the main thread and of this one, the load stage and the
+    // last [frame] / [frame-spike] / [io] / [sys] lines (formatted into a static buffer: no allocation, no lock)
+    static char s_frame_context[20 * 1024];
+    if (xray::perf::CrashContextFormat(s_frame_context, sizeof(s_frame_context)))
+        out += s_frame_context;
+
     Msg("! [Sentry]: memory at crash: WS=%llu MB, private=%llu MB, heap busy=%llu MB in %llu blocks",
         workingSet >> 20, privateBytes >> 20, totalBusyBytes >> 20, totalBusyBlocks);
 }
@@ -877,12 +885,39 @@ void xrSentry_Initialize(pcstr commandLine)
     // between the two there would otherwise be a window where the dump writer is not resolved yet.
     install_local_crash_reporter();
     s_xr_sentry_started = true;
+    // Sentry starts after the render device: the profile has all three stages here
+    xrSentry_UpdateHwTags();
 
     if (commandLine && std::strstr(commandLine, "-sentry_test_av_crash"))
     {
         volatile int* p = nullptr;
         *p = 42;
     }
+}
+
+// Crash reports grouped by the machine (plans/optimization_mt/50-smart-engine-hw-profile.md, section 4.2)
+void xrSentry_UpdateHwTags()
+{
+    if (!s_xr_sentry_started)
+        return;
+    const xray::hw::Profile& p = xray::hw::GetProfile();
+    constexpr double gib = double(u64(1) << 30);
+    constexpr double mib = double(u64(1) << 20);
+    string64 buf;
+    sentry_set_tag("hw.class", xray::hw::TierName(p.tiers.overall));
+    xr_sprintf(buf, "%.0f", p.mem.ram_total / gib);
+    sentry_set_tag("hw.ram_gb", buf);
+    xr_sprintf(buf, "%.0f", p.mem.commit_limit / gib);
+    sentry_set_tag("hw.commit_gb", buf);
+    sentry_set_tag("hw.disk", xray::hw::DiskKindName(p.data.game.kind));
+    if (p.stages & (xray::hw::STAGE_C | xray::hw::STAGE_C_PROBE))
+        xr_sprintf(buf, "%.0f", p.gpu.dedicated / mib);
+    else
+        xr_strcpy(buf, "?");
+    sentry_set_tag("hw.vram_mb", buf);
+    xr_sprintf(buf, "%uc/%ut", p.cpu.physical_avail, p.cpu.logical_avail);
+    sentry_set_tag("hw.cpu", buf);
+    sentry_set_tag("hw.wine", p.env.wine ? (p.env.wine_version[0] ? p.env.wine_version : "1") : "0");
 }
 
 void xrSentry_Shutdown()
@@ -1078,5 +1113,6 @@ void XRCORE_API xrSentry_CaptureError(pcstr /*logger*/, pcstr /*message*/, pcstr
 void XRCORE_API xrSentry_CaptureDebugFail(pcstr /*expr*/, pcstr /*desc*/, pcstr /*arg1*/, pcstr /*arg2*/) {}
 void xrSentry_Flush(u32 /*timeoutMs*/) {}
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr /*ini_path*/, pcstr /*section*/, pcstr /*key*/) {}
+void xrSentry_UpdateHwTags() {}
 
 #endif // USE_SENTRY

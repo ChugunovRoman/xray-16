@@ -984,6 +984,9 @@ void CRender::reset_begin()
 #if RENDER != R_R2
     r_rain.sync();
 #endif
+    // 50l-weak-cpu-spawn-models.md: no background model load (it creates buffers, shaders, textures) across the reset
+    if (Models)
+        Models->BackgroundLoadPause(true);
 
     Resources->reset_begin();
 
@@ -1057,6 +1060,8 @@ void CRender::reset_end()
     // Set this flag true to skip the first render frame,
     // that some data is not ready in the first frame (for example device camera position)
     m_bFirstFrameAfterReset = true;
+    if (Models)
+        Models->BackgroundLoadPause(false); // 50l: see reset_begin
 }
 
 void CRender::OnCameraUpdated()
@@ -1313,9 +1318,24 @@ void CRender::models_Prefetch() { Models->Prefetch(); }
 void CRender::models_Clear(bool b_complete) { Models->ClearPool(b_complete); }
 bool CRender::model_Preload(LPCSTR name) { return Models->Preload(name); }
 void CRender::model_PrefetchFiles(LPCSTR name, u32 source) { Models->PrefetchFiles(name, source); }
-void CRender::models_PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals)
+bool CRender::model_PrefetchPending(LPCSTR name) { return Models->PrefetchPending(name); } // 50i
+void CRender::models_PrefetchList(const xr_vector<PrefetchModel>& visuals)
 {
     Models->PrefetchList(visuals); // 40-parallel-prefetch.md
+}
+// 50k-slow-disk-early-prefetch.md
+bool CRender::models_EarlyWarmStart(const xr_vector<PrefetchModel>& models, const PrefetchEarlyWarmParams& params)
+{
+    return Models && Models->EarlyWarmStart(models, params);
+}
+bool CRender::models_EarlyWarmStop(PrefetchEarlyWarmStats& stats, bool release)
+{
+    if (!Models)
+    {
+        stats = {};
+        return false;
+    }
+    return Models->EarlyWarmStop(stats, release);
 }
 ref_shader CRender::getShader(int id)
 {

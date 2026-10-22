@@ -198,6 +198,8 @@ target_sources_grouped(
     TARGET xrCore
     NAME "FS"
     FILES
+    BackgroundIo.cpp
+    BackgroundIo.h
     FileCRC32.cpp
     FileCRC32.h
     FileSystem.cpp
@@ -388,6 +390,19 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrCore
+    NAME "Platform"
+    FILES
+    Platform/HwPolicy.cpp
+    Platform/HwProfile.cpp
+    Platform/HwProfile.h
+    Platform/HwProfile_Apple.cpp
+    Platform/HwProfile_impl.h
+    Platform/HwProfile_Linux.cpp
+    Platform/HwProfile_Windows.cpp
+)
+
+target_sources_grouped(
+    TARGET xrCore
     NAME "PostProcess"
     FILES
     PostProcess/PostProcess.cpp
@@ -404,6 +419,10 @@ target_sources_grouped(
     Profiling/PerfMetrics.cpp
     Profiling/PerfMetrics.hpp
     Profiling/PerfMetricsList.inl
+    Profiling/StartupMarks.cpp
+    Profiling/StartupMarks.hpp
+    Profiling/SysDiag.cpp
+    Profiling/SysDiag.hpp
 )
 
 target_sources_grouped(

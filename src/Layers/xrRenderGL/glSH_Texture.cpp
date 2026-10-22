@@ -50,12 +50,14 @@ CTexture::~CTexture()
 
 void CTexture::surface_set(GLenum target, GLuint surf)
 {
+    async_detach(); // 50r: a surface given from outside replaces the async loading (if any)
     desc = target;
     pSurface = surf;
 }
 
 GLuint CTexture::surface_get() const
 {
+    const_cast<CTexture*>(this)->async_ensure(); // 50r: the surface of a texture still being read - finished now
     return pSurface;
 }
 
@@ -70,6 +72,9 @@ void CTexture::PostLoad()
 void CTexture::apply_load(CBackend& cmd_list, u32 dwStage)
 {
     CHK_GL(glActiveTexture(GL_TEXTURE0 + dwStage));
+    // 50r-slow-disk-async-textures.md: a slow disk - the placeholder until the texture is in place
+    if (async_bind(cmd_list, dwStage))
+        return;
     if (!flags.bLoaded)
     {
         PERF_INC(tex_apply_load); // spawn stage 0: loaded by its first bind (render)
@@ -150,6 +155,19 @@ void CTexture::apply_normal(CBackend& cmd_list, u32 dwStage) const
     CHK_GL(glBindTexture(desc, pSurface));
 };
 
+// 50r-slow-disk-async-textures.md (plans/optimization_mt): the default texture object until the texture is in place
+void CTexture::async_bind_placeholder(CBackend& cmd_list, u32 dwStage)
+{
+    CHK_GL(glActiveTexture(GL_TEXTURE0 + dwStage));
+    CHK_GL(glBindTexture(desc, 0));
+}
+
+// 50r: GL creates its objects in the context of the main thread - the "Texture async" thread only reads the file, the
+// main thread creates the texture (asWarm); nothing is ever created by the thread
+bool CTexture::async_create() { return false; }
+void CTexture::async_install() { VERIFY(!"CTexture::async_install: GL creates on the main thread"); }
+void CTexture::async_release_created() {}
+
 void CTexture::Preload()
 {
     m_bumpmap = RImplementation.Resources->m_textures_description.GetBumpName(cName);
@@ -157,6 +175,14 @@ void CTexture::Preload()
 }
 
 void CTexture::Load()
+{
+    // 50r-slow-disk-async-textures.md: a texture of the async loading is finished here - the caller needs it now
+    if (m_async_state.load(std::memory_order_acquire) != asNone && async_finish_now())
+        return;
+    load_now();
+}
+
+void CTexture::load_now()
 {
     flags.bLoaded = true;
     desc_cache = 0;
@@ -354,6 +380,7 @@ void CTexture::Unload()
 
     //.	if (flags.bLoaded)		Msg		("* Unloaded: %s",cName.c_str());
 
+    async_detach(); // 50r: out of the async loading first (waits for the thread if it is reading this one)
     flags.bLoaded = FALSE;
 
     // Lua/UI teardown (RemoveCustomStatic, etc.) can destroy textures from the game thread with no GL context.

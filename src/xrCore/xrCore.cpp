@@ -17,6 +17,7 @@
 #include "xrCore.h"
 #include "xrCore/_std_extensions.h"
 #include "Threading/TaskManager.hpp"
+#include "xrCore/Platform/HwProfile_impl.h"
 
 #include <SDL.h>
 
@@ -278,6 +279,9 @@ void xrCore::Initialize(pcstr _ApplicationName, pcstr commandLine, bool init_fs,
         SDL_LogSetOutputFunction(SDLLogOutput, nullptr);
         Msg("\ncommand line %s\n", Params);
         _initialize_cpu();
+        // Hardware profile, stage A (CPU, RAM, OS, power, -hw_* keys): before the worker pool is spawned
+        // (plans/optimization_mt/50-smart-engine-hw-profile.md)
+        xray::hw::detail::RunStageA();
         TaskScheduler = xr_make_unique<TaskManager>();
         TaskScheduler->SpawnThreads();
         // xrDebug::Initialize ();
@@ -320,6 +324,8 @@ void xrCore::Initialize(pcstr _ApplicationName, pcstr commandLine, bool init_fs,
 #endif
         FS._initialize(flags, nullptr, fs_fname);
         EFS._initialize();
+        // Hardware profile, stage B (volumes of gamedata / appdata / system) and the first "* [hw]" lines
+        xray::hw::detail::RunStageB();
     }
     init_counter++;
 }

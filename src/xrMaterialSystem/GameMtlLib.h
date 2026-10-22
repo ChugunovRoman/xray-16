@@ -378,6 +378,10 @@ public:
     // IO routines
     void Load();
     bool Save();
+
+    // plans/optimization_mt/50z3-startup-slow-disk-io.md: the sounds created deferred at the start-up (a slow disk) take
+    // their numbers from their sources - read here if still pending. Main, before a level may play them
+    void ResolveDeferredSounds();
 };
 
 extern MTL_EXPORT_API CGameMtlLibrary GMLib;

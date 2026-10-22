@@ -6,6 +6,7 @@
 #include "Common/LevelStructure.hpp"
 #include "xrEngine/IGame_Persistent.h"
 #include "xrCore/stream_reader.h"
+#include "xrCore/FileCRC32.h"
 
 #if defined(USE_DX11)
 #include "Layers/xrRender/FHierrarhyVisual.h"
@@ -20,6 +21,7 @@ void CRender::level_Load(IReader* fs)
 
     R_ASSERT(g_pGameLevel);
     R_ASSERT(!b_loaded);
+    resetFileCrc32IncludeMemo(); // 50z2: the level's shaders hash the includes again once (they may have changed)
 
     // Begin
     g_pGamePersistent->LoadBegin();

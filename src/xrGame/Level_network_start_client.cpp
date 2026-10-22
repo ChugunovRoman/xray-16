@@ -13,6 +13,7 @@
 #include "xrPhysics/IPHWorld.h"
 #include "physics_game.h"
 #include "alife_switch_manager.h"
+#include "xrCore/Profiling/SysDiag.hpp"
 
 extern pureFrame* g_pNetProcessor;
 
@@ -61,6 +62,7 @@ bool CLevel::net_start_client2()
     }
 
     connected_to_server = Connect2Server(m_caClientOptions.c_str());
+    xray::perf::LoadMark("client_connect"); // 50z5-extra-diagnostics.md: the [load] timeline
 
     return true;
 }
@@ -121,6 +123,7 @@ bool CLevel::net_start_client3()
         deny_m_spawn = FALSE;
         // Load level
         R_ASSERT2(Load(level_id), "Loading failed.");
+        xray::perf::LoadMark("level_load"); // 50z5-extra-diagnostics.md: the [load] timeline
         map_data.m_level_geom_crc32 = 0;
         if (!IsGameTypeSingle())
             CalculateLevelCrc32();
@@ -148,6 +151,7 @@ bool CLevel::net_start_client4()
 
         VERIFY(physics_world());
         physics_world()->set_step_time_callback((PhysicsStepTimeCallback*)&PhisStepsCallback);
+        xray::perf::LoadMark("physics_world"); // 50z5-extra-diagnostics.md: the [load] timeline
 
         // Send network to single or multithreaded mode
         // *note: release version always has "mt_*" enabled
@@ -219,10 +223,12 @@ bool CLevel::net_start_client5()
             // 36-spawn-model-load.md (the model prefetch): models of the level's creatures / of all monsters into
             // the pool now, while the textures are still deferred (ResourcesDeferredUpload below loads theirs too)
             model_preload_level();
+            xray::perf::LoadMark("model_preload"); // 50z5-extra-diagnostics.md: the [load] timeline
             g_pGamePersistent->LoadTitle("st_loading_textures");
             GEnv.Render->DeferredLoad(FALSE);
             GEnv.Render->ResourcesDeferredUpload();
             LL_CheckTextures();
+            xray::perf::LoadMark("textures_upload");
         }
         sended_request_connection_data = FALSE;
         deny_m_spawn = TRUE;
@@ -264,6 +270,8 @@ bool CLevel::net_start_client6()
             }
         }
 
+        // 50z5-extra-diagnostics.md: the [load] timeline (the map sync, the connect spawns sent, the HUD)
+        xray::perf::LoadMark("client_sync");
         g_pGamePersistent->LoadTitle("st_client_synchronising");
         Device.PreCache(60, true);
         net_start_result_total = TRUE;

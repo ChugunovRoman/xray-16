@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "file_stream_reader.h"
+#include "xrCore/BackgroundIo.h"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include "xrCore/Text/Utf8Utils.hpp"
@@ -9,6 +10,7 @@
 
 void CFileStreamReader::construct(pcstr file_name, const size_t& window_size)
 {
+    xray::io::BackgroundIoNoteForegroundRead(); // 50z3-startup-slow-disk-io.md: the menu readers ahead give way
 #if defined(XR_PLATFORM_WINDOWS)
     m_file_handle = CreateFileW(XRay::Utf8::ToWide(file_name).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
 

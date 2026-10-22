@@ -42,6 +42,7 @@
 #include "spawn_smart_terrain_map_data_source.h"
 #include "xrEngine/xr_input.h"
 #include "ui/UILoadingScreen.h"
+#include "xrCore/Profiling/StartupMarks.hpp"
 #include "AnselManager.h"
 #include "xrCore/Threading/TaskManager.hpp"
 
@@ -106,14 +107,24 @@ IGame_Level* CGamePersistent::CreateLevel()
     return xr_new<CLevel>();
 }
 
+// console_commands.cpp, 50c-commit-growth-analysis.md (plans/optimization_mt)
+extern void stat_memory_level_destroyed();
+extern void stat_memory_tick();
+
 void CGamePersistent::DestroyLevel(IGame_Level*& lvl)
 {
     xr_delete(lvl);
+    // 50c: what the unload gave back - the level geometry (~IGame_Level -> level_Unload), the objects, the instances;
+    // mi_collect(true) returns the memory the allocator kept after the level to the OS
+    stat_memory_level_destroyed();
 }
 
 void CGamePersistent::PreStart(LPCSTR op)
 {
     inherited::PreStart(op);
+    // 50z3-startup-slow-disk-io.md: the sounds of the material library created deferred at the start-up (a slow disk)
+    // get their numbers here, on main, before the game threads may play them; a no-op otherwise
+    GMLib.ResolveDeferredSounds();
 }
 
 extern void clean_game_globals();
@@ -125,6 +136,7 @@ void CGamePersistent::OnAppStart()
 
     // load game materials
     GMLib.Load(); // XXX: not ready to be loaded in parallel. Crashes on Linux, rare crashes on Windows and bugs with water became mercury on Windows.
+    xray::StartupMark("app_gmlib"); // 50z1: game materials, their sounds and wallmarks
 
     // init game globals
 #ifndef XR_PLATFORM_WINDOWS
@@ -135,14 +147,18 @@ void CGamePersistent::OnAppStart()
 
     GEnv.UI = xr_new<UICore>();
     GEnv.UI->Focus().RegisterDebuggable();
+    xray::StartupMark("app_ui_core"); // 50z1: fonts, UI textures
     m_pMainMenu = xr_new<CMainMenu>();
+    xray::StartupMark("app_main_menu_object"); // 50z1: the script engine (plugins, class scripts), CMainMenu
     if (GEnv.isDedicatedServer)
         m_pLoadingScreen = xr_new<NullLoadingScreen>();
     else
         m_pLoadingScreen = xr_new<UILoadingScreen>();
 
     inherited::OnAppStart();
-    CSpawnSmartTerrainMapDataSource::StartSharedLoading("all");
+    // 50z3-startup-slow-disk-io.md: on a slow disk once the main menu has settled (or a map wants it), not here
+    CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle("all");
+    xray::StartupMark("app_smart_terrain_map_started"); // 50z1
 
 #ifdef XR_PLATFORM_WINDOWS
     ansel = xr_new<AnselManager>();
@@ -153,6 +169,7 @@ void CGamePersistent::OnAppStart()
 #ifdef XR_PLATFORM_WINDOWS
     TaskScheduler->Wait(initializeGlobals);
 #endif
+    xray::StartupMark("app_game_globals_wait"); // 50z1: Ansel, the wait for init_game_globals (xml of dialogs, profiles)
 }
 
 void CGamePersistent::OnAppEnd()
@@ -669,6 +686,8 @@ void CGamePersistent::OnFrame()
     if (!m_pMainMenu->IsActive())
         m_pMainMenu->DestroyInternal(false);
 
+    CSpawnSmartTerrainMapDataSource::UpdateSharedLoading(); // 50z3-startup-slow-disk-io.md
+
     if (!g_pGameLevel)
         return;
     if (!g_pGameLevel->bReady)
@@ -764,6 +783,11 @@ void CGamePersistent::OnFrame()
 #endif // MASTER_GOLD
     }
     inherited::OnFrame();
+
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): the [mem] lines once a minute in play (not in a pause; the
+    // main menu has its own line), the shape of the commit curve between the loads and saves
+    if (!Device.Paused() && !m_pMainMenu->IsActive())
+        stat_memory_tick();
 
     // `Engine.Sheduler.Update()` runs on the engine `GameThread` task (see `EngineThreading.cpp`), after
     // `seqFrame` and before `seqParallel` / `seqFrameMT`, matching ixray ordering.

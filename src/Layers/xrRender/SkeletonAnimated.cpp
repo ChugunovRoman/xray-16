@@ -1365,6 +1365,85 @@ void CKinematicsAnimated::LoadMotions(const char* N, IReader* data)
     //.		Msg("* WARNING: model '%s' has only one motion. Candidate for SkeletonRigid???",N);
 }
 
+u32 CKinematicsAnimated::PreloadMotions(const char* N, IReader* data)
+{
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): the omf of the motion refs, as loadOMF of LoadMotions finds
+    // them ("folder\*.omf" sets listed through FS as there). Not the motions inside the ogf itself (no refs) and not the
+    // shared hand animations of wpn_hand models: the background loading takes creatures only, LoadMotions loads the rest
+    // as before. An omf docked already, missing or failing is left to LoadMotions too.
+    u32 docked = 0;
+    const auto preload = [&](pcstr path) {
+        string_path fn;
+        if (!FS.exist(fn, "$level$", path) && !FS.exist(fn, "$game_meshes$", path))
+            return;
+        {
+            ModelMotionsScope motions_scope; // g_pMotionsContainer
+            if (g_pMotionsContainer->has(path))
+                return;
+        }
+        IReader* MS = FS.r_open(fn);
+        if (!MS)
+            return;
+        // motions_value::load uses only its own data, the bones of this model and the smem / shared_str containers
+        // (thread-safe): outside the motions lock, which the main thread takes for every LoadMotions
+        motions_value* loaded = xr_new<motions_value>();
+        loaded->m_dwReference = 0;
+        const BOOL ok = loaded->load(path, MS, bones);
+        FS.r_close(MS);
+        if (!ok)
+        {
+            xr_delete(loaded);
+            return;
+        }
+        ModelMotionsScope motions_scope;
+        if (g_pMotionsContainer->insert(path, loaded) == loaded) // else docked meanwhile, `loaded` freed
+            ++docked;
+    };
+    const auto preload_set = [&](pcstr nm) {
+        FS_FileSet fset;
+        FS.file_list(fset, "$game_meshes$", FS_ListFiles, nm);
+        FS.file_list(fset, "$level$", FS_ListFiles, nm);
+        for (const auto& file : fset)
+            preload(file.name.c_str());
+    };
+    if (data->find_chunk(OGF_S_MOTION_REFS))
+    {
+        string_path items_nm;
+        data->r_stringZ(items_nm, sizeof(items_nm));
+        const u32 set_cnt = _GetItemCount(items_nm);
+        string_path nm;
+        for (u32 k = 0; k < set_cnt; ++k)
+        {
+            _GetItem(items_nm, k, nm);
+            if (strstr(nm, "\\*.omf"))
+            {
+                preload_set(nm);
+                continue;
+            }
+            xr_strcat(nm, ".omf");
+            preload(nm);
+        }
+    }
+    else if (data->find_chunk(OGF_S_MOTION_REFS2))
+    {
+        const u32 set_cnt = data->r_u32();
+        string_path nm;
+        for (u32 k = 0; k < set_cnt; ++k)
+        {
+            data->r_stringZ(nm, sizeof(nm));
+            if (strstr(nm, "\\*.omf"))
+            {
+                preload_set(nm);
+                continue;
+            }
+            xr_strcat(nm, ".omf");
+            preload(nm);
+        }
+    }
+    (void)N;
+    return docked;
+}
+
 void CKinematicsAnimated::LL_BuldBoneMatrixAddonDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys)
 {
     u16 SelfID = bd->GetSelfID();
@@ -1506,20 +1585,14 @@ void CKinematicsAnimated::LL_BoneMatrixBuildAddon(CBoneInstance& bi, const CBone
     Fmatrix L;
     L.mul_43(bd->bind_transform, M_animation);
 
-    // 4. Сборка с родителем (игнорируя его вращение)
+    // 3. Сборка с родителем целиком (позиция и вращение), как у кости без анимации в CKinematics::BuildBoneMatrix.
+    // Раньше бралась только позиция родителя: кость addon_* не следовала за его поворотом в анимации
+    // (крышка ствольной коробки РПД на joint9, магазин Винтореза на magazin). Для костей на корне HUD-модели
+    // результат прежний: корень немонолитного HUD-предмета player_hud держит в identity.
     if (parent)
-    {
-        bi.mTransform.identity();
-        bi.mTransform.c.set(parent->c); // Позиция родителя (wpn_body)
-        
-        // Перемножаем: (Позиция_Родителя) * (Локальный_Bind_Pose)
-        // mul_43 важен, чтобы сохранить правильную иерархию координат
-        bi.mTransform.mulB_43(L); 
-    }
+        bi.mTransform.mul_43(*parent, L);
     else
-    {
         bi.mTransform = L;
-    }
 }
 
 // Добавить скриптовое смещение для кости --#SM+#--

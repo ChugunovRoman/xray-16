@@ -336,12 +336,9 @@ void CSoundRender_Emitter::dispatch_prefill()
 
 void CSoundRender_Emitter::wait_prefill() const
 {
-    // Same help-while-waiting loop as TaskManager::Wait(), keyed on our own flag instead of a Task*.
-    while (prefill_busy.load(std::memory_order_acquire))
-    {
-        if (!TaskScheduler->ExecuteOneTask())
-            std::this_thread::yield();
-    }
+    // Same help-while-waiting loop as TaskManager::Wait(), keyed on our own flag instead of a Task*. Yield after a miss
+    // as before; the bounded spin in the Short spin class (plans/optimization_mt 50g, R11).
+    TaskScheduler->HelpUntil([this] { return !prefill_busy.load(std::memory_order_acquire); });
 }
 
 u32 CSoundRender_Emitter::get_bytes_total() const

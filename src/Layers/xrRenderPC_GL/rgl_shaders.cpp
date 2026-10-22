@@ -503,7 +503,8 @@ HRESULT CRender::shader_compile(pcstr name, IReader* fs, pcstr pFunctionName,
         string_path shadersFolder;
         FS.update_path(shadersFolder, "$game_shaders$", RImplementation.getShaderPath());
 
-        getFileCrc32(fs, shadersFolder, fileCrc);
+        // 50z2: the CRC of each include is computed once per batch (resetFileCrc32IncludeMemo), not for every shader
+        getFileCrc32MemoIncludes(fs, shadersFolder, fileCrc);
         fs->seek(0);
     }
 

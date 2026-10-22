@@ -133,6 +133,30 @@ void CConsole::RemoveCommand(IConsole_Command* cc)
     }
 }
 
+// 50d-stage2-auto-engine.md (plans/optimization_mt): the policy changes when the render device reports its GPU (stage C
+// of the hardware profile), the auto values that depend on the GPU (texture_lod, r2_smap_size,
+// r__second_vp_render_scale) take their final values here. The commands come in the order of the map (by name).
+void CConsole::ResolveAutoCommands(bool log)
+{
+    string1024 line = "";
+    for (const auto& [name, cc] : Commands)
+    {
+        if (!cc || !cc->IsAutoCapable())
+            continue;
+        cc->ResolveAuto();
+        if (!log)
+            continue;
+        IConsole_Command::TStatus value;
+        cc->GetEffectiveStatus(value);
+        string256 item;
+        xr_sprintf(item, "%s%s %s (%s)", line[0] ? ", " : "", cc->Name(), value, cc->IsAuto() ? "auto" : "user");
+        if (xr_strlen(line) + xr_strlen(item) < sizeof(line))
+            xr_strcat(line, item);
+    }
+    if (log && line[0])
+        Msg("* [hw] auto: %s", line);
+}
+
 bool CConsole::ConsumePendingConfigCommandValue(pcstr cmd, shared_str& value)
 {
     const auto it = m_pending_cfg_commands.find(cmd);
@@ -540,7 +564,15 @@ void CConsole::ExecuteCommand(pcstr cmd_str, bool record_cmd)
                 {
                     IConsole_Command::TStatus stat;
                     cc->GetStatus(stat);
-                    Msg("- %s %s", cc->Name(), stat);
+                    if (cc->IsAuto())
+                    {
+                        // 50d-stage2-auto-engine.md: "auto" and the value it gives now
+                        IConsole_Command::TStatus effective;
+                        cc->GetEffectiveStatus(effective);
+                        Msg("- %s %s (%s)", cc->Name(), stat, effective);
+                    }
+                    else
+                        Msg("- %s %s", cc->Name(), stat);
                 }
             }
             else

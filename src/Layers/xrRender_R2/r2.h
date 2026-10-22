@@ -513,6 +513,21 @@ public:
     ref_rt svp_seed_rt[5];
     void capture_svp_seed_targets();
     void release_svp_seed_targets();
+    // R12 (plans/optimization_mt/50e-stage2-svp-vram.md): video memory of the scope pass.
+    // Spot pages of the dedicated SVP shadow atlas = min(r__svp_smap_pages, policy cap). Every reader of the page
+    // budget goes through it, so the atlas slice count and the copy / accumulation loops always agree.
+    u32 svp_smap_pages() const;
+    // Size of the scope pass targets (rt_secondVP and the svp_set twins) from r__second_vp_render_scale.
+    void svp_target_size(u32& w, u32& h) const;
+    // Idle release: with little video memory the svp_set twins and the shadow atlas (300-400 MB at 1080p-1440p)
+    // are freed after some seconds without the scope and recreated lazily by the next scope frame. Main thread
+    // only: the check runs at the top of the main calculate_for (no scope job in flight, no target swap), the
+    // creation stays where it was (BeginSecondVPCalculateParallel, RenderSecondViewport).
+    u32 svp_vram_last_use_ms{}; // Device.dwTimeContinual of the last frame with the scope active / rendered
+    bool svp_vram_released{}; // freed by the idle check: the next creation measures and logs its cost
+    float svp_vram_recreate_ms{}; // CPU time of that creation, summed over the creation points
+    void svp_vram_idle_check();
+    void svp_vram_mark_used() { svp_vram_last_use_ms = Device.dwTimeContinual; }
     bool svp_cmd_deferred{}; // svp dsgraph cmd_list is a deferred context this frame
     bool svp_geom_on_main{};
     // Frame driver: resolved per accepted SVP frame on the main thread; gates the worker stages
@@ -795,7 +810,11 @@ public:
     void models_Clear(bool b_complete) override;
     bool model_Preload(LPCSTR name) override; // 36-spawn-model-load.md
     void model_PrefetchFiles(LPCSTR name, u32 source) override;
-    void models_PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals) override; // 40
+    bool model_PrefetchPending(LPCSTR name) override; // 50i-stage3-slow-disk-io.md
+    void models_PrefetchList(const xr_vector<PrefetchModel>& visuals) override; // 40, 50a
+    // 50k-slow-disk-early-prefetch.md
+    bool models_EarlyWarmStart(const xr_vector<PrefetchModel>& models, const PrefetchEarlyWarmParams& params) override;
+    bool models_EarlyWarmStop(PrefetchEarlyWarmStats& stats, bool release) override;
     void emplace_texture_replacements(shared_str material_key, shared_str dds_path);
 
     // Occlusion culling

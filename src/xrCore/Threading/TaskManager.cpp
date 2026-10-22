@@ -20,9 +20,13 @@
 
 #include "ScopeLock.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
+#include "xrCore/Platform/HwProfile.h"
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 #include <SDL_events.h>
 
@@ -42,6 +46,57 @@
 #error Add your platform here
 #endif
 
+namespace
+{
+// plans/optimization_mt/50g-stage3-threads-power.md, R11: the bounded spin of the Short spin class (a small pool, SMT
+// on <= 4 cores, on battery or in battery saver; HwPolicy.cpp, HwProfile.cpp). A wait loop that found nothing to do:
+//   misses [0, kShortSpinPauses) - one CPU pause each: ~5-20 us together with the checks (a Wait() miss also tries
+//     a few steals), the usual time to the end of a running piece;
+//   then kShortSpinYields yields - the time slice goes to a ready thread of this CPU (maybe the one being awaited);
+//   then blocking until any task finishes or is pushed (TaskManagerNotifyShortWaiters), at most kShortSpinBlockMax.
+// The Long class (pool >= 7 on AC: the tester's machine) never gets here - its loops are as before.
+constexpr u32 kShortSpinPauses = 128;
+constexpr u32 kShortSpinYields = 8;
+// Only a guard against a wake-up missed by an unusual waiter (a flag set outside a task): a regular finish or push
+// wakes the blocked threads at once. ~1-2 ms with timeBeginPeriod(1).
+constexpr auto kShortSpinBlockMax = std::chrono::milliseconds(1);
+
+// Defined before TaskScheduler: built before it and destroyed after it (the pool threads finish in ~TaskManager).
+std::mutex s_short_wait_mutex;
+std::condition_variable s_short_wait_cv;
+u64 s_short_wait_generation = 0; // under s_short_wait_mutex: bumped by every notification
+std::atomic<u32> s_short_waiters{ 0 }; // threads blocked or about to block
+
+void TaskManagerCpuPause() noexcept
+{
+#if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_ARM) || \
+    defined(XR_ARCHITECTURE_ARM64)
+    _mm_pause(); // x86 PAUSE; sse2neon: the ARM yield/isb hint
+#else
+    std::this_thread::yield(); // no pause hint wired for this architecture
+#endif
+}
+
+// After a task finished (ExecuteTask) or was pushed (PushTask): wake the threads blocked in ShortSpinStepImpl. In the
+// Long class only a relaxed load and a branch: nobody blocks there (a waiter that started Short right before a switch
+// to Long wakes by its kShortSpinBlockMax).
+void TaskManagerNotifyShortWaiters() noexcept
+{
+    if (!TaskManager::ShortSpin())
+        return;
+    // Pairs with the fence in ShortSpinStepImpl: either this thread sees the waiter's count, or the waiter sees the
+    // finish this thread made before (the done() check after its announcement)
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    if (!s_short_waiters.load(std::memory_order_relaxed))
+        return;
+    {
+        std::lock_guard lock{ s_short_wait_mutex };
+        ++s_short_wait_generation;
+    }
+    s_short_wait_cv.notify_all();
+}
+} // namespace
+
 xr_unique_ptr<TaskManager> TaskScheduler;
 
 static constexpr size_t OTHER_THREADS_COUNT = 1; // Primary and Secondary thread
@@ -50,6 +105,24 @@ static constexpr size_t OTHER_THREADS_COUNT = 1; // Primary and Secondary thread
 // front so such a late RegisterThisThreadAsWorker() never reallocates `workers` while the pool threads read it
 // without the lock (TryToSteal). The pool size is not affected.
 static constexpr size_t CUSTOM_THREADS_RESERVE = 2;
+
+// GW (plans/optimization_mt 50, R8): the pool threads SpawnThreads starts - Policy::pool_workers of the hardware
+// profile. Stage A computes it right before the TaskManager is created (xrCore::Initialize), from the CPUs available
+// to the process (affinity, CPU sets) with the -hw_* keys applied: >= 12 logical - logical - 1 (at most 23), fewer -
+// by the physical cores (HwPolicy.cpp). Fallback when stage A did not run: hardware_concurrency() - 1 as before;
+// hardware_concurrency() may be 0 ("not computable"), and 0 - OTHER_THREADS_COUNT wrapped around u32 (4 billion
+// threads). At least one pool worker: fire-and-forget tasks nobody waits for still need a thread to run them.
+static size_t PoolThreadsCount(bool* from_policy = nullptr)
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    const bool use_policy = (xray::hw::GetProfile().stages & xray::hw::STAGE_A) && policy.pool_workers > 0;
+    if (from_policy)
+        *from_policy = use_policy;
+    if (use_policy)
+        return policy.pool_workers;
+    const size_t hw = std::thread::hardware_concurrency();
+    return std::max<size_t>(hw, OTHER_THREADS_COUNT + 1) - OTHER_THREADS_COUNT;
+}
 
 class TaskStorageSize
 {
@@ -194,7 +267,8 @@ public:
 TaskManager::TaskManager()
 {
     ZoneScoped;
-    workers.reserve(std::thread::hardware_concurrency() + CUSTOM_THREADS_RESERVE);
+    // main (registered below) + the pool + the custom threads
+    workers.reserve(OTHER_THREADS_COUNT + PoolThreadsCount() + CUSTOM_THREADS_RESERVE);
     RegisterThisThreadAsWorker();
 }
 
@@ -202,8 +276,11 @@ void TaskManager::SpawnThreads()
 {
     ZoneScoped;
 
-    const u32 threads = std::thread::hardware_concurrency() - OTHER_THREADS_COUNT;
+    bool from_policy = false;
+    const u32 threads = static_cast<u32>(PoolThreadsCount(&from_policy));
     workerThreads.reserve(threads);
+    Msg("* [hw] task pool: %u workers (%s, hardware_concurrency %u)", threads,
+        from_policy ? "hw policy" : "no hw policy: hardware_concurrency - 1", std::thread::hardware_concurrency());
 
     for (u32 i = 0; i < threads; ++i)
     {
@@ -296,8 +373,15 @@ void TaskManager::TaskWorkerStart()
     {
         if (!shouldPause.load(std::memory_order_consume))
         {
+            // 50z5-extra-diagnostics.md: the busy share of the pool in the [sys] lines (two Ticks() per task); stolen =
+            // not from the own queue
+            const u64 exec_t0 = ::xray::perf::Ticks();
+            const size_t own0 = s_tl_worker.execOwn;
             if (ExecuteOneTask())
+            {
+                ::xray::perf::TaskPoolExecNote(::xray::perf::Ticks() - exec_t0, s_tl_worker.execOwn == own0);
                 continue;
+            }
         }
 
         SetThreadStatus(false);
@@ -370,12 +454,51 @@ void TaskManager::PushTask(Task& task) noexcept
     ++s_tl_worker.wakeEvents;
     PERF_INC(task_wake_event);
     ++s_tl_worker.pushedTasks;
+    TaskManagerNotifyShortWaiters(); // R11: a blocked waiter may run it
 }
 
 void TaskManager::ExecuteTask(Task& task)
 {
     task();
     ++s_tl_worker.finishedTasks;
+    TaskManagerNotifyShortWaiters(); // R11: it may be the awaited one (or its last piece)
+}
+
+bool TaskManager::ShortSpin() noexcept
+{
+    return xray::hw::GetEffectiveSpinClass() == xray::hw::SpinClass::Short;
+}
+
+void TaskManager::ShortSpinStepImpl(u32 misses, SpinDoneFn* done, const void* context) noexcept
+{
+    if (misses < kShortSpinPauses)
+    {
+        TaskManagerCpuPause();
+        return;
+    }
+    if (misses < kShortSpinPauses + kShortSpinYields)
+    {
+        std::this_thread::yield(); // SwitchToThread on Windows
+        return;
+    }
+
+    const bool timed = xray::perf::g_perf_metrics_active;
+    const u64 block_t0 = timed ? xray::perf::Ticks() : 0;
+    {
+        std::unique_lock lock{ s_short_wait_mutex };
+        s_short_waiters.fetch_add(1, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_seq_cst); // pairs with TaskManagerNotifyShortWaiters
+        if (!done(context))
+        {
+            const u64 generation = s_short_wait_generation;
+            s_short_wait_cv.wait_for(lock, kShortSpinBlockMax,
+                [generation] { return s_short_wait_generation != generation; });
+        }
+        s_short_waiters.fetch_sub(1, std::memory_order_relaxed);
+    }
+    PERF_INC(task_wait_block);
+    if (timed)
+        xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_block_time, xray::perf::Ticks() - block_t0);
 }
 
 void TaskManager::RunTask(Task& task)
@@ -411,12 +534,16 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
     const bool time_it = s_tl_wait_depth == 1 && s_tl_worker.id == 0 && xray::perf::g_perf_metrics_active;
     const u64 wait_t0 = time_it ? xray::perf::Ticks() : 0;
     u64 exec_ticks = 0;
+    // R11 (50g): Long - spin on ExecuteOneTask() as before; Short - pause / yield / block after the misses
+    const bool short_spin = ShortSpin();
+    u32 misses = 0;
 
     while (!task.IsFinished())
     {
         const u64 iter_t0 = time_it ? xray::perf::Ticks() : 0;
         if (ExecuteOneTask())
         {
+            misses = 0;
             if (time_it)
                 exec_ticks += xray::perf::Ticks() - iter_t0;
         }
@@ -424,6 +551,8 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
         {
             ++s_tl_worker.waitSpin;
             PERF_INC(task_wait_spin);
+            if (short_spin)
+                ShortSpinStep(misses++, [&task] { return task.IsFinished(); });
         }
         if (s_tl_worker.id == 0 && (xrDebug::ProcessingFailure() || updateSystemEvents))
             SDL_PumpEvents(); // Necessary to prevent dead locks
@@ -446,7 +575,7 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
 // awaited task taken elsewhere), exec_foreign (other threads' work, the fallback steals).
 // Its own queue, then a piece of the awaited task at the head of any other queue; nothing else. Waiting for a
 // task that runs elsewhere the thread spins, waking a sleeping worker now and then (a worker sleeps after a few
-// missed random steals, possibly past the awaited task); after kOwnOnlyFallback without own work it steals once as
+// missed random steals, possibly past the awaited task; the Short spin class blocks instead, plan 50g R11); after kOwnOnlyFallback without own work it steals once as
 // before (task/wait_game/fallback): the awaited task may sit in the queue of a thread that will not serve it soon
 // (main in the join, a worker blocked on a lock this thread holds) - the old Wait() would have run it here.
 void TaskManager::WaitGameThread(const Task& task) const
@@ -462,6 +591,10 @@ void TaskManager::WaitGameThread(const Task& task) const
     bool idle = false; // no own work since idle_since
     clock::time_point idle_since{};
     clock::time_point last_wake{};
+    // R11 (50g): Short - no wake-up of a worker every kWakePeriod (one at the start of the idle stretch stays), the
+    // empty checks pause / yield / block instead (a push or a finish ends the block). The 1 ms fallback steal stays.
+    const bool short_spin = ShortSpin();
+    u32 misses = 0;
 
     while (!task.IsFinished())
     {
@@ -512,7 +645,7 @@ void TaskManager::WaitGameThread(const Task& task) const
                     }
                     idle_since = now; // the next fallback steal after another kOwnOnlyFallback
                 }
-                else if (now - last_wake >= kWakePeriod)
+                else if (!short_spin && now - last_wake >= kWakePeriod)
                 {
                     last_wake = now;
                     newWorkArrived.Set();
@@ -528,6 +661,7 @@ void TaskManager::WaitGameThread(const Task& task) const
         if (t)
         {
             ExecuteTask(*t);
+            misses = 0;
             if (!foreign)
                 idle = false;
             if (time_it)
@@ -537,6 +671,8 @@ void TaskManager::WaitGameThread(const Task& task) const
         {
             ++s_tl_worker.waitSpin;
             PERF_INC(task_wait_spin);
+            if (short_spin)
+                ShortSpinStep(misses++, [&task] { return task.IsFinished(); });
         }
     }
 
@@ -591,6 +727,12 @@ bool TaskManager::ExecuteOneTask() const
 size_t TaskManager::GetWorkersCount() const noexcept
 {
     return workers.size();
+}
+
+size_t TaskManager::GetPoolWorkersCount() const noexcept
+{
+    // Filled once by SpawnThreads on the main thread before any task is pushed, never changed afterwards
+    return workerThreads.size();
 }
 
 size_t TaskManager::GetMaxWorkersCount() const noexcept

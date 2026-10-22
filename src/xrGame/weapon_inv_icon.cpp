@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Platform/HwProfile.h"
 #include "weapon_inv_icon.h"
 #include "Weapon.h"
 #include "Level.h"
@@ -249,6 +250,16 @@ void EnsureLoaded()
     g_icons_per_frame = pSettings->read_if_exists<u32>("weapon_inv_icon", "icons_per_frame", 2);
     g_rt_budget_mb = pSettings->read_if_exists<u32>("weapon_inv_icon", "rt_budget_mb", 192);
     clamp(g_rt_budget_mb, 0u, 4096u);
+    // R13 of plan 50 (50d-stage2-auto-engine.md): the hardware policy caps the configured budget by the video memory,
+    // min(192, budget / 16) MB. 0 in the config (unbounded) is a deliberate choice and stays. The icons are made in a
+    // game, long after the real render device reported its GPU.
+    const xray::hw::Policy& hw_policy = xray::hw::GetPolicy();
+    if (g_rt_budget_mb && xray::hw::PolicyValid(hw_policy) && hw_policy.icons_mb &&
+        u32(hw_policy.icons_mb) < g_rt_budget_mb)
+    {
+        Msg("* [weapon_inv_icon] icon RT budget %u MB (config %u MB, hw policy)", u32(hw_policy.icons_mb), g_rt_budget_mb);
+        g_rt_budget_mb = hw_policy.icons_mb;
+    }
     if (GEnv.Render && !GEnv.isDedicatedServer)
         GEnv.Render->WeaponIcon_SetUserIconRtBudget(u64(g_rt_budget_mb) * 1024ull * 1024ull);
     g_icons_per_frame_inventory_open =

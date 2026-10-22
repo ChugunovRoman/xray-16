@@ -22,6 +22,7 @@ public:
     CTexture* GetBaseTexture() const;
     bool GetBaseTextureResolution(Fvector2& res) override;
     xrImTextureData GetImGuiTextureId() override;
+    bool BaseTexturePending() override; // 50r-slow-disk-async-textures.md
 
 private:
     ref_shader hShader;

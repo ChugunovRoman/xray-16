@@ -239,8 +239,17 @@ public:
     ~motions_container();
     bool has(shared_str key);
     motions_value* dock(shared_str key, IReader* data, vecBones* bones);
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): docks motions loaded outside the container (a new
+    // motions_value with m_dwReference 0, motions_value::load run on another thread, outside the lock of the caller).
+    // The first one docked under a key wins: when the key is there already, `loaded` is freed. Returns the docked one.
+    // Same thread-safety as dock (the render calls both under its motions lock).
+    motions_value* insert(shared_str key, motions_value* loaded);
     void dump();
     void clean(bool force_destroy);
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): the docked motions and of them those no model holds (they
+    // stay until clean(false), i.e. until the model pool is destroyed). No bytes: mem_usage walks every motion of every
+    // bone (stat_motions does). Not thread-safe against dock: the render calls it under its motions lock.
+    void stats(size_t& count, size_t& unreferenced) const;
 };
 
 extern XRCORE_API motions_container* g_pMotionsContainer;

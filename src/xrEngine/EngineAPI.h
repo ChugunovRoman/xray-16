@@ -58,6 +58,9 @@ public:
     virtual bool CheckGameRequirements() = 0;
     virtual void SetupEnv(pcstr mode) = 0;
     virtual void ClearEnv() = 0;
+    // 50z2: the modes ObtainSupportedModes gives when the hardware test passes, without running the test (a module
+    // that is not probed is still listed in the options). Empty: the module can't tell, it is always probed.
+    virtual xr_vector<std::pair<pcstr, int>> GetUntestedModes() const { return {}; }
 };
 
 class ENGINE_API CEngineAPI
@@ -77,8 +80,8 @@ public:
     CEngineAPI();
     ~CEngineAPI();
 
-    // Call it in the main thread
-    void CreateRendererList(const std::array<RendererModule*, 2>& modules);
+    // Call it in the main thread. requestedMode: the renderer the command line or user.ltx asks for (may be empty)
+    void CreateRendererList(const std::array<RendererModule*, 2>& modules, pcstr requestedMode);
     void Initialize(GameModule* game);
     void Destroy();
 };

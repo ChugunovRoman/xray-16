@@ -82,7 +82,19 @@ pcstr CConsole::GetString(pcstr cmd) const
     return stat;
 }
 
-pcstr CConsole::GetToken(pcstr cmd) const { return GetString(cmd); }
+// The effective value: for an auto-capable command in auto mode (xr_ioc_cmd.h, IConsole_Command::IsAuto) the token /
+// number the hardware policy gave, not "auto" (GetString gives "auto" then). The same as GetString otherwise.
+pcstr CConsole::GetToken(pcstr cmd) const
+{
+    IConsole_Command* cc = GetCommand(cmd);
+    if (!cc)
+        return NULL;
+
+    static IConsole_Command::TStatus stat;
+    cc->GetEffectiveStatus(stat);
+    return stat;
+}
+
 const xr_token* CConsole::GetXRToken(pcstr cmd) const
 {
     IConsole_Command* cc = GetCommand(cmd);

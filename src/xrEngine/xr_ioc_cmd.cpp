@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
+#include "xrCore/Platform/HwProfile.h"
 #include "IGame_Level.h"
 
 #include "XR_IOConsole.h"
@@ -109,6 +111,15 @@ public:
     }
 };
 
+//-----------------------------------------------------------------------
+// Prints the hardware profile and the policy derived from it (plans/optimization_mt/50-smart-engine-hw-profile.md).
+// Stores nothing: GetStatus is empty, so cfg_save does not write it to user.ltx.
+class CCC_HwInfo : public IConsole_Command
+{
+public:
+    CCC_HwInfo(pcstr N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    void Execute(pcstr /*args*/) override { xray::hw::LogInfo(); }
+};
 //-----------------------------------------------------------------------
 class CCC_Help : public IConsole_Command
 {
@@ -310,6 +321,7 @@ public:
             Log("! Can't start game without client. Arguments: '%s'.", args);
             return;
         }
+        xray::perf::LoadMarkBegin("start"); // 50z5-extra-diagnostics.md: the [load] timeline of a start / load
         if (g_pGameLevel)
             Engine.Event.Defer("KERNEL:disconnect");
 
@@ -796,6 +808,7 @@ void CCC_Register()
     CMD1(CCC_Disconnect, "disconnect");
     CMD1(CCC_SaveCFG, "cfg_save");
     CMD1(CCC_LoadCFG, "cfg_load");
+    CMD1(CCC_HwInfo, "hw_info");
 
     // Bits: 1 = Tracy plots, 2 = 5 s Msg log, 4 = hide the engine's existing per-call hot-path Tracy zones
     // while measuring (xray::perf::HideHotZones(), PERF_HOT_ZONE). Not saved to user.ltx, see CCC_PerfMetrics.
@@ -817,6 +830,10 @@ void CCC_Register()
     // that frame (Lua GC, relcase, ALife, game events, Lua binders, the bus, game_wait / frame_move / render), at most
     // 30 lines per 5 s; 0 = off. > 0 collects the metrics even with perf_metrics 0. Not saved (same class).
     CMD4(CCC_PerfMetrics, "perf_frame_peak_ms", &::xray::perf::g_perf_frame_peak_ms, 0, 10000);
+    // 50n-frame-spike-report.md: the frame spike report of every build ("! [frame-spike]", two lines per frame of play
+    // longer than max(perf_frame_spike_ms, 3 x the running median), at most 10 per 10 s). The emergency switch only:
+    // 0 = off (the 60 s "* [frame]" window lines stay). Not saved (same class).
+    CMD4(CCC_PerfMetrics, "perf_frame_spike_ms", &::xray::perf::g_perf_frame_spike_ms, 0, 10000);
     // 32-frame-spikes.md: the relcase switches R1, R2, the callback scan, the no-op skip and the parallel relcase
     // (ol_relcase_npc_batch, ol_relcase_vision_sorted, ol_relcase_cb_scan, ol_relcase_skip_noop, ol_relcase_parallel)
     // are always on since 2026-10-18 (41-cvar-cleanup.md, see xr_object.h). So are, since the same day (step 2), the
@@ -907,7 +924,19 @@ void CCC_Register()
     // CMD4(CCC_Integer, "rs_ib_size", &rsDIB_Size, 32, 4096);
 
     // Texture manager
-    CMD4(CCC_Integer, "texture_lod", &psTextureLOD, 0, 4);
+    {
+        // R13 of plan 50 (50d-stage2-auto-engine.md): "texture_lod auto" - one step more at <= 3 GB of video memory or
+        // on an integrated GPU, the engine default otherwise. Resolved again after the real render device (stage C).
+        static CCC_Integer texture_lod("texture_lod", &psTextureLOD, 0, 4);
+        texture_lod.SetAuto([](int& lod) {
+            const xray::hw::Policy& policy = xray::hw::GetPolicy();
+            if (!xray::hw::PolicyValid(policy))
+                return false;
+            lod = policy.texture_lod_auto;
+            return true;
+        });
+        Console->AddCommand(&texture_lod);
+    }
     CMD4(CCC_Integer, "net_dedicated_sleep", &psNET_DedicatedSleep, 0, 64);
 
     // General video control
@@ -930,7 +959,20 @@ void CCC_Register()
     CMD3(CCC_Mask, "snd_use_float32", &psSoundFlags, ss_UseFloat32);
     CMD4(CCC_Integer, "snd_targets", &psSoundTargets, 4, 256);
     // 46-engine-core-render-audit.md: the PCM cache is filled by use now (sounds played twice), the cap is up to 512 MB
-    CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 512);
+    {
+        // R18 of plan 50 (50d-stage2-auto-engine.md): "snd_cache_size auto" - by the RAM (known at stage A, before
+        // user.ltx): < 12 GB - 40 MB, 12..24 - 64, more - 96 (the engine default). The budget is read when a source
+        // fills its PCM cache (SoundRender_Source.cpp), so the value is in time whenever it is set.
+        static CCC_Integer snd_cache_size("snd_cache_size", &psSoundCacheSizeMB, 4, 512);
+        snd_cache_size.SetAuto([](int& mb) {
+            const xray::hw::Policy& policy = xray::hw::GetPolicy();
+            if (!xray::hw::PolicyValid(policy) || !policy.snd_cache_mb_auto)
+                return false;
+            mb = policy.snd_cache_mb_auto;
+            return true;
+        });
+        Console->AddCommand(&snd_cache_size);
+    }
     CMD4(CCC_Float, "snd_cache_short_sec", &psSoundCacheShortSec, 0.0f, 30.0f);
     // plans/optimization_mt/34-sound-cold-load.md: the sound prefetch (a background thread reads ahead the .ogg of the
     // folders named by scripts and of a sound loaded cold in a game event) is always on since 2026-10-18

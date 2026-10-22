@@ -97,6 +97,18 @@ enum esound_type : u32
     st_Music = 1,
 };
 
+// plans/optimization_mt/50j-slow-disk-async-sound.md: the source of a sound created deferred
+// (ref_sound::create_deferred, a slow disk only) - its file is read on the "Sound prefetch" thread
+enum class SoundSourceState : u8
+{
+    Ready,   // read: its length, format and info are known (always so for a sound created the usual way)
+    Pending, // queued or being read in the background
+    Failed,  // the file could not be read: nothing plays
+};
+
+// 50j: how long a play of a deferred sound may wait for its source (CSoundPlayer), then it is dropped
+constexpr u32 snd_deferred_max_delay_ms = 1500;
+
 /// definition (Sound Source)
 class XRSOUND_API XR_NOVTABLE CSound_source
 {
@@ -245,8 +257,45 @@ public:
 
     // 34-sound-cold-load.md: read ahead in the background the .ogg files of a folder relative to $game_sounds$
     // (e.g. "taunts\\actor_stalker\\"; one path component may be "*" = every subfolder). Returns at once. Each folder
-    // is taken once per session.
+    // is taken once per session. 50i-stage3-slow-disk-io.md: on a slow disk a "*" folder is not read in bulk - its
+    // subfolders are read one by one, each when a sound of it is loaded cold in a game event.
     virtual void prefetch_sources(pcstr folder) = 0;
+
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): the loaded sources (one per file, kept until the sound
+    // restarts or the exit) and the bytes of their PCM caches, for the [mem] line of stat_memory. Any thread
+    virtual void memory_stats(size_t& sources, size_t& pcm_cached_bytes)
+    {
+        sources = 0;
+        pcm_cached_bytes = 0;
+    }
+
+    // plans/optimization_mt/50j-slow-disk-async-sound.md: the state of the source of S. urgent = a play waits for it:
+    // a pending source is read before the others. Any thread
+    virtual SoundSourceState source_state(const CSound& /*S*/, bool /*urgent*/)
+    {
+        return SoundSourceState::Ready;
+    }
+
+    // plans/optimization_mt/50z3-startup-slow-disk-io.md: reads on the calling thread every source still pending (created
+    // deferred, not read by the "Sound prefetch" thread yet). The engine calls it once, at the start of the first level
+    // load: the sounds of the start-up (the material library, the weather ambients) the menu did not read are read
+    // there, as the start-up read them before. The number of them. Main thread
+    virtual u32 read_pending_sources() { return 0; }
+
+protected:
+    // 50j: as create(), but on a slow disk a source not loaded yet is not read here: it is queued to the "Sound
+    // prefetch" thread and the sound starts pending (dwBytesTotal / fTimeTotal 0, CSound::deferred). Only for sounds
+    // nobody needs the length of before a play: a play reads the source if it still waits (SoundSourceState). Elsewhere
+    // (a fast disk) - create(). 50z3: sg_SourceType too - the type is taken from the source with the numbers
+    virtual CSound* create_deferred(pcstr fName, esound_type sound_type, u32 game_type)
+    {
+        return create(fName, sound_type, game_type);
+    }
+
+    // 50z3-startup-slow-disk-io.md: a deferred S takes its numbers from its source now (read here if it still waits), as
+    // the start of a play does; for a shared sound other threads may play directly (the material library) - resolved on
+    // main before they run. false = the source could not be read
+    virtual bool resolve_deferred(CSound& /*S*/) { return true; }
 };
 
 class XRSOUND_API CSoundManager
@@ -300,6 +349,12 @@ public:
     u32 dwBytesTotal{};
     float fTimeTotal{};
 
+    // plans/optimization_mt/50j-slow-disk-async-sound.md: created before its source was read (create_deferred, a slow
+    // disk): dwBytesTotal and fTimeTotal (and g_type when deferred_g_type: the type is the source's, sg_SourceType) are
+    // 0 until they are taken from the source - by clone() of a ready source and by the start of a play
+    bool deferred{};
+    bool deferred_g_type{};
+
     CSound(CSound_source* src) : handle(src) { VERIFY(src); }
     ~CSound() override { GEnv.Sound->destroy(*this); }
 };
@@ -338,6 +393,27 @@ struct resptrcode_sound : public resptr_base<CSound>
         return _get();
     }
 
+    // plans/optimization_mt/50j-slow-disk-async-sound.md: see ISoundManager::create_deferred
+    ICF bool create_deferred(pcstr name, esound_type sound_type, u32 game_type)
+    {
+        VerSndUnlocked();
+        _set(GEnv.Sound->create_deferred(name, sound_type, game_type));
+        return _get();
+    }
+
+    // 50j: Ready for a sound created the usual way; Failed without a sound
+    [[nodiscard]]
+    SoundSourceState source_state(bool urgent = false) const
+    {
+        return p_ ? GEnv.Sound->source_state(*p_, urgent) : SoundSourceState::Failed;
+    }
+
+    // 50z3-startup-slow-disk-io.md: see ISoundManager::resolve_deferred; a no-op for a sound created the usual way
+    bool resolve_deferred() const
+    {
+        return !p_ || !p_->deferred || GEnv.Sound->resolve_deferred(*p_);
+    }
+
     ICF void destroy()
     {
         _set(nullptr);
@@ -356,12 +432,29 @@ struct resptrcode_sound : public resptr_base<CSound>
         if (!from._get())
             return;
         _set(xr_new<CSound>(from->handle));
-        p_->dwBytesTotal = from->dwBytesTotal;
-        p_->fTimeTotal = from->fTimeTotal;
         p_->fn_attached[0] = from->fn_attached[0];
         p_->fn_attached[1] = from->fn_attached[1];
-        p_->g_type = (game_type == sg_SourceType) ? p_->handle->game_type() : game_type;
         p_->s_type = sound_type;
+        // 50j-slow-disk-async-sound.md: the source of a deferred sound may still be read in the background - then the
+        // clone is deferred too (filled when it starts playing); a ready one gives its numbers now
+        if (from->deferred && from.source_state() == SoundSourceState::Pending)
+        {
+            p_->deferred = true;
+            p_->deferred_g_type = game_type == sg_SourceType;
+            p_->g_type = p_->deferred_g_type ? sg_Undefined : game_type;
+            return;
+        }
+        if (from->deferred) // no tails: attach_tail() takes the source of a deferred sound first
+        {
+            p_->dwBytesTotal = p_->handle->bytes_total();
+            p_->fTimeTotal = p_->handle->length_sec();
+        }
+        else
+        {
+            p_->dwBytesTotal = from->dwBytesTotal;
+            p_->fTimeTotal = from->fTimeTotal;
+        }
+        p_->g_type = (game_type == sg_SourceType) ? p_->handle->game_type() : game_type;
     }
 
     ICF void play(IGameObject* O, u32 flags = 0, float delay = 0.f)

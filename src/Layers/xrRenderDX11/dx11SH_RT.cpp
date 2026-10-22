@@ -3,6 +3,7 @@
 
 #include "Layers/xrRender/ResourceManager.h"
 #include "dx11TextureUtils.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -18,6 +19,7 @@ void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/
 {
     if (pSurface)
         return;
+    GW_FRAME_EVENT(RtCreate); // 50z5-extra-diagnostics.md: "rtc" of the frame report
 
     R_ASSERT(HW.pDevice && Name && Name[0] && w && h);
     _order = CPU::QPC(); // Device.GetTimerGlobal()->GetElapsed_clk();

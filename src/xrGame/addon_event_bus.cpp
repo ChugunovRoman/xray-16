@@ -1292,6 +1292,50 @@ void DescribeHandlerSpike(const void* ctx, char* buf, size_t size)
 }
 #endif
 
+// 50n-frame-spike-report.md (Lua events): a timed Lua subscriber call of at least xray::perf::LuaDispatchFloorTicks()
+// goes to xray::perf::LuaDispatchNote named "<file>:<line>" of its function ({object}: "<event>@<file>:<line>"), the
+// script without its directory. The function: the copy on the stack (handler_index, always there for a {once} one) or
+// the registry reference of the subscription if it is still alive - the handler may have unsubscribed itself ("?").
+// Only after a slow call; leaves the stack as it was.
+void NoteTimedLuaHandler(lua_State* L, const Event& event, GwpSubscriptionId id, ESubscriberKind kind,
+    int handler_index, u64 ticks)
+{
+    const int top = lua_gettop(L);
+    int index = handler_index;
+    if (!index && lua_checkstack(L, 1))
+    {
+        for (const Subscriber& subscriber : event.subscribers)
+        {
+            if (subscriber.id != id)
+                continue;
+            if (subscriber.alive && subscriber.lua_ref != LUA_NOREF)
+            {
+                lua_rawgeti(L, LUA_REGISTRYINDEX, subscriber.lua_ref);
+                index = lua_gettop(L);
+            }
+            break;
+        }
+    }
+    string256 handler;
+    DescribeHandler(L, index, kind, event, handler, sizeof(handler));
+    lua_settop(L, top);
+
+    pcstr text = handler;
+    if (0 == strncmp(text, "fn=", 3))
+        text += 3;
+    pcstr at = strchr(text, '@');
+    pcstr path = at ? at + 1 : text;
+    pcstr file = path;
+    for (pcstr c = path; *c; ++c)
+    {
+        if (*c == '\\' || *c == '/')
+            file = c + 1;
+    }
+    string256 name;
+    xr_sprintf(name, "%.*s%s", static_cast<int>(path - text), text, file);
+    xray::perf::LuaDispatchNote(ticks, event.name.c_str(), name);
+}
+
 void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 {
     ZoneScopedN("events/dispatch_lua"); // Tracy: all Lua subscribers of one emit
@@ -1322,6 +1366,12 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
     // stack: a {once} one loses its registry reference before the call.
     const bool lua_spike = gw::lua_spike::Enabled();
     const bool name_handlers = lua_spike || xray::perf::SpikeActive() || tracy_text;
+    // 50n-frame-spike-report.md (Lua events, always on with perf_frame_spike_ms > 0): every call is timed, a slow one
+    // is named for the frame spike report / a "[lua-slow]" line (NoteTimedLuaHandler); the calls together too
+    const bool timed = xray::perf::LuaDispatchTimed();
+    u64 timed_sum = 0;
+    u32 timed_calls = 0;
+    bool timed_slow_call = false; // one call of this dispatch alone reached the [lua-slow] threshold
 
     u32 now = 0;
     bool now_set = false;
@@ -1373,6 +1423,7 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
         const ESubscriberKind kind = subscriber.kind;
         const int lua_ref = subscriber.lua_ref;
         const bool once = subscriber.once;
+        const GwpSubscriptionId subscription_id = subscriber.id;
 
         int profile_handle = 0;
         if (profile)
@@ -1382,7 +1433,7 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
         }
 
         int handler_index = 0;
-        if (name_handlers)
+        if (name_handlers || (timed && once)) // a {once} subscriber has no registry reference after the call
         {
             lua_rawgeti(L, LUA_REGISTRYINDEX, lua_ref);
             handler_index = lua_gettop(L);
@@ -1421,7 +1472,10 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 #endif
             PERF_SPIKE_NAMED(handler_spike, "events/lua_handler", &spike_ctx, &DescribeHandlerSpike, false);
             gw::lua_spike::Probe spike(lua_spike ? L : nullptr, gw::lua_spike::ECategory::EventHandler);
-            if (lua_pcall(L, nargs, 0, 0) != 0)
+            const u64 call_t0 = timed ? xray::perf::Ticks() : 0;
+            const int call_status = lua_pcall(L, nargs, 0, 0);
+            const u64 call_ticks = timed ? xray::perf::Ticks() - call_t0 : 0;
+            if (call_status != 0)
             {
                 const char* error = lua_tostring(L, -1);
                 Msg("! Script callback [%s] failed: %s", event.name.c_str(), error ? error : "(non-string error)");
@@ -1434,11 +1488,28 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
                 xr_sprintf(what, "%.200s %.250s", event.name.c_str(), handler);
                 spike.Report(what, gw::lua_spike::kNoId, gw::lua_spike::kNoId);
             }
+            if (timed)
+            {
+                timed_sum += call_ticks;
+                ++timed_calls;
+                if (call_ticks >= xray::perf::LuaDispatchFloorTicks())
+                {
+                    NoteTimedLuaHandler(L, event, subscription_id, kind, handler_index, call_ticks);
+                    timed_slow_call = timed_slow_call || call_ticks >= xray::perf::LuaSlowTicks();
+                }
+            }
         }
 
         if (profile_handle)
             ProfileEnd(L, profile_handle);
         lua_settop(L, base);
+    }
+    // many calls, none slow alone, slow together: one line for the event (not the frame's slowest call)
+    if (timed && timed_calls > 1 && !timed_slow_call)
+    {
+        const u64 slow = xray::perf::LuaSlowTicks();
+        if (slow && timed_sum >= slow)
+            xray::perf::LuaDispatchNote(timed_sum, event.name.c_str(), nullptr, timed_calls);
     }
 }
 
@@ -1890,6 +1961,7 @@ int LuaEmit(lua_State* L)
 
     if (event->lua_count)
     {
+        GW_FRAME_PHASE_LOGIC(LuaBus, GLuaBus); // 50n: the frame spike report ("luaev")
         LuaArgs args;
         args.first = 2;
         args.count = argc;
@@ -2452,6 +2524,7 @@ GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* resu
     if (L && lua_checkstack(L, 4))
     {
         PERF_SCOPE(events_dispatch_lua);
+        GW_FRAME_PHASE_LOGIC(LuaBus, GLuaBus); // 50n: the frame spike report ("luaev")
         gw::lua_spike::Probe spike(L, gw::lua_spike::ECategory::EventLua);
         DispatchLuaFromNative(bus, L, *event, argv, argc, result, from_engine);
         if (spike.Finish())

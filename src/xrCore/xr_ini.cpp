@@ -16,6 +16,7 @@
 
 XRCORE_API CInifile const* pSettings = nullptr;
 XRCORE_API CInifile const* pSettingsAuth = nullptr;
+XRCORE_API SettingsAuthLoader pSettingsAuthLoader = nullptr;
 XRCORE_API CInifile const* pSettingsOpenXRay = nullptr;
 XRCORE_API CInifile const* pSettingsFE = nullptr;
 

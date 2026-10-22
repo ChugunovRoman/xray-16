@@ -13,6 +13,7 @@
 #include "UIGameCustom.h"
 #include "ui/UICDkey.h"
 #include "xrNetServer/NET_Messages.h"
+#include "xrCore/Profiling/SysDiag.hpp"
 
 int g_cl_save_demo = 0;
 
@@ -145,6 +146,7 @@ bool CLevel::net_start1()
 
 bool CLevel::net_start2()
 {
+    xray::perf::LoadMark("server_create"); // 50z5-extra-diagnostics.md: the [load] timeline
     if (net_start_result_total && m_caServerOptions.size())
     {
         ZoneScoped;
@@ -155,7 +157,9 @@ bool CLevel::net_start2()
             Msg("! Failed to start server.");
             return true;
         }
+        xray::perf::LoadMark("alife_load"); // the ALife simulator: the script engine, the save, the graph
         Server->SLS_Default();
+        xray::perf::LoadMark("alife_online_switch");
         map_data.m_name = Server->level_name(m_caServerOptions);
         if (!GEnv.isDedicatedServer)
             g_pGamePersistent->LoadTitle(nullptr, true, map_data.m_name);
@@ -344,6 +348,7 @@ bool CLevel::net_start6()
             CurrentGameUI()->OnConnected();
     }
 
+    xray::perf::LoadMark("net_start_done"); // 50z5-extra-diagnostics.md: the [load] timeline
     return true;
 }
 

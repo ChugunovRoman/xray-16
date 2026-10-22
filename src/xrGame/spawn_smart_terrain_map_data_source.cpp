@@ -8,6 +8,7 @@
 
 #include "Common/object_loader.h"
 #include "xrAICore/Navigation/game_graph.h"
+#include "xrCore/BackgroundIo.h"
 #include "xrCore/Threading/ThreadUtil.h"
 #include "xrEngine/Engine.h"
 #include "xrServerEntities/xrMessages.h"
@@ -472,6 +473,84 @@ bool parse_spawn_packet_metadata(
     return false;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// plans/optimization_mt/50z3-startup-slow-disk-io.md: the walk below maps the spawn file and touches nearly all of it
+// (~100 MB): on a slow disk that is page faults of 32-64 KB in between the reads of everybody else. There the file is
+// read ahead first, sequentially in big reads, in the slot of the single background I/O queue (xray::io): kWarmSlot
+// bytes per take of the slot, so the other readers get it in between; then the walk finds the pages in the OS cache.
+// A load nobody waits for yet (the menu settled) reads as a Warm client - after the foreground reads of the menu; a
+// load a map waits for (urgent) as a Model one - only after the read in progress.
+constexpr size_t kWarmRead = 1024 * 1024;
+constexpr u64 kWarmSlot = 4ull * 1024 * 1024;
+
+// false = no such file / stopped. stop and urgent are the cache's.
+bool warm_spawn_file(pcstr path, const std::atomic<bool>& stop, const std::atomic<bool>& urgent, u64& bytes)
+{
+    bytes = 0;
+#if defined(XR_PLATFORM_WINDOWS)
+    wchar_t wpath[1024];
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, static_cast<int>(sizeof(wpath) / sizeof(wpath[0]))))
+        return false;
+    const HANDLE file = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+#else
+    xr_string os_path = path;
+    for (char& c : os_path)
+    {
+        if (c == '\\')
+            c = '/';
+    }
+    FILE* file = fopen(os_path.c_str(), "rb");
+    if (!file)
+        return false;
+#endif
+    xr_vector<u8> buf(kWarmRead);
+    const auto halted = [&stop] { return stop.load(std::memory_order_relaxed); };
+    bool ok = true;
+    for (bool eof = false; !eof;)
+    {
+        xray::io::BackgroundIoScope io;
+        const bool taken = urgent.load(std::memory_order_relaxed) ?
+            io.enter(xray::io::BackgroundIoClient::Model, halted) :
+            io.enter(xray::io::BackgroundIoClient::Warm,
+                [&] { return halted() || urgent.load(std::memory_order_relaxed); });
+        if (!taken)
+        {
+            if (halted())
+            {
+                ok = false;
+                break;
+            }
+            continue; // became urgent while waiting: take the slot as a Model client
+        }
+        for (u64 slot_bytes = 0; slot_bytes < kWarmSlot;)
+        {
+#if defined(XR_PLATFORM_WINDOWS)
+            DWORD n = 0;
+            if (!ReadFile(file, buf.data(), static_cast<DWORD>(buf.size()), &n, nullptr))
+                n = 0;
+#else
+            const size_t n = fread(buf.data(), 1, buf.size(), file);
+#endif
+            if (n == 0 || halted())
+            {
+                eof = true;
+                break;
+            }
+            slot_bytes += n;
+            bytes += n;
+        }
+    }
+#if defined(XR_PLATFORM_WINDOWS)
+    CloseHandle(file);
+#else
+    fclose(file);
+#endif
+    return ok && !halted();
+}
+
 struct SSharedSmartTerrainSnapshot
 {
     shared_str spawn_name;
@@ -649,11 +728,29 @@ public:
 
         xr_string requested_spawn_name = spawn_name;
         m_loading.store(true, std::memory_order_release);
+        m_stop.store(false, std::memory_order_relaxed);
 
         m_worker = Threading::RunThread("smart_terrain_map", [this, requested_spawn_name]()
         {
             auto* snapshot = xr_new<SSharedSmartTerrainSnapshot>();
             snapshot->spawn_name = requested_spawn_name.c_str();
+
+            // 50z3-startup-slow-disk-io.md: a slow disk - the file is read ahead in the background I/O slot first
+            if (xray::io::BackgroundIoSingle())
+            {
+                string_path spawn_file_name;
+                if (FS.exist(spawn_file_name, "$game_spawn$", requested_spawn_name.c_str(), ".spawn"))
+                {
+                    const u64 t0 = CPU::QPC();
+                    u64 bytes = 0;
+                    const bool read = warm_spawn_file(spawn_file_name, m_stop, m_urgent, bytes);
+                    Msg("* [startup] slow disk: smart terrain map - %s.spawn read ahead, %u MB in %.1f s%s%s",
+                        requested_spawn_name.c_str(), static_cast<u32>(bytes >> 20),
+                        double(CPU::QPC() - t0) / double(CPU::qpc_freq),
+                        m_urgent.load(std::memory_order_relaxed) ? " (a map waited for it)" : "",
+                        read ? "" : " (stopped)");
+                }
+            }
 
             load_spawn_smart_terrain_points(requested_spawn_name.c_str(), snapshot->points, snapshot->focus_level);
 
@@ -674,8 +771,43 @@ public:
         ++m_revision;
     }
 
+    // 50z3-startup-slow-disk-io.md: on a slow disk only remembered - StartDeferred starts it (main)
+    void DeferLoading(pcstr spawn_name)
+    {
+        if (!spawn_name || !xr_strlen(spawn_name))
+            return;
+        if (!xray::io::BackgroundIoSingle())
+        {
+            StartLoading(spawn_name);
+            return;
+        }
+        m_deferred_spawn_name = spawn_name;
+        m_deferred = true;
+    }
+
+    // The menu has settled (urgent = false) or a map / a script wants the data now (urgent = true). Main
+    void StartDeferred(bool urgent)
+    {
+        if (urgent)
+            m_urgent.store(true, std::memory_order_relaxed); // a reading in progress takes the slot first from now on
+        if (!m_deferred)
+            return;
+        m_deferred = false;
+        Msg("* [startup] slow disk: smart terrain map - the loading starts (%s)",
+            urgent ? "a map wants it" : "the main menu settled");
+        StartLoading(m_deferred_spawn_name.c_str());
+    }
+
+    void UpdateDeferred()
+    {
+        if (m_deferred && xray::io::BackgroundIoMenuSettled())
+            StartDeferred(false);
+    }
+
     void Shutdown()
     {
+        m_deferred = false;
+        m_stop.store(true, std::memory_order_relaxed); // 50z3: a read ahead waiting for the slot leaves
         if (m_worker.joinable())
             m_worker.join();
 
@@ -822,6 +954,11 @@ private:
     std::unique_ptr<SSharedSmartTerrainSnapshot> m_published;
     std::atomic<bool> m_loading{ false };
     u32 m_revision = 0;
+    // 50z3-startup-slow-disk-io.md
+    std::atomic<bool> m_stop{ false }; // the worker's read ahead leaves (Shutdown)
+    std::atomic<bool> m_urgent{ false }; // a map / a script waits for the data: the read ahead takes the slot first
+    bool m_deferred = false; // main: a slow disk, the loading waits for the menu to settle or a request
+    shared_str m_deferred_spawn_name;
 };
 } // namespace
 
@@ -833,6 +970,21 @@ CSpawnSmartTerrainMapDataSource::CSpawnSmartTerrainMapDataSource(pcstr spawn_nam
 void CSpawnSmartTerrainMapDataSource::StartSharedLoading(pcstr spawn_name)
 {
     CSharedSmartTerrainMapCache::Instance().StartLoading(spawn_name);
+}
+
+void CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle(pcstr spawn_name)
+{
+    CSharedSmartTerrainMapCache::Instance().DeferLoading(spawn_name);
+}
+
+void CSpawnSmartTerrainMapDataSource::UpdateSharedLoading()
+{
+    CSharedSmartTerrainMapCache::Instance().UpdateDeferred();
+}
+
+void CSpawnSmartTerrainMapDataSource::RequestData()
+{
+    CSharedSmartTerrainMapCache::Instance().StartDeferred(true);
 }
 
 void CSpawnSmartTerrainMapDataSource::PublishSharedDataIfReady()
@@ -848,6 +1000,7 @@ void CSpawnSmartTerrainMapDataSource::ShutdownSharedLoading()
 pcstr CSpawnSmartTerrainMapDataSource::GetSharedSmartLevelName(pcstr smart_name, pcstr spawn_name)
 {
     CSharedSmartTerrainMapCache& cache = CSharedSmartTerrainMapCache::Instance();
+    cache.StartDeferred(true); // 50z3-startup-slow-disk-io.md: a script wants it (the faction select)
     cache.PublishPending();
     return cache.FindLevelNameBySmartName(spawn_name, smart_name);
 }

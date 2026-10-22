@@ -6,6 +6,7 @@
 #include "PerformanceAlert.hpp"
 #include "Include/xrRender/RenderVisual.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Platform/HwProfile.h"
 #include <tracy/Tracy.hpp>
 
 //#define DEBUG_SCHEDULER
@@ -61,6 +62,11 @@ ENGINE_API int ps_scheduler_max_steps_per_frame = 128;
 // CVisualMemoryManager::get_visible_value: += time_delta / time_quant): a 5-14 s dt of an object late in the queue
 // would make it "see" at once whom it should notice gradually. A near object is updated close to its interval now and
 // does not hit the clamp; shed/dt_clamped and shed/dt_lost_ms show how much time is cut.
+//
+// R16 (plans/optimization_mt/50-smart-engine-hw-profile.md, 50h-stage3-game-budgets.md): the base budget of a pass is
+// min(shed_budget_ms, the shed budget of the hardware policy): 5 ms on <= 4 physical cores (preemption burns a
+// wall-clock budget there), 8 ms otherwise. shed_budget_ms is saved (user.ltx), so the player can only lower the base;
+// the adaptive budget (see ps_shed_budget_min_ms) works below it as before. No policy: shed_budget_ms alone.
 ENGINE_API int ps_shed_budget_ms = 8;
 ENGINE_API int ps_shed_near_dist = 30;
 ENGINE_API int ps_shed_near_seen_dist = 60;
@@ -153,6 +159,28 @@ constexpr float ShedAdaptGain = 0.25f; // ms of budget per ms of the error beyon
 constexpr float ShedAdaptMaxCutMs = 0.5f; // a frame: cut fast...
 constexpr float ShedAdaptMaxGrowMs = 0.1f; // ...give back slowly
 constexpr u32 ShedAdaptStaleFrames = 30; // passes without a new sample -> the base budget
+
+// R16 (see the comment at ps_shed_budget_ms): the cap of the base budget from the hardware policy, 0 = no policy. Taken
+// once in CSheduler::Initialize (main thread, the profile stages A and B are done): the passes do not read the policy,
+// which stage C rewrites on the main thread
+u32 s_shed_policy_budget_ms = 0;
+// The last base budget logged ("* [hw] shed budget"), Game thread: a new line only when shed_budget_ms changes it
+s32 s_shed_logged_user_ms = -1;
+
+u32 ShedBaseBudgetMs()
+{
+    const u32 user_ms = u32(_max(1, ps_shed_budget_ms));
+    const u32 base_ms = s_shed_policy_budget_ms ? _min(user_ms, s_shed_policy_budget_ms) : user_ms;
+    if (s_shed_logged_user_ms != s32(user_ms))
+    {
+        s_shed_logged_user_ms = s32(user_ms);
+        if (s_shed_policy_budget_ms)
+            Msg("* [hw] shed budget %u ms (user %u, policy %u)", base_ms, user_ms, s_shed_policy_budget_ms);
+        else
+            Msg("* [hw] shed budget %u ms (user, no policy)", base_ms);
+    }
+    return base_ms;
+}
 
 enum : u32
 {
@@ -364,6 +392,9 @@ void CSheduler::Initialize()
 {
     m_current_step_obj = nullptr;
     m_processing_now = false;
+    // R16 (see the comment at ps_shed_budget_ms)
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    s_shed_policy_budget_ms = xray::hw::PolicyValid(policy) ? policy.shed_budget_ms : 0;
 }
 
 void CSheduler::Destroy()
@@ -1270,7 +1301,7 @@ void CSheduler::ProcessStep()
     const u32 dwTime = Device.dwTimeGlobal;
     // Precache frames: no time limit (the step cap still holds)
     const bool timed = Device.dwPrecacheFrame == 0;
-    const u32 budget_ms = u32(_max(1, ps_shed_budget_ms));
+    const u32 budget_ms = ShedBaseBudgetMs(); // R16: min(shed_budget_ms, policy)
     const u64 budget_ns = u64(budget_ms) * 1000000ull;
     const u32 max_steps = ps_shed_max_steps > 0 ? u32(ps_shed_max_steps) : u32(-1);
     const u32 near_min_steps = u32(_max(0, ps_shed_near_min_steps));

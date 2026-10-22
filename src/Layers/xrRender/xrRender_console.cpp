@@ -4,6 +4,7 @@
 #include "xrRender_console.h"
 #include "xrCore/xr_token.h"
 #include "xrCore/Animation/SkeletonMotions.hpp"
+#include "xrCore/Platform/HwProfile.h"
 
 #include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/xr_ioc_cmd.h"
@@ -28,6 +29,8 @@ namespace xray::render::RENDER_NAMESPACE
 u32 ps_Preset = 2;
 const xr_token qpreset_token[] =
 {
+    // 50d-stage2-auto-engine.md: the preset by the hardware profile (CCC_Preset); first - the first item of the combo
+    { "Auto", 5 },
     { "Minimum", 0 },
     { "Low", 1 },
     { "Default", 2 },
@@ -533,6 +536,8 @@ public:
         CCC_Token::Execute(args);
         string_path _cfg;
         string_path cmd;
+        bool igpu_render_scale = false;
+        bool auto_preset = false;
 
         switch (*value)
         {
@@ -541,10 +546,49 @@ public:
         case 2: xr_strcpy(_cfg, "rspec_default.ltx"); break;
         case 3: xr_strcpy(_cfg, "rspec_high.ltx"); break;
         case 4: xr_strcpy(_cfg, "rspec_extreme.ltx"); break;
+        case 5: igpu_render_scale = AutoPreset(_cfg); auto_preset = true; break;
         }
         FS.update_path(_cfg, "$game_config$", _cfg);
         strconcat(sizeof(cmd), cmd, "cfg_load", " ", _cfg);
         Console->Execute(cmd);
+        // "Auto" leaves the auto-capable quality settings to the hardware policy: the class preset may hold numbers for
+        // them (rspec_low: texture_lod 2), "Auto" is what the player picked
+        if (auto_preset)
+        {
+            for (pcstr auto_cmd : { "texture_lod auto", "r2_smap_size auto", "snd_cache_size auto",
+                     "r__second_vp_render_scale auto" })
+            {
+                Console->Execute(auto_cmd);
+            }
+        }
+        // R22: an integrated GPU gets the smaller main pass only through a preset, never automatically
+        if (igpu_render_scale)
+            Console->Execute("r__render_scale 0.75");
+    }
+
+private:
+    // _preset Auto (plan 50 sections 12.1 and R22, 50d-stage2-auto-engine.md): the preset by the overall class of the
+    // hardware profile - potato -> minimum, low -> low, medium and high -> default. High gets rspec_default, not
+    // rspec_high: on a "high" machine the result stays as it is now (rspec_default is today's first-run preset), the
+    // higher presets are a quality choice of the player. Returns true for an integrated GPU (its class is low or below):
+    // it gets r__render_scale 0.75 after the preset.
+    static bool AutoPreset(string_path& cfg)
+    {
+        using namespace xray::hw;
+        const Profile& profile = GetProfile();
+        // no policy (stage A never ran in this process) - the old first-run preset
+        const bool known = PolicyValid(GetPolicy());
+        const Tier tier = known ? profile.tiers.overall : Tier::Medium;
+        switch (tier)
+        {
+        case Tier::Potato: xr_strcpy(cfg, "rspec_minimum.ltx"); break;
+        case Tier::Low: xr_strcpy(cfg, "rspec_low.ltx"); break;
+        default: xr_strcpy(cfg, "rspec_default.ltx"); break;
+        }
+        const bool igpu = known && profile.tiers.gpu_known && profile.gpu.uma;
+        Msg("* [hw] _preset Auto: %s (class %s%s%s)", cfg, TierName(tier), profile.tiers.gpu_known ? "" : ", GPU unknown",
+            igpu ? ", integrated GPU: r__render_scale 0.75" : "");
+        return igpu;
     }
 };
 
@@ -556,9 +600,9 @@ public:
     {
         // TODO: OGL: Implement memory usage statistics.
 #if defined(USE_DX11)
-        u32 m_base = 0;
+        u64 m_base = 0;
         u32 c_base = 0;
-        u32 m_lmaps = 0;
+        u64 m_lmaps = 0;
         u32 c_lmaps = 0;
 
         RImplementation.ResourcesGetMemoryUsage(m_base, c_base, m_lmaps, c_lmaps);
@@ -810,7 +854,23 @@ void xrRender_initconsole()
 
     CMD4(CCC_Float, "r__geometry_lod", &ps_r__LOD, 0.1f, 2.f);
     // Second viewport RT size as a fraction of main resolution. Applied live; smaller = cheaper PP target for scope texture.
-    CMD4(CCC_Float, "r__second_vp_render_scale", &ps_r__second_vp_render_scale, 0.05f, 1.f);
+    {
+        // R12 of plan 50 (50d-stage2-auto-engine.md): "r__second_vp_render_scale auto" - 0.75 at <= 3 GB of video
+        // memory or on an integrated GPU, the engine default (1.0) otherwise. The policy has no field of its own for it:
+        // the condition is the one that gives 2 SVP atlas pages (svp_pages, the same rule R12 in HwPolicy.cpp).
+        static CCC_Float second_vp_render_scale(
+            "r__second_vp_render_scale", &ps_r__second_vp_render_scale, 0.05f, 1.f);
+        second_vp_render_scale.SetAuto([](float& scale) {
+            constexpr u8 low_vram_svp_pages = 2;
+            constexpr float low_vram_scale = 0.75f;
+            const xray::hw::Policy& policy = xray::hw::GetPolicy();
+            if (!xray::hw::PolicyValid(policy) || !policy.svp_pages || policy.svp_pages > low_vram_svp_pages)
+                return false;
+            scale = low_vram_scale;
+            return true;
+        });
+        Console->AddCommand(&second_vp_render_scale);
+    }
     // Main pass internal resolution as a fraction of the window resolution. Applied live (the
     // downsized target set is (re)created lazily); UI, HUD overlay, menu and screenshots stay native.
     CMD4(CCC_Float, "r__render_scale", &ps_r__render_scale, 0.2f, 1.f);
@@ -963,7 +1023,20 @@ void xrRender_initconsole()
     CMD4(CCC_Float, "r2_light_degrade_lod", &ps_r2_light_degrade_lod, 0.f, 1.f);
     CMD4(CCC_Float, "r2_light_shadow_dist", &ps_r2_light_shadow_dist, 0.f, 200.f);
     CMD4(CCC_Integer, "r2_smap_npc_blob", &ps_r2_smap_npc_blob, 0, 3);
-    CMD3(CCC_Token, "r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
+    {
+        // R13 of plan 50 (50d-stage2-auto-engine.md): "r2_smap_size auto" - 1024 at <= 3 GB of video memory or on an
+        // integrated GPU, the engine default (2048) otherwise. Read when the render targets are created, after the real
+        // device reported its GPU (CRenderDevice::Create resolves the auto values in between).
+        static CCC_Token r2_smap_size("r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
+        r2_smap_size.SetAuto([](u32& size) {
+            const xray::hw::Policy& policy = xray::hw::GetPolicy();
+            if (!xray::hw::PolicyValid(policy) || !policy.smap_size_auto)
+                return false;
+            size = policy.smap_size_auto;
+            return true;
+        });
+        Console->AddCommand(&r2_smap_size);
+    }
 
     Fvector tw_min, tw_max;
     tw_min.set(0, 0, 0);

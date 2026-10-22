@@ -187,7 +187,10 @@ private:
     u32 m_cached_budget{};
     bool m_queue_dirty{};
     // One-shot background warm-up state (menu pre-loading).
-    u32 m_warmCursor{};
+    shared_str m_warmCursor; // the last key warmed (50z2)
+    u32 m_warmMenuFrames{}; // frames the main menu is active in a row (50z2)
+    u32 m_warmLoaded{};
+    u64 m_warmUs{};
     bool m_warmDone{};
 };
 } // namespace xray::render::RENDER_NAMESPACE

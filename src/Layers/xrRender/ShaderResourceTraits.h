@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ResourceManager.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -633,6 +634,9 @@ T* CResourceManager::CreateShader(cpcstr name, pcstr filename /*= nullptr*/, u32
             sh->sh = 0;
             return sh;
         }
+
+        // 50z5-extra-diagnostics.md: "shc" of the frame report - the source opened, the cache hit or the compile
+        GW_FRAME_EVENT(ShaderCreate);
 
         // Remove ( and everything after it
         string_path shName;

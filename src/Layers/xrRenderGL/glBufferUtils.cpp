@@ -202,6 +202,7 @@ void VertexStagingBuffer::Create(size_t size, bool allowReadBack /*= false*/)
     m_AllowReadBack = allowReadBack;
 
     m_HostBuffer = xr_alloc<u8>(size);
+    BufferUtils::g_host_vb_bytes.fetch_add(static_cast<s64>(size), std::memory_order_relaxed); // 50c
     AddRef();
 }
 
@@ -263,7 +264,10 @@ void VertexStagingBuffer::Destroy()
 void VertexStagingBuffer::DiscardHostBuffer()
 {
     if (m_HostBuffer)
+    {
+        BufferUtils::g_host_vb_bytes.fetch_sub(static_cast<s64>(m_Size), std::memory_order_relaxed); // 50c
         xr_free(m_HostBuffer);
+    }
 }
 
 size_t VertexStagingBuffer::GetSystemMemoryUsage() const
@@ -294,6 +298,7 @@ void IndexStagingBuffer::Create(size_t size, bool allowReadBack /*= false*/, boo
     m_AllowReadBack = allowReadBack;
 
     m_HostBuffer = xr_alloc<u8>(size);
+    BufferUtils::g_host_ib_bytes.fetch_add(static_cast<s64>(size), std::memory_order_relaxed); // 50c
     AddRef();
 }
 
@@ -355,7 +360,10 @@ void IndexStagingBuffer::Destroy()
 void IndexStagingBuffer::DiscardHostBuffer()
 {
     if (m_HostBuffer)
+    {
+        BufferUtils::g_host_ib_bytes.fetch_sub(static_cast<s64>(m_Size), std::memory_order_relaxed); // 50c
         xr_free(m_HostBuffer);
+    }
 }
 
 size_t IndexStagingBuffer::GetSystemMemoryUsage() const

@@ -11,6 +11,11 @@
 #include "xrEngine/device.h"
 #include "Layers/xrRender/ResourceManager.h"
 #include "Layers/xrRender/SH_Texture.h"
+#include "Layers/xrRender/ModelPool.h"
+#include "xrEngine/IGame_Persistent.h"
+#include "xrCore/Profiling/StartupMarks.hpp"
+
+#include <chrono>
 
 #include <algorithm>
 #include <iterator>
@@ -1580,7 +1585,7 @@ void CPreviewSceneRenderer::WipeDiskCache()
     m_diskCacheDirty = false;
     m_diskCacheLoaded = true;
     m_diskCachePath[0] = '\0';
-    m_warmCursor = 0;
+    m_warmCursor = nullptr;
     m_warmDone = false;
 
     if (FS.path_exist("$app_data_root$"))
@@ -1595,10 +1600,42 @@ void CPreviewSceneRenderer::WipeDiskCache()
 // Background warm-up: pre-load disk-cached preview DDS into VRAM (menu)
 // ---------------------------------------------------------------------------
 
+// 50z2 (plans/optimization_mt/50z2-startup-thm-shaders-probes-preview.md): the warm-up used to load
+// npc_preview_disk_cache_warm_per_frame (16) dds per frame on main from the first frame of the menu, whatever they cost:
+// ~4 s of main time in the first ~10 s of the menu on an NVMe (~4100 files, ~2 GB), ~0.8 s per frame for minutes on a
+// USB HDD. Now:
+// - it starts once the main menu is active and has drawn kWarmStartMenuFrames frames (the menu is built and shown);
+// - a frame loads while kWarmBudgetUs of main time are not spent (one texture at least), the cvar is the upper limit;
+// - on a slow disk (ModelPoolDiskSlow: the hw profile or the measured warm-up) it does not run: there one dds is a seek
+//   plus ~0.5 MB (~50 ms), so even one per frame is a stutter for minutes, the disk is taken from the early warm-up of
+//   the level (50k) and ~2 GB of previews go to the memory of a laptop GPU. A grid loads the previews it shows, as it
+//   does for any preview not warmed yet; the warm-up only made them ready before the editor opened.
 void CPreviewSceneRenderer::WarmDiskCacheTextures()
 {
+    constexpr u32 kWarmStartMenuFrames = 30;
+    constexpr u64 kWarmBudgetUs = 2000;
+
     if (m_warmDone)
         return;
+
+    if (!g_pGamePersistent || !g_pGamePersistent->IsMainMenuActive())
+    {
+        m_warmMenuFrames = 0;
+        return;
+    }
+    if (m_warmMenuFrames < kWarmStartMenuFrames)
+    {
+        ++m_warmMenuFrames;
+        return;
+    }
+
+    if (ModelPoolDiskSlow())
+    {
+        m_warmDone = true;
+        Msg("* [preview_scene] disk cache warm-up: slow disk - not run (%u textures loaded before), the previews load "
+            "when shown", m_warmLoaded);
+        return;
+    }
 
     EnsureDiskCacheLoaded();
     if (m_diskIndex.empty())
@@ -1610,13 +1647,12 @@ void CPreviewSceneRenderer::WarmDiskCacheTextures()
         return;
     const u32 budget = static_cast<u32>(v);
 
-    // Advance cursor into the ordered map. O(cursor) but total is typically
-    // < 200 entries; the dominant cost is DDS I/O per texture.
-    const u32 total = static_cast<u32>(m_diskIndex.size());
-    auto it = m_diskIndex.begin();
-    for (u32 s = _min(m_warmCursor, total); s > 0 && it != m_diskIndex.end(); ++it, --s)
-        ; // advance
+    // The cursor is the last key warmed: the index may change between frames (entries added or dropped)
+    auto it = m_warmCursor._get() ? m_diskIndex.upper_bound(m_warmCursor) : m_diskIndex.begin();
 
+    using clock = std::chrono::steady_clock;
+    const auto t0 = clock::now();
+    u64 spent_us = 0;
     u32 loaded = 0;
     while (it != m_diskIndex.end() && loaded < budget)
     {
@@ -1628,12 +1664,22 @@ void CPreviewSceneRenderer::WarmDiskCacheTextures()
         if (tex && !tex->flags.bLoaded)
             tex->Load();
         ++loaded;
+        m_warmCursor = base;
         ++it;
-        ++m_warmCursor;
+        spent_us = static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - t0).count());
+        if (spent_us >= kWarmBudgetUs)
+            break;
     }
+    m_warmLoaded += loaded;
+    m_warmUs += spent_us;
 
     if (it == m_diskIndex.end())
+    {
         m_warmDone = true;
+        Msg("* [preview_scene] disk cache warm-up done: %u textures, %u ms of main thread", m_warmLoaded,
+            static_cast<u32>(m_warmUs / 1000));
+        xray::StartupMarkOnce("preview_warm_done"); // 50z1 timeline
+    }
 }
 
 void CPreviewSceneRenderer::ProcessQueue()

@@ -474,6 +474,10 @@ public:
     // Ensure returns false when creation fails -> caller keeps scope lighting on the inline path.
     bool SVPSmapAtlasEnsure();
     void SVPSmapAtlasRelease();
+    // R12 (plan 50e): video memory of the scope pass - the svp_set twins and the shadow atlas. Held = any of them
+    // exists (the idle release in CRender frees both); Bytes = an estimate for the log, aliases counted once.
+    bool SVPResourcesHeld() const { return svp_set.Position || svp_rt_smap_depth; }
+    u64 SVPResourcesBytes() const;
     // Frame driver stage 1c: point the "$user$smap_depth" named texture at the dedicated SVP
     // atlas (use_atlas=true) or restore its own surface (false), so the by-name s_smap samplers
     // of the accumulation blenders read worker-built shadows. Returns false when no atlas exists.

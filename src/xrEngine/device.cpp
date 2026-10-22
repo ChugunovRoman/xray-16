@@ -5,6 +5,9 @@
 #include "xrCore/FS_impl.h"
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Platform/HwProfile.h"
+#include "xrCore/Profiling/StartupMarks.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
 
 #include "XR_IOConsole.h"
 #include "xr_input.h"
@@ -13,6 +16,9 @@
 #include "IGame_Persistent.h"
 #include "EngineThreading.h"
 #include "Engine.h"
+#ifndef _EDITOR
+#include "Environment.h" // 50n: the game time of the frame spike report
+#endif
 
 #include "xrScriptEngine/script_space.hpp"
 #include "xrScriptEngine/script_wrapper_cache.hpp"
@@ -108,6 +114,7 @@ void CRenderDevice::RenderEnd(void)
             Memory.mem_compact();
             Msg("* MEMORY USAGE: %d K", Memory.mem_usage() / 1024);
             Msg("* End of synchronization A[%d] R[%d]", b_is_Active, b_is_Ready);
+            xray::perf::LoadMark("precache_done"); // 50z5-extra-diagnostics.md: the [load] timeline
             FIND_CHUNK_COUNTER_FLUSH();
             if (g_pGamePersistent->GameType() == 1 && !psDeviceFlags.test(rsAlwaysActive)) // haCk
             {
@@ -324,7 +331,15 @@ void CRenderDevice::DoRender()
         {
             ZoneScopedN("present");
             PERF_SCOPE(frame_render_present);
+            GW_FRAME_PHASE(Present); // 50n: the frame spike report
             RenderEnd(); // End + PresentFrame
+            // 50z1: the first frame with the main menu on the screen
+            static bool s_menu_presented = false;
+            if (!s_menu_presented && g_pGamePersistent && g_pGamePersistent->IsMainMenuActive())
+            {
+                s_menu_presented = true;
+                xray::StartupMark("main_menu_first_present");
+            }
         }
 
         {
@@ -415,6 +430,7 @@ void CRenderDevice::RunBonesPrepass()
     }
     ZoneScopedN("BonesPrepass");
     PERF_SCOPE(prepass_time);
+    GW_FRAME_PHASE(Prepass); // 50n: the frame spike report
     BonesPrepassCallback();
 }
 
@@ -438,6 +454,7 @@ void CRenderDevice::JoinGameLogic()
     // (normally before the UI, inside frame/render).
     ZoneScopedN("GameLogicJoin");
     PERF_SCOPE(frame_game_wait);
+    GW_FRAME_PHASE(GameWait); // 50n: the frame spike report
     PERF_SCOPE_IF(g_svp_scope_render_frame == dwFrame, frame_game_wait_svp); // the same wait, frames with the scope pass
     PERF_SPLIT(None); // C1.0: neither build nor submit of the render (render/split/*)
     // 29-game-thread-next.md: the same wait, measured in every build (no XR_PERF_METRICS needed), feeds the adaptive
@@ -475,6 +492,10 @@ void CRenderDevice::ProcessFrame()
 {
     ZoneScoped;
 
+    // plans/optimization_mt 50g, R14: AC <-> battery switches the spin class of the waits. A desktop without a battery:
+    // one flag check; with a battery: a clock read every frame and a power query every ~5 s. Loading frames included.
+    xray::hw::PollPower();
+
     if (!BeforeFrame())
         return;
 
@@ -487,6 +508,7 @@ void CRenderDevice::ProcessFrame()
     {
         ZoneScopedN("seqParallelBeforRender");
         PERF_SCOPE(frame_before_prerender);
+        GW_FRAME_PHASE(Before); // 50n: the frame spike report
         xr_vector<fastdelegate::FastDelegate0<>> befor_batch;
         befor_batch.swap(seqParallelBeforRender);
         for (auto& d : befor_batch)
@@ -498,6 +520,7 @@ void CRenderDevice::ProcessFrame()
     {
         ZoneScopedN("OnFrameBeforePreRender");
         PERF_SCOPE(frame_before_prerender);
+        GW_FRAME_PHASE(Before); // 50n: the frame spike report
         g_pGamePersistent->OnFrameBeforePreRender();
     }
 
@@ -507,6 +530,7 @@ void CRenderDevice::ProcessFrame()
     {
         ZoneScopedN("Environment_OnFrame");
         PERF_SCOPE(frame_environment);
+        GW_FRAME_PHASE(Before); // 50n: the frame spike report
         g_pGamePersistent->OnFrameEnvironment();
     }
 
@@ -514,6 +538,7 @@ void CRenderDevice::ProcessFrame()
     {
         ZoneScopedN("ModelDeferredClear");
         PERF_SCOPE(frame_model_clear);
+        GW_FRAME_PHASE(Before); // 50n: the frame spike report
         ModelDeferredClear();
     }
 
@@ -523,11 +548,13 @@ void CRenderDevice::ProcessFrame()
 
     {
         PERF_SCOPE(frame_move);
+        GW_FRAME_PHASE(FrameMove); // 50n: the frame spike report
         FrameMove();
     }
 
     {
         PERF_SCOPE(frame_camera);
+        GW_FRAME_PHASE(FrameMove); // 50n: the frame spike report
         OnCameraUpdated();
     }
 
@@ -561,6 +588,7 @@ void CRenderDevice::ProcessFrame()
         if (run_scheduler)
         {
             PERF_SCOPE(frame_rt_sheduler);
+            GW_FRAME_PHASE(RtSched); // 50n: the frame spike report
             XRay::Engine::GameThreadRT();
         }
         // Bones prepass: after the RT part, before the Game thread starts changing animations (and the render
@@ -607,6 +635,7 @@ void CRenderDevice::ProcessFrame()
     {
         PERF_WAIT_SITE(xray::perf::wait_site::Game);
         PERF_SCOPE(frame_game_wait);
+        GW_FRAME_PHASE(GameWait); // 50n: the frame spike report
         TaskScheduler->Wait(*m_game_task);
         m_game_task = nullptr;
     }
@@ -627,6 +656,7 @@ void CRenderDevice::ProcessFrame()
 
     {
         PERF_SCOPE(frame_render);
+        GW_FRAME_PHASE(Render); // 50n: the frame spike report
         DoRender();
     }
 
@@ -646,6 +676,7 @@ void CRenderDevice::ProcessFrame()
     {
         ZoneScopedN("PhysicsOverlapJoin");
         PERF_SCOPE(ph_overlap_join);
+        GW_FRAME_PHASE(PhysWait); // 50n: the frame spike report
         PhysicsWaitOverlapCallback();
     }
 
@@ -656,6 +687,7 @@ void CRenderDevice::ProcessFrame()
     {
         PERF_WAIT_SITE(xray::perf::wait_site::PreRender);
         PERF_SCOPE(frame_prerender_wait);
+        GW_FRAME_PHASE(PreRenderWait); // 50n: the frame spike report
         TaskScheduler->Wait(*m_pre_render_task);
         m_pre_render_task = nullptr;
     }
@@ -666,6 +698,7 @@ void CRenderDevice::ProcessFrame()
     {
         ZoneScopedN("PhysicsDeferredFlush");
         PERF_SCOPE(frame_ph_flush);
+        GW_FRAME_PHASE(PhysFlush); // 50n: the frame spike report
         PhysicsJoinOverlapCallback();
     }
 
@@ -678,8 +711,25 @@ void CRenderDevice::ProcessFrame()
     // pointers captured during the window, and post-join commands (P2: visual changes, model/light deletion) may
     // invalidate them; and with the window closed (physics and IsFrameOverlapActive() both false) the commands
     // execute their effects immediately instead of deferring them again. Empty (no-op) in a sequential frame today.
-    ApplyPostJoinQueue();
+    {
+        GW_FRAME_PHASE(PhysFlush); // 50n: the frame spike report
+        ApplyPostJoinQueue();
+    }
     m_game_render_overlap_frame.store(false, std::memory_order_release);
+
+    // 50n-frame-spike-report.md: what kind of frame this was, for the frame spike report of the next xray::perf::Flush()
+    // (only a level frame in play is judged: no loading, precache, pause, main menu or inactive window)
+    {
+        const bool in_game = g_pGameLevel && g_pGameLevel->bReady && b_is_Active && !dwPrecacheFrame &&
+            !load_screen_renderer.IsActive() && !Paused() &&
+            !(g_pGamePersistent && g_pGamePersistent->m_pMainMenu && g_pGamePersistent->m_pMainMenu->IsActive());
+        u32 game_day_s = 0;
+#ifndef _EDITOR
+        if (g_pGamePersistent && g_pGamePersistent->pEnvironment)
+            game_day_s = static_cast<u32>(g_pGamePersistent->pEnvironment->GetGameTime());
+#endif
+        xray::perf::FrameSetContext(in_game, dwTimeGlobal / 1000, game_day_s);
+    }
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;
@@ -695,9 +745,14 @@ void CRenderDevice::ProcessFrame()
 #if XR_PERF_METRICS
     perf_frame_total.reset();
 #endif
+    // 50z5-extra-diagnostics.md: vsync, the window mode, the monitor, the frame budget of the limiter and its sleep of
+    // this frame (the [frame] pace line)
+    xray::perf::FramePacingContext(psDeviceFlags.test(rsVSync), static_cast<u8>(psDeviceMode.WindowStyle),
+        psDeviceMode.Monitor, updateDelta, frameTime < updateDelta ? static_cast<u32>(updateDelta - frameTime) : 0);
     if (frameTime < updateDelta)
     {
         PERF_SCOPE(frame_fps_sleep);
+        GW_FRAME_PHASE(FpsSleep); // 50n: the frame spike report
         Sleep(updateDelta - frameTime);
     }
 

@@ -52,12 +52,23 @@ class XRSOUND_API CSoundRender_Source final : public CSound_source
     mutable std::atomic<u32> m_pcm_plays{0}; // starts of play (decompress at offset 0) while not cached
     mutable std::atomic<u8> m_pcm_state{0};  // snd_pcm_state_* (SoundRender_Source.cpp)
 
+    // plans/optimization_mt/50j-slow-disk-async-sound.md: snd_src_* (SoundRender_Source.cpp). Ready (0) for a source
+    // loaded the usual way. A deferred one (prepare_deferred, a slow disk) is pending until the "Sound prefetch" thread
+    // or a caller that needs it now reads its file (begin_load / finish_load); the fields above are written only by the
+    // one that moved it to "loading" and are read only after "ready" (acquire).
+    mutable std::atomic<u8> m_src_state{0};
+    mutable std::atomic_bool m_src_urgent{false}; // 50j: queued as urgent (a play waits for it) once
+
 private:
     // true = all `size` bytes were decoded (false: the stream ended or broke first)
     bool i_decompress(OggVorbis_File* ovf, char* dest, u32 size) const;
     bool i_decompress(OggVorbis_File* ovf, float* dest, u32 size) const; // this overload clamps denormalized sounds
 
-    bool LoadWave(pcstr name);
+    // background = on the "Sound prefetch" thread (50j): pname is set already, the sound/source/load_* timers (waits of
+    // the callers) are not counted
+    bool LoadWave(pcstr name, bool background = false);
+    bool resolve_path(pcstr name, string_path& fn); // load(): fname, the .ogg of $level$ or $game_sounds$; false = none
+    void ensure_ready_slow() const;
     bool should_cache_pcm() const; // B-1: short enough to fully cache (and caching enabled)?
     // 46-engine-core-render-audit.md: a start of play of a streamed sound - from the second one on, reserve the budget
     // (snd_cache_size) and queue the whole decode (cache_pcm_step)
@@ -81,6 +92,24 @@ public:
     bool load(pcstr name);
     void unload();
 
+    // plans/optimization_mt/50j-slow-disk-async-sound.md: a source read later. prepare_deferred = the names and the
+    // path of load() (the creating thread), the state becomes pending; false = no such file (as load()). begin_load =
+    // takes the read (pending -> loading), false = another thread took it or it is done; finish_load = the read
+    // (LoadWave), then ready / failed (release).
+    bool prepare_deferred(pcstr name);
+    bool begin_load();
+    void finish_load(bool background);
+    [[nodiscard]] SoundSourceState load_state() const;
+    // the state is ready or failed on return: a pending source is read here (a sync fallback), one being read on the
+    // thread is waited for. Called by the getters below - a source is never used before it is read.
+    void ensure_ready() const
+    {
+        if (m_src_state.load(std::memory_order_acquire) != 0)
+            ensure_ready_slow();
+    }
+    [[nodiscard]] bool mark_urgent() const { return !m_src_urgent.exchange(true, std::memory_order_relaxed); }
+    void clear_urgent() const { m_src_urgent.store(false, std::memory_order_relaxed); }
+
     OggVorbis_File* open() const;
     void close(OggVorbis_File*& ovf) const;
 
@@ -89,16 +118,19 @@ public:
     // B-1: the whole sound is decoded in m_cached_pcm, decompress() never touches the ogg file (ovf may be null).
     // Once true, stays true until unload().
     [[nodiscard]] bool has_cached_pcm() const { return m_cached_pcm.load(std::memory_order_acquire) != nullptr; }
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): the bytes of all the PCM caches (bounded by
+    // snd_cache_size). Any thread
+    [[nodiscard]] static size_t cached_pcm_bytes_total();
 
-    [[nodiscard]] const auto& data_info() const { return m_data_info; }
-    [[nodiscard]] const auto&      info() const { return m_info; }
+    [[nodiscard]] const auto& data_info() const { ensure_ready(); return m_data_info; }
+    [[nodiscard]] const auto&      info() const { ensure_ready(); return m_info; }
 
     [[nodiscard]] pcstr file_name() const override { return fname.c_str(); }
     // the file the source was loaded from (FS path with the extension), 34-sound-cold-load.md
     [[nodiscard]] pcstr path_name() const { return pname.c_str(); }
 
-    [[nodiscard]] float length_sec() const override { return fTimeTotal; }
-    [[nodiscard]] u32 bytes_total() const override { return dwBytesTotal; }
+    [[nodiscard]] float length_sec() const override { ensure_ready(); return fTimeTotal; }
+    [[nodiscard]] u32 bytes_total() const override { ensure_ready(); return dwBytesTotal; }
 
     [[nodiscard]] u16 channels_num() const override { return data_info().channels; }
     [[nodiscard]] u32 game_type() const override { return info().gameType; }

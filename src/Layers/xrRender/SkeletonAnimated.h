@@ -249,6 +249,11 @@ public:
     // 40-parallel-prefetch.md (plans/optimization_mt): the motions part of Load (omf, partition, bone motions, blend
     // pool); Load calls it, or the motions chain of the parallel prefetch later (ModelMotionsDefer)
     void LoadMotions(const char* N, IReader* data);
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): the background base loading of CModelPool (a weak CPU) runs
+    // LoadMotions later on the main thread; before that, on its own thread, it loads the omf this model refers to that
+    // nobody has docked yet (the parse of the keys - the costly part) outside the motions lock and docks them under it,
+    // so LoadMotions only finds them. Returns the number of omf docked.
+    u32 PreloadMotions(const char* N, IReader* data);
     virtual void Release();
     virtual void Spawn();
     virtual void Depart();

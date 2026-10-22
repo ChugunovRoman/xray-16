@@ -36,6 +36,7 @@
 #include "login_manager.h"
 #include "profile_store.h"
 #include "xrEngine/xr_input.h"
+#include "xrCore/Profiling/StartupMarks.hpp"
 
 // fwd. decl.
 extern ENGINE_API bool bShowPauseString;
@@ -211,7 +212,8 @@ void CMainMenu::Activate(bool bActivate)
         };
         Device.seqRender.Add(this, 4); // 1-console 2-cursor 3-tutorial
 
-        Console->Execute("stat_memory");
+        Console->Execute("stat_memory main menu");
+        xray::StartupMarkOnce("main_menu_built"); // 50z1: ReloadUI - the menu scripts, faction editor / select
     }
     else
     {

@@ -24,6 +24,7 @@
 #include "restriction_space.h"
 #include "xrEngine/profiler.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
 #include "mt_config.h"
 #include "npc_cpp_profile.h"
 #include "xrNetServer/NET_Messages.h"
@@ -259,6 +260,7 @@ void CALifeUpdateManager::update()
 {
     ZoneScopedN("alife_update");
     PERF_SCOPE(alife_update);
+    GW_FRAME_PHASE(GAlife); // 50n: the frame spike report
     // -npc_cpp_profile: the whole update and how many of them were long (no histograms in the profiler). The time may
     // include a report printed from a nested stage (flush_if_needed), so up to one long update per 5 s window can be
     // the report itself.
@@ -369,6 +371,7 @@ void CALifeUpdateManager::update_spread()
 {
     ZoneScopedN("alife_update_spread");
     PERF_SCOPE(alife_update);
+    GW_FRAME_PHASE(GAlife); // 50n: the frame spike report
     if (!initialized())
         return;
     PERF_INC(alife_spread_frames);
@@ -438,6 +441,11 @@ bool CALifeUpdateManager::change_level(NET_Packet& net_packet)
 {
     if (m_changing_level)
         return (false);
+
+    // 50n-frame-spike-report.md: this frame (the save of the level change) and the frames until the next level is in
+    // play are not reported as spikes
+    xray::perf::LoadMarkBegin("level_change"); // 50z5-extra-diagnostics.md: the [load] timeline
+    xray::perf::FrameSessionMark(xray::perf::frame_session::Exit);
 
     luabind::functor<void> funct;
     if (GEnv.ScriptEngine->functor("_G.CALifeUpdateManager__on_before_change_level", funct))

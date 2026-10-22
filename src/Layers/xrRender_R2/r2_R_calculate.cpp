@@ -7,6 +7,7 @@
 #include "Layers/xrRender/xrRender_console.h"
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Platform/HwProfile.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -176,6 +177,9 @@ void CRender::calculate_for(bool second_pass)
         svp_geom_on_main = false;
         svp_seq_build = false; // 31-svp-scope.md: cleared after the scope pass already, here for safety
         svp_seq_frustum_valid = false;
+        // R12: free the scope pass VRAM after a while without the scope (low video memory only). Here the previous
+        // frame's scope job is over and this frame's has not started yet.
+        svp_vram_idle_check();
     }
 
     // Transfer to global space to avoid deep pointer access.
@@ -674,16 +678,47 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
         !svp_frame_driver_available())
         return false;
 
+    // R9 (plan 50): no SVP worker without DriverCommandLists (the runtime replays the emulated deferred list on main)
+    // or with a pool < 3 (the worker would compete with main, Game and Physics for the cores) - the sequential scope
+    // pass, as under RenderDoc.
+    if (!xray::hw::SvpWorkerAllowed())
+    {
+        static bool s_hw_gate_logged = false;
+        if (!s_hw_gate_logged)
+        {
+            s_hw_gate_logged = true;
+            Msg("* SVP: parallel frame driver disabled by the hardware policy (no DriverCommandLists or pool < 3)");
+        }
+        return false;
+    }
+
     // Frame driver gate: the worker will record scope lighting (stage C) and combine (stage D)
     // into deferred lists after the geometry stage. The dedicated shadow atlas must exist BEFORE
     // the worker reaches lighting, so it is created here on the main thread; a GL backend or
     // creation failure just keeps those stages inline later without affecting the already-shipped
     // calculate/geometry.
     svp_frame_driver = svp_frame_driver_available();
+    // R12: after an idle release both the atlas and the scope twins are recreated right here, and the cost is
+    // measured (the log line follows in RenderSecondViewport).
+    svp_vram_mark_used();
+    CTimer svp_vram_timer;
+    if (svp_vram_released)
+        svp_vram_timer.Start();
     // Shadow-transfer: the main pass copies each smap page into the dedicated SVP atlas itself
     // (see render_lights); the worker builds no scope shadows.
     if (svp_frame_driver && !Target->SVPSmapAtlasEnsure())
         svp_frame_driver = false;
+    // The scope twins too, before capture_svp_seed_targets() below picks them for the worker's geometry recording:
+    // without them (the first scope frame, or the first one after an idle release) the worker would record into
+    // the main rt_* surfaces while the scope lighting in RenderSecondViewport reads the freshly created twins.
+    // Same size as there; a creation failure is latched and RenderSecondViewport falls back as before.
+    {
+        u32 sw, sh;
+        svp_target_size(sw, sh);
+        Target->SVPTargetsEnsure(sw, sh);
+    }
+    if (svp_vram_released)
+        svp_vram_recreate_ms += svp_vram_timer.GetElapsed_sec() * 1000.f;
     // Stage machine: 3 = shadow-transfer, the MAIN pass delivers copied atlas slices.
     svp_shadow_stage = svp_frame_driver ? 3 : 0;
     // Transfer page groups are filled by the MAIN pass page loop (render_lights) - start the
@@ -849,6 +884,65 @@ void CRender::AbortSecondVPCalculate()
     r_main_dsgraph_override = nullptr;
     r_main_calc_params = nullptr;
     svp_parallel = false;
+}
+
+u32 CRender::svp_smap_pages() const
+{
+    // R12 (plan 50): technical knob, category 2 - the player can only lower the policy cap
+    const u32 user = u32(_max(ps_r__svp_smap_pages, 1));
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    if (!xray::hw::PolicyValid(policy) || !policy.svp_pages)
+        return user;
+    return _min(user, u32(policy.svp_pages));
+}
+
+namespace
+{
+// R12: seconds without the scope before its VRAM is freed; 0 = never. Derived from the policy's atlas page cap -
+// both come from the same video memory thresholds of HwPolicy.cpp: 2 pages (budget <= 3 GB, UMA, software) - 30 s,
+// 4 pages (<= 6 GB) - 60 s, more (or no policy) - never, i.e. the resources live until the device goes away, as
+// before.
+u32 svp_idle_release_seconds()
+{
+    const xray::hw::Policy& policy = xray::hw::GetPolicy();
+    if (!xray::hw::PolicyValid(policy) || !policy.svp_pages)
+        return 0;
+    if (policy.svp_pages <= 2)
+        return 30;
+    if (policy.svp_pages <= 4)
+        return 60;
+    return 0;
+}
+} // namespace
+
+void CRender::svp_vram_idle_check()
+{
+    // Main thread, top of the main calculate_for. The previous frame's scope job was joined by
+    // EndSecondVPCalculateParallel / AbortSecondVPCalculate (they also drop the seed refs to the twins), the scope
+    // pass and its target swap are over, this frame's job is not kicked yet; the GPU keeps the released surfaces
+    // alive until its queued work is done (D3D11 / GL deferred destruction). Render targets are created and
+    // destroyed on the main thread only, as everywhere in the render (ResourceManager::m_rtargets has no lock).
+    const u32 idle_s = svp_idle_release_seconds();
+    if (!idle_s || !Target)
+        return;
+    if (Device.m_SecondViewport.IsSVPActive())
+    {
+        svp_vram_mark_used(); // aimed through the scope, even on a frame skipped by r__svp_frame_delay
+        return;
+    }
+    if (!Target->SVPResourcesHeld() || Target->SvpPipelineSwapped() || svp_seed_rt[0])
+        return;
+    const u32 idle_ms = Device.dwTimeContinual - svp_vram_last_use_ms;
+    if (idle_ms < idle_s * 1000)
+        return;
+
+    const u64 bytes = Target->SVPResourcesBytes();
+    Target->SVPTargetsRelease();
+    Target->SVPSmapAtlasRelease();
+    svp_vram_released = true;
+    svp_vram_recreate_ms = 0.f;
+    Msg("* [hw] svp: resources released after %u s without the scope (~%u MB)", idle_ms / 1000,
+        u32(bytes >> 20));
 }
 
 bool CRender::svp_sun_reuse_active() const

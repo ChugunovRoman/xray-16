@@ -876,6 +876,9 @@ void CObjectList::process_destroy_queue()
     // 37-destroy-relcase-smooth.md: the whole destroy phase, max_frame = the tallest one (the Tracy zone above)
     PERF_SCOPE(relcase_total);
     flush_destroy_child_scan(); // B1: the children of the queued objects join the queue
+    // 50n: the frame spike report - the objects destroyed (count) and the whole destroy phase with the relcase (time)
+    const xray::perf::FrameEventScope destroy_frame_event(xray::perf::frame_event::Destroy, true,
+        static_cast<u32>(destroy_queue.size()));
 #if XR_PERF_METRICS
     // P19 spike logger: the whole destroy phase (relcase + net_Destroy) of a frame, detail = its size
     struct RelcaseSpikeInfo

@@ -345,6 +345,11 @@ void model_prefetch_for_each_visual(CSE_Abstract* object, F&& f)
 
 void model_prefetch_files_of(CSE_Abstract* object, u32 source)
 {
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): source bit 2 - a creature: on a weak CPU (D3D11) the render
+    // also loads its base model in the background once the files are read. Not items: a section with world_material_N
+    // registers its texture replacements right before its first model_Create, a base loaded earlier would miss them.
+    if (smart_cast<CSE_ALifeCreatureAbstract*>(object))
+        source |= 2;
     model_prefetch_for_each_visual(object, [source](pcstr name) { GEnv.Render->model_PrefetchFiles(name, source); });
 }
 } // namespace
@@ -373,6 +378,24 @@ void model_prefetch_spawn(u16 id)
         return;
     if (CSE_ALifeDynamicObject* object = ai().alife().objects().object(id, true))
         model_prefetch_files_of(object, 1);
+}
+
+bool model_prefetch_spawn_pending(u16 id)
+{
+    if (id == u16(-1) || !ai().get_alife())
+        return false;
+    CSE_ALifeDynamicObject* object = ai().alife().objects().object(id, true);
+    if (!object)
+        return false;
+    // 50l: a creature is asked as a spawn first with the creature bit (PrefetchPending asks without it), so one that
+    // comes online without an ALife prefetch gets its background load too
+    if (smart_cast<CSE_ALifeCreatureAbstract*>(object))
+        model_prefetch_files_of(object, 1);
+    // every visual is asked (each queues its job), not up to the first pending one
+    bool pending = false;
+    model_prefetch_for_each_visual(
+        object, [&pending](pcstr name) { pending = GEnv.Render->model_PrefetchPending(name) || pending; });
+    return pending;
 }
 
 void model_preload_level()

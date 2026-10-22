@@ -250,6 +250,9 @@ public:
     struct EnvVec : xr_vector<CEnvDescriptor*>
     {
         bool soc_style{};
+        // false: a CoP style weather file known by name only, its descriptors are read on the first use
+        // (SetWeather / SetWeatherFX) or at a level load (load_all_weathers)
+        bool loaded{ true };
     };
     using EnvsMap = xr_map<shared_str, EnvVec, str_pred>;
     using EnvAmbVec = xr_vector<CEnvAmbient*>;
@@ -334,6 +337,9 @@ public:
     void mods_load();
     void mods_unload();
 
+    // Reads the weather and effect files that are still known by name only (see EnvVec::loaded)
+    void load_all_weathers();
+
     void OnFrame();
     void on_tool_frame() override;
     void lerp();
@@ -377,6 +383,13 @@ protected:
     virtual void load_weather_effects();
 
     void load_level_specific_ambients();
+
+    // CoP style weather files: descriptors of one file appended to env (no sort, no checks)
+    void read_weather_file(EnvVec& env, const shared_str& name);
+    void read_weather_effect_file(EnvVec& env, const shared_str& name);
+    // A cycle / an effect known by name only: its file is read, sorted and checked as load_weathers did it
+    void load_weather_cycle(EnvVec& env, const shared_str& name);
+    void load_weather_effect(EnvVec& env, const shared_str& name);
 
     void save_weathers(CInifile* environment_config = nullptr) const;
     void save_weather_effects(CInifile* environment_config = nullptr) const;

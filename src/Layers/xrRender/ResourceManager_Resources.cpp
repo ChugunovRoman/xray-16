@@ -54,6 +54,10 @@ void CResourceManager::_DeleteState(const SState* state)
 {
     if (0 == (state->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): the registries a shader creation fills (here and below:
+    // states, constant tables, matrices, constants and their lists) are deleted under its lock too - in play the
+    // background base loading creates shaders while the main thread may release the last reference of one
+    ScopeLock scope(&m_create_lock);
     if (reclaim(v_states, state))
         return;
     Msg("! ERROR: Failed to find compiled stateblock");
@@ -76,6 +80,7 @@ void CResourceManager::_DeleteDecl(const SDeclaration* dcl)
 {
     if (0 == (dcl->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&v_geoms_lock); // 50l: CreateGeom registers the declarations under it (any thread)
     if (reclaim(v_declarations, dcl))
         return;
     Msg("! ERROR: Failed to find compiled vertex-declarator");
@@ -100,6 +105,7 @@ void CResourceManager::_DeleteConstantTable(const R_constant_table* C)
 {
     if (0 == (C->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 50l
     if (reclaim(v_constant_tables, C))
         return;
     Msg("! ERROR: Failed to find compiled constant-table");
@@ -311,6 +317,10 @@ CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
     T->Preload();
     if (Device.b_is_Ready && !bDeferredLoad)
     {
+        // 50r-slow-disk-async-textures.md (plans/optimization_mt): a slow disk - the file is read on the
+        // "Texture async" thread, the texture binds a placeholder until it is in place
+        if (_AsyncTextureQueue(T, false))
+            return T;
         // Spawn stage 0 (plans/spawn_optimization/SPEC.md): a synchronous load after the level load (DeferredUpload):
         // in play (not loading screen / precache) and inside a client spawn apart. Still under m_textures_lock.
         ZoneScopedN("texture_create_sync");
@@ -318,9 +328,25 @@ CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
         PERF_SCOPE(tex_create_sync);
         PERF_SCOPE_IF(!load_screen_renderer.IsActive() && Device.dwPrecacheFrame == 0, tex_create_sync_play);
         PERF_SCOPE_IF(xray::perf::TlSpawn() != 0, tex_create_sync_spawn);
+        GW_FRAME_EVENT(TexSync); // 50n: the frame spike report
         T->Load();
     }
     return T;
+}
+
+bool CResourceManager::_TextureRegistered(LPCSTR _Name)
+{
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): the name as _CreateTexture looks it up
+    if (!_Name || !_Name[0] || 0 == xr_strcmp(_Name, "null"))
+        return false;
+    string_path Name;
+    xr_strcpy(Name, _Name);
+    fix_texture_name(Name);
+#ifdef DEBUG
+    simplify_texture(Name);
+#endif
+    ScopeLock scope(&m_textures_lock);
+    return m_textures.find(pstr(Name)) != m_textures.end();
 }
 
 void CResourceManager::_DeleteTexture(const CTexture* T)
@@ -381,6 +407,7 @@ void CResourceManager::_DeleteMatrix(const CMatrix* M)
 {
     if (0 == (M->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 50l
     pstr N = pstr(M->cName.c_str());
     map_Matrix::iterator I = m_matrices.find(N);
     if (I != m_matrices.end())
@@ -420,6 +447,7 @@ void CResourceManager::_DeleteConstant(const CConstant* C)
 {
     if (0 == (C->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 50l
     pstr N = pstr(C->cName.c_str());
     map_Constant::iterator I = m_constants.find(N);
     if (I != m_constants.end())
@@ -500,6 +528,7 @@ void CResourceManager::_DeleteMatrixList(const SMatrixList* L)
 {
     if (0 == (L->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 50l
     if (reclaim(lst_matrices, L))
         return;
     Msg("! ERROR: Failed to find compiled list of xform-defs");
@@ -535,6 +564,7 @@ void CResourceManager::_DeleteConstantList(const SConstantList* L)
 {
     if (0 == (L->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 50l
     if (reclaim(lst_constants, L))
         return;
     Msg("! ERROR: Failed to find compiled list of r1-constant-defs");

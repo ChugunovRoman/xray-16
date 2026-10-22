@@ -49,6 +49,9 @@ void D3DXRenderBase::updateGamma()
 
 void D3DXRenderBase::OnDeviceDestroy(bool bKeepTextures)
 {
+    // 50r-slow-disk-async-textures.md: the "Texture async" thread stops before any texture or the device goes
+    if (Resources)
+        Resources->_AsyncTexturesShutdown("device destroy");
     WeaponIcon_ReleaseStaticResources();
     if (!GEnv.isDedicatedServer)
     {
@@ -82,6 +85,8 @@ void D3DXRenderBase::OnDeviceDestroy(bool bKeepTextures)
 void D3DXRenderBase::Destroy()
 {
     WeaponIcon_ReleaseStaticResources();
+    if (Resources)
+        Resources->_AsyncTexturesShutdown("render destroy"); // 50r: done by OnDeviceDestroy as a rule
     xr_delete(Resources);
     HW.DestroyDevice();
 }
@@ -322,7 +327,11 @@ void D3DXRenderBase::ResourcesDeferredUnload()
 {
     Resources->DeferredUnload();
 }
-void D3DXRenderBase::ResourcesGetMemoryUsage(u32& m_base, u32& c_base, u32& m_lmaps, u32& c_lmaps)
+u32 D3DXRenderBase::texture_prefetch_files(const char* const* names, u32 count)
+{
+    return Resources ? Resources->_TexturePrefetchFiles(names, count) : 0; // 50r-slow-disk-async-textures.md
+}
+void D3DXRenderBase::ResourcesGetMemoryUsage(u64& m_base, u32& c_base, u64& m_lmaps, u32& c_lmaps)
 {
     if (Resources)
         Resources->_GetMemoryUsage(m_base, c_base, m_lmaps, c_lmaps);
@@ -335,6 +344,37 @@ void D3DXRenderBase::ResourcesStoreNecessaryTextures()
 void D3DXRenderBase::ResourcesDumpMemoryUsage()
 {
     Resources->_DumpMemoryUsage();
+}
+
+void D3DXRenderBase::GetMemoryStats(RenderMemoryStats& stats, bool no_wait)
+{
+    stats = {};
+#if defined(USE_DX11)
+    u64 nonlocal_budget = 0;
+    stats.vram_valid = HW.QueryVideoMemory(
+        stats.vram_local_usage, stats.vram_local_budget, stats.vram_nonlocal_usage, nonlocal_budget);
+#endif
+    if (RImplementation.Models)
+        RImplementation.Models->memory_counts(stats, no_wait);
+    if (Resources)
+    {
+        u64 m_base = 0, m_lmaps = 0;
+        u32 c_base = 0, c_lmaps = 0;
+        // no_wait: a sync texture load holds the textures lock (tens of ms) - tried only; otherwise unlocked as before
+        if (no_wait)
+            stats.tex_valid = Resources->_TryGetMemoryUsage(m_base, c_base, m_lmaps, c_lmaps);
+        else
+        {
+            Resources->_GetMemoryUsage(m_base, c_base, m_lmaps, c_lmaps);
+            stats.tex_valid = true;
+        }
+        stats.tex_count = c_base + c_lmaps;
+        stats.tex_bytes = m_base + m_lmaps;
+    }
+    const s64 vb = BufferUtils::g_host_vb_bytes.load(std::memory_order_relaxed);
+    const s64 ib = BufferUtils::g_host_ib_bytes.load(std::memory_order_relaxed);
+    stats.host_vb_bytes = vb > 0 ? static_cast<u64>(vb) : 0;
+    stats.host_ib_bytes = ib > 0 ? static_cast<u64>(ib) : 0;
 }
 DeviceState D3DXRenderBase::GetDeviceState()
 {
@@ -351,6 +391,9 @@ u32 D3DXRenderBase::GetCacheStatPolys()
 }
 void D3DXRenderBase::Begin()
 {
+    // 50r-slow-disk-async-textures.md: the textures the "Texture async" thread has read go in place (main thread,
+    // before this frame's binds)
+    Resources->_AsyncTexturesPump();
     HW.BeginScene();
 #if RENDER == R_R4
     for (int id = 0; id < R__NUM_CONTEXTS; ++id)

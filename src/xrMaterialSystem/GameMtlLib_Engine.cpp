@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "GameMtlLib.h"
+#include "xrCore/BackgroundIo.h"
 
 namespace
 {
@@ -16,8 +17,24 @@ void CreateSounds(xr_vector<ref_sound>& lst, pcstr buf)
     const int cnt = _GetItemCount(buf);
     R_ASSERT(cnt <= GAMEMTL_SUBITEM_COUNT + 2);
     lst.resize(cnt);
+    // plans/optimization_mt/50z3-startup-slow-disk-io.md: the library is loaded at the start-up (~200 .ogg); on a slow
+    // disk they are not read here but on the "Sound prefetch" thread once the menu has settled (create_deferred is
+    // create elsewhere). Nothing plays them before a level: the first level load reads what is left and resolves them
+    // all on main (CGamePersistent::PreStart -> ResolveDeferredSounds), before the game threads may play them.
+    const bool deferred = xray::io::BackgroundIoMenuPhase();
     for (int k = 0; k < cnt; ++k)
-        lst[k].create(_GetItem(buf, k, tmp), st_Effect, sg_SourceType);
+    {
+        if (deferred)
+            lst[k].create_deferred(_GetItem(buf, k, tmp), st_Effect, sg_SourceType);
+        else
+            lst[k].create(_GetItem(buf, k, tmp), st_Effect, sg_SourceType);
+    }
+}
+
+void ResolveSounds(xr_vector<ref_sound>& lst)
+{
+    for (const ref_sound& snd : lst)
+        snd.resolve_deferred();
 }
 
 void CreateMarks(IWallMarkArray* pMarks, pcstr buf)
@@ -85,4 +102,17 @@ void SGameMtlPair::Load(IReader& fs)
 
     fs.r_stringZ(buf);
     CreateMarks(&*CollideMarks, buf.c_str());
+}
+
+// 50z3-startup-slow-disk-io.md: a sound of the library is shared - the step manager, the bullets and the physics play it
+// directly (or copy it) from the threads of the game; so its deferred numbers are filled once here, on main, before
+// a level runs, and not by the start of a play
+void CGameMtlLibrary::ResolveDeferredSounds()
+{
+    for (SGameMtlPair* pair : material_pairs)
+    {
+        ResolveSounds(pair->BreakingSounds);
+        ResolveSounds(pair->StepSounds);
+        ResolveSounds(pair->CollideSounds);
+    }
 }

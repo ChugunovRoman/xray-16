@@ -535,6 +535,7 @@ void CPHWorld::flush_deferred_mutations()
 // skips; physics is dense enough float work that this is worth not skipping too.
 void CPHWorld::PhysicsWorkerLoop()
 {
+    Threading::SetCurrentThreadHighQos(); // plans/optimization_mt 50g, R15: main waits for the step, as for Game
     for (;;)
     {
         m_physics_wake.Wait();

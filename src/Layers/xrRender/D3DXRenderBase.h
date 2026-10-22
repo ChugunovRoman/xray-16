@@ -54,10 +54,12 @@ public:
     virtual void DeferredLoad(bool E) override;
     virtual void ResourcesDeferredUpload() override;
     virtual void ResourcesDeferredUnload() override;
-    virtual void ResourcesGetMemoryUsage(u32& m_base, u32& c_base, u32& m_lmaps, u32& c_lmaps) override;
+    u32 texture_prefetch_files(const char* const* names, u32 count) override; // 50r-slow-disk-async-textures.md
+    virtual void ResourcesGetMemoryUsage(u64& m_base, u32& c_base, u64& m_lmaps, u32& c_lmaps) override;
     virtual void ResourcesDestroyNecessaryTextures() override;
     virtual void ResourcesStoreNecessaryTextures() override;
     virtual void ResourcesDumpMemoryUsage() override;
+    void GetMemoryStats(RenderMemoryStats& stats, bool no_wait) override;
     //	HWSupport
     virtual bool HWSupportsShaderYUV2RGB() override;
     //	Device state

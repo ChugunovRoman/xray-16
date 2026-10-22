@@ -141,6 +141,11 @@ public:
     Fvector* GetFVectorPtr(pcstr cmd) const;
     IConsole_Command* GetCommand(pcstr cmd) const;
 
+    // The auto-capable commands in auto mode (xr_ioc_cmd.h, IConsole_Command::IsAuto) re-read their effective values
+    // from the hardware policy: CRenderDevice::Create calls it once the real render device reported its GPU, before
+    // the render targets and the textures are created. log: one "* [hw] auto: ..." line with the effective values.
+    void ResolveAutoCommands(bool log);
+
 protected:
     char m_edit_string[CONSOLE_BUF_SIZE]{};
 

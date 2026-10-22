@@ -30,6 +30,9 @@ void CLocatorAPI::auth_runtime(void* params)
 	m_auth_lock->Enter();
     auth_options* _o = (auth_options*)params;
 
+    if (!pSettingsAuth && pSettingsAuthLoader)
+        pSettingsAuthLoader(); // 50z1: not parsed at startup any more
+
     CMemoryWriter writer;
     pSettingsAuth->save_as(writer);
     m_auth_code = crc32(writer.pointer(), writer.size());

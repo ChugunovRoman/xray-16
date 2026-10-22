@@ -16,11 +16,13 @@ struct SEmitter;
 };
 
 // 40-parallel-prefetch.md (plans/optimization_mt): one model of a prefetch list - the name (lower case, no extension)
-// and the suffix, as Create(name, suffix) takes them
+// and the suffix, as Create(name, suffix) takes them; 50a-stage1-prefetch.md: the estimated size of its files (the
+// warm-up lead counts it, plan 50 R4)
 struct ModelPrefetchItem
 {
     xr_string name;
     xr_string suffix;
+    u64 bytes{};
 };
 
 // defs
@@ -58,6 +60,9 @@ class ECORE_API CModelPool
     xr_vector<std::pair<dxRender_Visual*, BOOL>> ModelsToDelete;
     REGISTRY Registry; // Just pairing of pointer / Name
     POOL Pool; // Unused / Inactive
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): name (as in Registry / Pool / Models) -> the estimated bytes
+    // of one instance of that model, filled by memory_counts on the first need (all the instances of a model are alike)
+    std::unordered_map<shared_str, u32> InstanceBytes;
     BOOL bLogging;
     BOOL bForceDiscard;
 
@@ -91,16 +96,30 @@ public:
 
     void Logging(BOOL bEnable) { bLogging = bEnable; }
     void Prefetch();
-    // 40-parallel-prefetch.md: IRender::models_PrefetchList (name, suffix)
-    void PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals);
+    // 40-parallel-prefetch.md: IRender::models_PrefetchList (name, suffix, estimated bytes)
+    void PrefetchList(const xr_vector<PrefetchModel>& visuals);
+    // 50k-slow-disk-early-prefetch.md: IRender::models_EarlyWarmStart / models_EarlyWarmStop (main thread)
+    bool EarlyWarmStart(const xr_vector<PrefetchModel>& models, const PrefetchEarlyWarmParams& params);
+    bool EarlyWarmStop(PrefetchEarlyWarmStats& stats, bool release);
     void ClearPool(BOOL b_complete);
     // 36-spawn-model-load.md (the model prefetch): IRender::model_Preload / model_PrefetchFiles
     bool Preload(LPCSTR name);
-    void PrefetchFiles(LPCSTR name, u32 source);
+    bool PrefetchFiles(LPCSTR name, u32 source); // false = put off (the pool lock was held)
+    // 50i-stage3-slow-disk-io.md: IRender::model_PrefetchPending (a slow disk, the spawn waits for the warm-up)
+    bool PrefetchPending(LPCSTR name);
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt), the background base loading of a weak CPU: InPool - any
+    // thread, a base or a free instance of the pool key; BackgroundLoadPause - the main thread, a device reset (on:
+    // waits for the model being loaded)
+    bool InPool(LPCSTR key);
+    void BackgroundLoadPause(bool on);
 
     void dump();
 
     void memory_stats(u32& vb_mem_video, u32& vb_mem_system, u32& ib_mem_video, u32& ib_mem_system);
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): the model_* and motions* fields of RenderMemoryStats. Any
+    // thread; takes ModelPool_Mutex, then the motions lock (the documented order). no_wait: both are only tried, a busy
+    // one leaves its fields out (models_valid / motions_valid stay false)
+    void memory_counts(RenderMemoryStats& stats, bool no_wait);
 #ifdef _EDITOR
     void OnDeviceDestroy();
     void Render(dxRender_Visual* m_pVisual, const Fmatrix& mTransform, int priority, bool strictB2F, float m_fLOD);
@@ -122,6 +141,13 @@ struct ModelPoolDeferDeletes
 // 36-spawn-model-load.md: true while this thread is inside a cold model load (CModelPool::Create loading an ogf, its
 // LOD and children included)
 bool ModelPoolColdLoad();
+
+// 50a-stage1-prefetch.md (plans/optimization_mt, plan 50 R3): the disk of gamedata is slow - by the hw profile (HDD,
+// USB, network) or by the measurement of the start-up warm-up. Any thread.
+bool ModelPoolDiskSlow();
+// 50a-stage1-prefetch.md: reads the file (an OS path, as FS.exist / update_path give it) into the OS cache and throws
+// the bytes away - the reader of the start-up warm-up. Any thread, no engine state. false = no such file.
+bool ModelPoolWarmFile(pcstr path);
 
 // 40-parallel-prefetch.md (plans/optimization_mt): the motions part of CKinematicsAnimated::Load (LoadMotions) -
 // g_pMotionsContainer, the motions_value shared by models (the first model to dock an omf maps its bones,

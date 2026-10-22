@@ -10,6 +10,7 @@
 #include "Layers/xrRender/blenders/blender_bloom_build.h"
 #include "Layers/xrRender/blenders/blender_luminance.h"
 #include "Layers/xrRender/blenders/blender_ssao.h"
+#include "xrCore/Platform/HwProfile.h"
 
 #include "Layers/xrRender/blenders/dx11MSAABlender.h"
 #include "Layers/xrRender/blenders/dx11RainBlender.h"
@@ -1109,9 +1110,10 @@ bool CRenderTarget::SVPSmapAtlasEnsure()
     // main page size.
     const u32 page = RImplementation.o.smapsize;
     // Sun-reuse tail: three extra slices hold the copied sun cascades (base =
-    // ps_r__svp_smap_pages), mirrored from the main atlas right after its Render/Sun - slice 0
+    // svp_smap_pages()), mirrored from the main atlas right after its Render/Sun - slice 0
     // of the main atlas is destroyed by the first spot page clear.
-    const u32 num_slices = static_cast<u32>(ps_r__svp_smap_pages) + R__NUM_SUN_CASCADES;
+    // R12: the spot page budget is min(r__svp_smap_pages, policy cap), see CRender::svp_smap_pages().
+    const u32 num_slices = RImplementation.svp_smap_pages() + R__NUM_SUN_CASCADES;
     if (svp_rt_smap_depth && svp_rt_smap_depth->valid() && svp_smap_page_size == page &&
         svp_rt_smap_depth->dwWidth == page && svp_rt_smap_depth->n_slices == num_slices)
         return true;
@@ -1148,6 +1150,20 @@ bool CRenderTarget::SVPSmapAtlasEnsure()
     svp_smap_page_size = page;
     svp_smap_failed = false;
     Msg("SVP frame driver: created %ux%u shadow atlas (%u slice(s))", page, page, u32(num_slices));
+    {
+        // R12: once per combination of the user value and the policy cap (main thread only)
+        static s32 s_logged_user = -1;
+        static u32 s_logged_policy = 0;
+        const xray::hw::Policy& policy = xray::hw::GetPolicy();
+        const u32 policy_pages = xray::hw::PolicyValid(policy) ? policy.svp_pages : 0;
+        if (s_logged_user != ps_r__svp_smap_pages || s_logged_policy != policy_pages)
+        {
+            s_logged_user = ps_r__svp_smap_pages;
+            s_logged_policy = policy_pages;
+            Msg("* [hw] svp: smap pages %u (user %d, policy %u)", num_slices - R__NUM_SUN_CASCADES,
+                ps_r__svp_smap_pages, policy_pages);
+        }
+    }
     return true;
 #else
     (void)page;
@@ -1161,6 +1177,45 @@ void CRenderTarget::SVPSmapAtlasRelease()
     svp_rt_smap_depth.destroy();
     svp_smap_page_size = 0;
     svp_smap_failed = false;
+}
+
+u64 CRenderTarget::SVPResourcesBytes() const
+{
+    // Estimate for the R12 log: width x height x samples x slices x bytes per pixel of every distinct surface.
+    const auto pixel_bytes = [](D3DFORMAT fmt) -> u64
+    {
+        switch (fmt)
+        {
+        case D3DFMT_A32B32G32R32F: return 16;
+        case D3DFMT_A16B16G16R16:
+        case D3DFMT_A16B16G16R16F:
+        case D3DFMT_G32R32F: return 8;
+        case D3DFMT_R16F:
+        case D3DFMT_D16: return 2;
+        default: return 4; // 8888, 1010102, G16R16(F), R32F, D24S8/D24X8/D32F
+        }
+    };
+    const CRT* seen[32]{};
+    u32 seen_count = 0;
+    u64 bytes = 0;
+    const auto add = [&](const ref_rt& rt)
+    {
+        if (!rt)
+            return;
+        const CRT* p = rt._get();
+        if (std::find(seen, seen + seen_count, p) != seen + seen_count || seen_count == std::size(seen))
+            return;
+        seen[seen_count++] = p;
+        bytes += u64(p->dwWidth) * p->dwHeight * _max(1u, p->sampleCount) * _max(1u, p->n_slices) * pixel_bytes(p->fmt);
+    };
+    for (const ref_rt& rt : svp_set.Base)
+        add(rt);
+    for (const ref_rt* rt : { &svp_set.Base_Depth, &svp_set.MSAADepth, &svp_set.Position, &svp_set.Normal,
+             &svp_set.Color, &svp_set.Accumulator, &svp_set.Accumulator_temp, &svp_set.Generic_0, &svp_set.Generic_1,
+             &svp_set.Generic_0_r, &svp_set.Generic_1_r, &svp_set.Generic, &svp_set.Generic_2, &svp_set.half_depth,
+             &svp_set.ssao_temp, &svp_rt_smap_depth })
+        add(*rt);
+    return bytes;
 }
 
 bool CRenderTarget::svp_publish_smap_atlas(bool use_atlas)

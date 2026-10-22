@@ -9,6 +9,7 @@
 #include "IGame_Level.h"
 #include "Common/object_broker.h"
 #include "Common/LevelGameDef.h"
+#include "xrCore/BackgroundIo.h"
 
 void CEnvModifier::load(IReader* fs, u32 version)
 {
@@ -132,10 +133,17 @@ void CEnvAmbient::SSndChannel::load(const CInifile& config, pcstr sect, pcstr se
 
     m_sounds.resize(cnt);
 
+    // plans/optimization_mt/50z3-startup-slow-disk-io.md: weathers loaded at the start-up (the menu phase) - on a slow
+    // disk their sounds are read on the "Sound prefetch" thread once the menu has settled (create elsewhere); the start
+    // of the first level load reads what is left, a play (CGamePersistent::WeathersUpdate, main) takes the numbers
+    const bool deferred = xray::io::BackgroundIoMenuPhase();
     for (int k = 0; k < cnt; ++k)
     {
         _GetItem(snds, k, tmp);
-        m_sounds[k].create(tmp, st_Effect, sg_SourceType);
+        if (deferred)
+            m_sounds[k].create_deferred(tmp, st_Effect, sg_SourceType);
+        else
+            m_sounds[k].create(tmp, st_Effect, sg_SourceType);
     }
 }
 
@@ -149,7 +157,13 @@ CEnvAmbient::SEffect* CEnvAmbient::create_effect(const CInifile& config, pcstr i
     result->wind_gust_factor = config.r_float(id, "wind_gust_factor");
 
     if (config.line_exist(id, "sound"))
-        result->sound.create(config.r_string(id, "sound"), st_Effect, sg_SourceType);
+    {
+        // 50z3-startup-slow-disk-io.md: as the sounds of a channel above
+        if (xray::io::BackgroundIoMenuPhase())
+            result->sound.create_deferred(config.r_string(id, "sound"), st_Effect, sg_SourceType);
+        else
+            result->sound.create(config.r_string(id, "sound"), st_Effect, sg_SourceType);
+    }
 
     if (config.line_exist(id, "wind_blast_strength"))
     {
@@ -741,6 +755,12 @@ void CEnvironment::mods_load()
 {
     ZoneScoped;
 
+    // 50z4-startup-weathers-lazy-menus.md: all the weathers and effects before the level ambients below and the
+    // textures upload of the level load (net_start_client5), as the app start had them before. The cycles a level
+    // goes through are chosen by scripts at run time (level_weathers: af3_<brightness>_<state>[_<moon>], effects
+    // of surges and psi storms), so all of them, and only once per process.
+    load_all_weathers();
+
     Modifiers.clear();
     string_path path;
     if (FS.exist(path, "$level$", "level.env_mod"))
@@ -838,7 +858,11 @@ void CEnvironment::load_weathers()
     FS_FileSet weathers;
     FS.file_list(weathers, "$game_weathers$", FS_ListFiles, "*.ltx");
 
-    // CoP style weather config
+    // CoP style weather config.
+    // 50z4-startup-weathers-lazy-menus.md (plans/optimization_mt): only the names here, from the FS index without
+    // reading the disk (112 files with 88 includes in GW). The main menu does not draw the weather, a file is read
+    // on the first SetWeather / SetWeatherFX of its cycle or at the level load (mods_load, before the textures
+    // upload and the level ambients), so a level sees the same descriptors, ambients and textures as before.
     xr_string id;
     for (const auto& file : weathers)
     {
@@ -847,20 +871,7 @@ void CEnvironment::load_weathers()
             continue;
         const size_t length = xr_strlen(fileName);
         id.assign(fileName, length - 4);
-        EnvVec& env = WeatherCycles[id.c_str()];
-
-        string_path file_path;
-        FS.update_path(file_path, "$game_weathers$", fileName);
-        CInifile* config = CInifile::Create(file_path);
-
-        auto& sections = config->sections();
-        env.reserve(sections.size());
-
-        for (const auto& section : sections)
-            if (!strstr(section->Name.c_str(), "gswr_"))
-                env.emplace_back(create_descriptor(section->Name, config));
-
-        CInifile::Destroy(config);
+        WeatherCycles[id.c_str()].loaded = false;
     }
 
     // ShoC style weather config
@@ -879,7 +890,13 @@ void CEnvironment::load_weathers()
             const u32 envCount = pSettings->line_count(weatherSection);
 
             EnvVec& env = WeatherCycles[weatherName];
-            env.reserve(envCount);
+            // A CoP file of the same name: its descriptors go first, as the eager loading had them
+            if (!env.loaded)
+            {
+                read_weather_file(env, weatherName);
+                env.loaded = true;
+            }
+            env.reserve(env.size() + envCount);
             env.soc_style = true;
 
             pcstr executionTime, envSection;
@@ -895,14 +912,113 @@ void CEnvironment::load_weathers()
 
     R_ASSERT2(!WeatherCycles.empty(), "Empty weathers.");
 
-    // sorting weather envs
+    // sorting weather envs (the cycles not read yet are sorted and checked by load_weather_cycle)
     for (auto& cycle : WeatherCycles)
     {
+        if (!cycle.second.loaded)
+            continue;
         R_ASSERT3(cycle.second.size() > 1, "Environment in weather must >=2", cycle.first.c_str());
         std::sort(cycle.second.begin(), cycle.second.end(), sort_env_etl_pred);
     }
 
+    // Reads the first cycle (one file): the current weather is always a loaded one
     SetWeather((*WeatherCycles.begin()).first.c_str());
+}
+
+void CEnvironment::read_weather_file(EnvVec& env, const shared_str& name)
+{
+    ZoneScoped;
+
+    string_path fileName, file_path;
+    strconcat(sizeof(fileName), fileName, name.c_str(), ".ltx");
+    FS.update_path(file_path, "$game_weathers$", fileName);
+    CInifile* config = CInifile::Create(file_path);
+
+    auto& sections = config->sections();
+    env.reserve(env.size() + sections.size());
+
+    for (const auto& section : sections)
+        if (!strstr(section->Name.c_str(), "gswr_"))
+            env.emplace_back(create_descriptor(section->Name, config));
+
+    CInifile::Destroy(config);
+}
+
+void CEnvironment::load_weather_cycle(EnvVec& env, const shared_str& name)
+{
+    if (env.loaded)
+        return;
+
+    read_weather_file(env, name);
+    env.loaded = true;
+
+    R_ASSERT3(env.size() > 1, "Environment in weather must >=2", name.c_str());
+    std::sort(env.begin(), env.end(), sort_env_etl_pred);
+}
+
+void CEnvironment::read_weather_effect_file(EnvVec& env, const shared_str& name)
+{
+    ZoneScoped;
+
+    string_path fileName, file_name;
+    strconcat(sizeof(fileName), fileName, name.c_str(), ".ltx");
+    FS.update_path(file_name, "$game_weather_effects$", fileName);
+    CInifile* config = CInifile::Create(file_name);
+
+    auto& sections = config->sections();
+    env.reserve(env.size() + sections.size() + 2);
+
+    env.emplace_back(create_descriptor("00:00:00", nullptr));
+    env.back()->dont_save = true;
+
+    for (const auto& section : sections)
+        env.emplace_back(create_descriptor(section->Name, config));
+
+    CInifile::Destroy(config);
+
+    env.emplace_back(create_descriptor("24:00:00", nullptr));
+    env.back()->exec_time_loaded = DAY_LENGTH;
+    env.back()->dont_save = true;
+}
+
+void CEnvironment::load_weather_effect(EnvVec& env, const shared_str& name)
+{
+    if (env.loaded)
+        return;
+
+    read_weather_effect_file(env, name);
+    env.loaded = true;
+
+    R_ASSERT3(env.size() > 1, "Environment in weather must >=2", name.c_str());
+    std::sort(env.begin(), env.end(), sort_env_etl_pred);
+}
+
+void CEnvironment::load_all_weathers()
+{
+    ZoneScoped;
+
+    CTimer timer;
+    timer.Start();
+    u32 cycles = 0, effects = 0;
+    for (auto& [name, env] : WeatherCycles)
+    {
+        if (!env.loaded)
+        {
+            load_weather_cycle(env, name);
+            ++cycles;
+        }
+    }
+    for (auto& [name, env] : WeatherFXs)
+    {
+        if (!env.loaded)
+        {
+            load_weather_effect(env, name);
+            ++effects;
+        }
+    }
+    if (cycles || effects)
+        Msg("* [weathers] read %u weather and %u effect files known by name, %u ms", cycles, effects,
+            timer.GetElapsed_ms());
 }
 
 void CEnvironment::load_weather_effects()
@@ -915,32 +1031,15 @@ void CEnvironment::load_weather_effects()
     FS_FileSet weathersEffects;
     FS.file_list(weathersEffects, "$game_weather_effects$", FS_ListFiles, "*.ltx");
 
+    // 50z4-startup-weathers-lazy-menus.md: as the weathers, the names only; a file is read on the first
+    // SetWeatherFX of its effect or at the level load
     xr_string id;
     for (const auto& file : weathersEffects)
     {
         pcstr fileName = file.name.c_str();
         const size_t length = xr_strlen(fileName);
         id.assign(fileName, length - 4);
-        EnvVec& env = WeatherFXs[id.c_str()];
-
-        string_path file_name;
-        FS.update_path(file_name, "$game_weather_effects$", fileName);
-        CInifile* config = CInifile::Create(file_name);
-
-        auto& sections = config->sections();
-        env.reserve(sections.size() + 2);
-
-        env.emplace_back(create_descriptor("00:00:00", nullptr));
-        env.back()->dont_save = true;
-
-        for (const auto& section : sections)
-            env.emplace_back(create_descriptor(section->Name, config));
-
-        CInifile::Destroy(config);
-
-        env.emplace_back(create_descriptor("24:00:00", nullptr));
-        env.back()->exec_time_loaded = DAY_LENGTH;
-        env.back()->dont_save = true;
+        WeatherFXs[id.c_str()].loaded = false;
     }
 
     // ShoC style weather effects config
@@ -957,6 +1056,12 @@ void CEnvironment::load_weather_effects()
         if (pSettings->r_line("weather_effects", weatherIdx, &weatherName, &weatherSection))
         {
             EnvVec& env = WeatherFXs[weatherName];
+            // A CoP file of the same name: its descriptors go first, as the eager loading had them
+            if (!env.loaded)
+            {
+                read_weather_effect_file(env, weatherName);
+                env.loaded = true;
+            }
             env.soc_style = true;
             env.emplace_back(create_descriptor("00:00:00", nullptr));
             env.back()->dont_save = true;
@@ -977,9 +1082,11 @@ void CEnvironment::load_weather_effects()
         }
     }
 
-    // sorting weather envs
+    // sorting weather envs (the effects not read yet are sorted and checked by load_weather_effect)
     for (auto& fx : WeatherFXs)
     {
+        if (!fx.second.loaded)
+            continue;
         R_ASSERT3(fx.second.size() > 1, "Environment in weather must >=2", fx.first.c_str());
         std::sort(fx.second.begin(), fx.second.end(), sort_env_etl_pred);
     }
@@ -998,6 +1105,15 @@ void CEnvironment::load()
 
     load_weathers();
     load_weather_effects();
+
+    u32 pending_cycles = 0, pending_effects = 0;
+    for (const auto& [name, env] : WeatherCycles)
+        pending_cycles += env.loaded ? 0 : 1;
+    for (const auto& [name, env] : WeatherFXs)
+        pending_effects += env.loaded ? 0 : 1;
+    Msg("* [weathers] %u weathers, %u effects; %u and %u of them known by name, read at the first use or the "
+        "level load", static_cast<u32>(WeatherCycles.size()), static_cast<u32>(WeatherFXs.size()), pending_cycles,
+        pending_effects);
 }
 
 void CEnvironment::unload()
@@ -1038,12 +1154,18 @@ void CEnvironment::ED_Reload()
     ZoneScoped;
     unload();
     load();
+    // On a level everything is read at once, as the eager loading did (the level ambients are not applied again)
+    if (g_pGameLevel)
+        load_all_weathers();
     OnFrame();
 }
 
 void CEnvironment::save() const
 {
     ZoneScoped;
+
+    // A weather known by name only would be written as an empty file
+    const_cast<CEnvironment*>(this)->load_all_weathers();
 
     string_path environment_config_path;
     FS.update_path(environment_config_path, "$game_config$", "weathers\\environment.ltx");

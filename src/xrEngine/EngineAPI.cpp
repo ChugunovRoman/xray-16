@@ -150,7 +150,7 @@ void CEngineAPI::Destroy()
     XRC.r_clear_compact();
 }
 
-void CEngineAPI::CreateRendererList(const std::array<RendererModule*, 2>& modules)
+void CEngineAPI::CreateRendererList(const std::array<RendererModule*, 2>& modules, pcstr requestedMode)
 {
     if (!VidQualityToken.empty())
         return;
@@ -187,8 +187,43 @@ void CEngineAPI::CreateRendererList(const std::array<RendererModule*, 2>& module
     }
     else
     {
+        // 50z2 (plans/optimization_mt/50z2-startup-thm-shaders-probes-preview.md): every module used to be probed - a
+        // D3D11 device and swap chain, then two GL windows and contexts (the ICD load) - on every start, with r4
+        // selected too. A later module is probed only when it is needed: no earlier module gave a mode the game can
+        // use, or the renderer asked for is one of its modes. Otherwise its modes are listed untested, so the options
+        // still offer them: choosing one takes effect after a restart, where that start probes the module (and if
+        // the test fails there, SelectRenderer falls back to the best available mode, as for any unavailable one).
+        // SelectRenderer never picks an untested mode: it is not in renderModes.
+        bool usable = false; // an earlier probed module has modes and the game can use it
         for (const auto& module : modules)
-            loadRenderer(module);
+        {
+            if (!module)
+                continue;
+            if (usable)
+            {
+                const auto untested = module->GetUntestedModes();
+                const bool requested = requestedMode && requestedMode[0] &&
+                    std::any_of(untested.begin(), untested.end(), [requestedMode](const auto& m)
+                    {
+                        return xr_stricmp(m.first, requestedMode) == 0;
+                    });
+                if (!untested.empty() && !requested)
+                {
+                    for (const auto& [mode, modeIndex] : untested)
+                    {
+                        const bool listed = std::any_of(VidQualityToken.begin(), VidQualityToken.end(),
+                            [mode = mode](const xr_token& t) { return t.name && xr_strcmp(t.name, mode) == 0; });
+                        if (!listed)
+                            VidQualityToken.emplace_back(mode, modeIndex);
+                    }
+                    Msg("* renderer: '%s' asked for, a module with %u more mode(s) is not probed (listed untested)",
+                        requestedMode && requestedMode[0] ? requestedMode : "(none)", u32(untested.size()));
+                    continue;
+                }
+            }
+            if (loadRenderer(module) && module->CheckGameRequirements())
+                usable = true;
+        }
     }
 
     auto& modes = VidQualityToken;

@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 #endif
 #include "xrCore/Text/Utf8Utils.hpp"
+#include "xrCore/BackgroundIo.h"
 #include <sys/stat.h>
 #include <fcntl.h>
 
@@ -108,6 +109,7 @@ static int open_internal(pcstr fn, int& handle)
 
 bool file_handle_internal(pcstr file_name, size_t& size, int& file_handle)
 {
+    xray::io::BackgroundIoNoteForegroundRead(); // 50z3-startup-slow-disk-io.md: the menu readers ahead give way
     if (open_internal(file_name, file_handle))
     {
         Sleep(1);
@@ -566,6 +568,7 @@ CVirtualFileReader::CVirtualFileReader(int fd, char* mapped, size_t sz, pcstr db
 
 CVirtualFileReader* CVirtualFileReader::TryOpen(pcstr cFileName)
 {
+    xray::io::BackgroundIoNoteForegroundRead(); // 50z3-startup-slow-disk-io.md
 #if defined(XR_PLATFORM_WINDOWS)
     const std::wstring wFileName = XRay::Utf8::ToWide(cFileName);
     void* const hFile =
@@ -693,6 +696,7 @@ CVirtualFileRW::~CVirtualFileRW()
 
 CVirtualFileReader::CVirtualFileReader(pcstr cFileName)
 {
+    xray::io::BackgroundIoNoteForegroundRead(); // 50z3-startup-slow-disk-io.md
 #if defined(XR_PLATFORM_WINDOWS)
     // Open the file
     const std::wstring wFileName = XRay::Utf8::ToWide(cFileName);

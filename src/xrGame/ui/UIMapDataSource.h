@@ -56,4 +56,7 @@ public:
     virtual bool GetFocusLevel(shared_str& outLevel) const { return false; }
     virtual void OnMapClick(u32 logical_id, EUiMapClick clickType) {}
     virtual bool UpdatePointVisual(u32 logical_id, pcstr owner_faction, pcstr icon_texture) { return false; }
+    // plans/optimization_mt/50z3-startup-slow-disk-io.md: a shown map wants the data now (a source that defers its
+    // loading starts it at once). Main thread
+    virtual void RequestData() {}
 };

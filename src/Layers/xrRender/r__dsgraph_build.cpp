@@ -1094,8 +1094,8 @@ void run_jobs_parallel(u32 count, u32 helpers, const Job& job, const OwnWork& ow
     run();
     {
         PERF_SCOPE(rmain_par_jobs_tail);
-        while (state.done.load(std::memory_order_acquire) < count)
-            std::this_thread::yield();
+        // yield as before; the bounded spin in the Short spin class (plans/optimization_mt 50g, R11)
+        TaskManager::SpinUntil([&state, count] { return state.done.load(std::memory_order_acquire) >= count; });
     }
     // Helpers still queued find no jobs and return at once; Wait() runs them first from this thread's queue.
     TaskManager::RunTask(root);
@@ -1533,7 +1533,9 @@ bool R_dsgraph_structure::build_dynamic_main_parallel(u32 ltrack_index, bool col
     const u32 count = static_cast<u32>(lstRenderables.size());
     const u32 grain = static_cast<u32>(std::max(r__parallel_main_build_grain, 1));
     const u32 parts = std::min((count + grain - 1) / grain, PARALLEL_MAIN_BUILD_MAX_PARTS);
-    const u32 workers = TaskScheduler ? static_cast<u32>(TaskScheduler->GetWorkersCount()) : 0;
+    // Pool threads only (plan 50b): main, Game and Physics are not helpers; with fewer than 2 the split only adds
+    // setup.
+    const u32 workers = TaskScheduler ? static_cast<u32>(TaskScheduler->GetPoolWorkersCount()) : 0;
     // val_recorder (old sun cascades) is a shared vector the parts would race on - sequential then.
     if (parts < 2 || workers < 2 || count < static_cast<u32>(std::max(r__parallel_main_build_min, 0)) || val_recorder)
     {
@@ -1700,8 +1702,8 @@ bool R_dsgraph_structure::build_dynamic_main_parallel(u32 ltrack_index, bool col
             // Spin (no stealing) until the parts taken by others are done: TaskManager::Wait() could pick up an
             // unrelated long task (a sun cascade) here and delay the main thread waiting for this build.
             PERF_SCOPE(rmain_par_tail);
-            while (state.done.load(std::memory_order_acquire) < parts)
-                std::this_thread::yield();
+            // yield as before; the bounded spin in the Short spin class (plans/optimization_mt 50g, R11)
+            TaskManager::SpinUntil([&state, parts] { return state.done.load(std::memory_order_acquire) >= parts; });
         }
         // Helpers still queued find no parts and return at once; Wait() runs them first from this thread's queue.
         TaskManager::RunTask(root);
@@ -1826,7 +1828,8 @@ void R_dsgraph_structure::presort_main_dynamic()
     };
     constexpr size_t PRESORT_PARALLEL_MIN_ITEMS = 1024;
     constexpr u32 PRESORT_MAX_JOBS = 8;
-    const u32 workers = TaskScheduler ? static_cast<u32>(TaskScheduler->GetWorkersCount()) : 0;
+    // Main plus the pool threads (plan 50b): one job per thread that can take one
+    const u32 workers = TaskScheduler ? static_cast<u32>(TaskScheduler->GetPoolWorkersCount()) + 1 : 0;
     const u32 group_count = static_cast<u32>(s_presort_groups.size());
     const u32 jobs = std::min({ group_count, workers, PRESORT_MAX_JOBS });
     if (jobs < 2 || total_items < PRESORT_PARALLEL_MIN_ITEMS)

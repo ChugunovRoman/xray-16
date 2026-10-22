@@ -201,7 +201,10 @@ public:
     void _ParseList(sh_list& dest, LPCSTR names);
     IBlender* _GetBlender(LPCSTR Name);
     IBlender* _FindBlender(LPCSTR Name);
-    void _GetMemoryUsage(u32& m_base, u32& c_base, u32& m_lmaps, u32& c_lmaps);
+    void _GetMemoryUsage(u64& m_base, u32& c_base, u64& m_lmaps, u32& c_lmaps);
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): _GetMemoryUsage under m_textures_lock, only tried (the
+    // [mem] line in play: textures are created on any thread). false = the lock was busy, nothing counted
+    bool _TryGetMemoryUsage(u64& m_base, u32& c_base, u64& m_lmaps, u32& c_lmaps);
     void _DumpMemoryUsage();
     //.	BOOL							_GetDetailTexture	(LPCSTR Name, LPCSTR& T, R_constant_setup* &M);
 
@@ -221,6 +224,26 @@ public:
     // Low level resource creation
     CTexture* _CreateTexture(LPCSTR Name);
     void _DeleteTexture(const CTexture* T);
+    // 50l-weak-cpu-spawn-models.md (plans/optimization_mt): a texture of this name is registered (_CreateTexture made
+    // it: loaded, unless the load is deferred). Any thread, m_textures_lock.
+    bool _TextureRegistered(LPCSTR Name);
+
+    // 50r-slow-disk-async-textures.md (plans/optimization_mt): the async loading of textures on a slow disk
+    // (ResourceManager.cpp). _AsyncTextureQueue: any thread; gives the texture to the "Texture async" thread unless it
+    // must be loaded now (a fast disk, the loading screen, a precache frame, a background loader thread creating it, a
+    // render target, a video, no dds); bound = its first bind (the urgent queue). true = queued or pending already
+    // (bind the placeholder), false = load it as before.
+    bool _AsyncTextureQueue(CTexture* T, bool bound);
+    void _AsyncTexturePromote(CTexture* T); // a pending texture bound: to the urgent queue (once)
+    void _AsyncTextureDetach(CTexture* T); // CTexture::async_detach
+    void _AsyncTexturesPump(); // main thread, every frame (D3DXRenderBase::Begin): puts the read textures in place
+    // main thread (the level load, the device destroy): stops the thread; the pending textures become "not loaded"
+    // again, the created ones are put in place; one summary line per period with anything done
+    void _AsyncTexturesShutdown(pcstr reason);
+    void _AsyncTexturesBlock(bool block); // DeferredUpload: no queueing meanwhile
+    // IRender::texture_prefetch_files: queues the dds of these texture names (not registered yet) for the thread to
+    // read into the OS cache; a slow disk only, else 0. Any thread. Returns the names queued.
+    u32 _TexturePrefetchFiles(const char* const* names, u32 count);
 
     CMatrix* _CreateMatrix(LPCSTR Name);
     void _DeleteMatrix(const CMatrix* M);

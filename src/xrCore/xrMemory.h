@@ -17,6 +17,11 @@ public:
     size_t mem_usage();
 
     void mem_compact();
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): gives the free memory the allocator still holds back to the
+    // OS (mimalloc: mi_collect; force - also the free parts of the abandoned segments of the finished threads and the
+    // segment caches). Walks the heap of the calling thread, milliseconds: not per frame. No-op without mimalloc.
+    // The caller measures the effect with mem_usage() before and after.
+    void mem_collect(bool force);
 
     void* mem_alloc(size_t size);
     void* mem_alloc(size_t size, size_t alignment);

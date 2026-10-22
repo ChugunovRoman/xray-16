@@ -35,17 +35,28 @@ public:
         ZoneScoped;
 
         if (CheckCanAddMode())
-        {
-#ifdef XR_PLATFORM_WINDOWS
-            modes.emplace_back(RENDERER_RGL_MODE, 6);
-#else
-            //modes.emplace_back(RENDERER_R2_MODE, 2);
-            //modes.emplace_back(RENDERER_R2_5_MODE, 3);
-            modes.emplace_back(RENDERER_R3_MODE, 4);
-            //modes.emplace_back(RENDERER_R4_MODE, 5);
-#endif
-        }
+            AddModes(modes);
         return modes;
+    }
+
+    // 50z2: the same list without the test (EngineAPI lists the module untested when it needs no probe)
+    xr_vector<std::pair<pcstr, int>> GetUntestedModes() const override
+    {
+        xr_vector<std::pair<pcstr, int>> untested;
+        AddModes(untested);
+        return untested;
+    }
+
+    static void AddModes(xr_vector<std::pair<pcstr, int>>& to)
+    {
+#ifdef XR_PLATFORM_WINDOWS
+        to.emplace_back(RENDERER_RGL_MODE, 6);
+#else
+        //to.emplace_back(RENDERER_R2_MODE, 2);
+        //to.emplace_back(RENDERER_R2_5_MODE, 3);
+        to.emplace_back(RENDERER_R3_MODE, 4);
+        //to.emplace_back(RENDERER_R4_MODE, 5);
+#endif
     }
 
     bool CheckGameRequirements() override

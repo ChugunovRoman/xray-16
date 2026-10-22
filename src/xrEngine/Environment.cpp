@@ -180,6 +180,8 @@ void CEnvironment::SetWeather(shared_str name, bool forced)
             return;
         }
         R_ASSERT3(it != WeatherCycles.end(), "Invalid weather name.", name.c_str());
+        // 50z4-startup-weathers-lazy-menus.md: a cycle known by name only is read on its first use
+        load_weather_cycle(it->second, it->first);
         CurrentCycleName = it->first;
         if (forced)
         {
@@ -215,6 +217,8 @@ bool CEnvironment::SetWeatherFX(shared_str name)
     {
         auto it = WeatherFXs.find(name);
         R_ASSERT3(it != WeatherFXs.end(), "Invalid weather effect name.", name.c_str());
+        // 50z4-startup-weathers-lazy-menus.md: an effect known by name only is read on its first use
+        load_weather_effect(it->second, it->first);
         EnvVec* PrevWeather = CurrentWeather;
         VERIFY(PrevWeather);
         CurrentWeather = &it->second;

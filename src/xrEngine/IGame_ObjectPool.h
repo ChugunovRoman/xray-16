@@ -32,3 +32,12 @@ public:
     virtual ~IGame_ObjectPool();
 };
 //-----------------------------------------------------------------------------------------------------------
+
+struct PrefetchListItem;
+struct PrefetchModel;
+// 40-parallel-prefetch.md / 50k-slow-disk-early-prefetch.md (plans/optimization_mt): the visuals the Load of these
+// prefetch objects creates, each once, in the order of its first section (IGame_ObjectPool.cpp). with_material_visuals:
+// also the visuals the Load creates itself (a section with world_material_N lines) - for a file warm-up, which does not
+// create them. Main thread. xrEngine only (IGame_ObjectPool::prefetch, the early warm-up of IGame_Persistent).
+void PrefetchObjectVisuals(
+    const xr_vector<PrefetchListItem>& sections, xr_vector<PrefetchModel>& visuals, bool with_material_visuals);

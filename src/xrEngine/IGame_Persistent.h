@@ -222,4 +222,35 @@ public:
 };
 
 extern ENGINE_API IGame_Persistent* g_pGamePersistent;
+
+#ifndef _EDITOR
+// 50a-stage1-prefetch.md (plans/optimization_mt; plan 50, rules R1 variant B and R4): the lists of
+// prefetch_single.ltx in their priority order and one byte budget for the objects and the models stage. A list line is
+// "<name> = <KB>, <order>": its place in one priority order over both lists (CInifile keeps the keys of a section
+// sorted by name) and the size of the files it adds to the lines with a smaller order, of either list (ogf, LOD, omf,
+// dds). A line without a number gets the default size, a line without an order goes after the ordered ones, in name
+// order. Main thread, inside IGame_Persistent::Prefetch (outside it the lists are taken whole).
+struct PrefetchListItem
+{
+    shared_str name; // the key as written
+    u64 bytes{}; // the estimated size of its files
+};
+
+// The lines of the list section (it must exist, as r_section) in the priority order
+ENGINE_API void PrefetchListRead(pcstr section, xr_vector<PrefetchListItem>& items);
+// Cuts the list (read by PrefetchListRead) to what the prefetch budget allows. PrefetchMode::Full: all of it.
+// Core / Level: IGame_Persistent::Prefetch merges both lists by <order> beforehand and takes the merged lines while the
+// estimated memory of what is taken fits prefetch_budget, the first line that does not fit ends the walk; each stage
+// gets the lines of its list from that prefix. stage: "objects" or "models".
+ENGINE_API void PrefetchListTake(pcstr stage, xr_vector<PrefetchListItem>& items);
+
+// R4: how many bytes (by the list estimates) the start-up warm threads of the model prefetch may read ahead of the
+// loads - from the RAM available at the start of the prefetch; 0 = no warm-up. with_textures: false = no dds.
+struct PrefetchWarmLimits
+{
+    u64 lead_bytes;
+    bool with_textures;
+};
+ENGINE_API PrefetchWarmLimits PrefetchWarmLimitsNow();
+#endif
 #endif // IGame_PersistentH
