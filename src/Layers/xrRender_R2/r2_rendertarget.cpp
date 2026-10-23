@@ -1795,9 +1795,16 @@ void CRenderTarget::ScaledSetBegin(ScaledTargetSet& set)
     // while this second pass binds the twins holding LAST scope frame's contents. Zero them here
     // or scope lighting/volumetrics add onto the previous frame - the lens image progressively
     // washes out to white. The main pass owns those once-per-frame clears itself.
+    // rt_Accumulator is not cleared here but by the first phase_accumulator() of the pass (the mark
+    // is reset for it, End restores the main pass's one): the rain of the pass (render_rain::flush,
+    // draw_rain "patch normal") writes the patched normals into rt_Accumulator BEFORE the lighting,
+    // and a clear here left them under the scope lighting - a bright green circle of
+    // r3_dynamic_wet_surfaces_far around the camera in the lens. That clear also resets the light
+    // marker, as in the main pass (the twin has its own stencil).
     if (set.clear_on_begin)
     {
-        RCache.ClearRT(rt_Accumulator, {});
+        set.saved_accum_clear_mark = dwAccumulatorClearMark;
+        dwAccumulatorClearMark = 0;
         if (rt_Accumulator_temp)
             RCache.ClearRT(rt_Accumulator_temp, {});
         if (rt_Generic_2)
@@ -1825,6 +1832,9 @@ void CRenderTarget::ScaledSetEnd(ScaledTargetSet& set)
 
     dwWidth[RCache.context_id] = set.saved_w;
     dwHeight[RCache.context_id] = set.saved_h;
+
+    if (set.clear_on_begin)
+        dwAccumulatorClearMark = set.saved_accum_clear_mark;
 
     set.orig_Base.clear();
     set.orig_Base_Depth.destroy(); // drops the extra reference only, the original stays in rt_Base_Depth

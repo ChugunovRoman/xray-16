@@ -105,6 +105,7 @@ public:
         xr_vector<std::pair<ref_rt*, ref_rt>> saved; // {member, original} saved by Begin, restored by End
         u32 saved_w{};
         u32 saved_h{};
+        u32 saved_accum_clear_mark{}; // clear_on_begin: dwAccumulatorClearMark of the main pass, restored by End
         // Originals of the backbuffer pair captured by Begin: the scaled main pass presents into
         // them (phase_pp upscale), see get_present_rt()/get_present_zb().
         xr_vector<ref_rt> orig_Base;
