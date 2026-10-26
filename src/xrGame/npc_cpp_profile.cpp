@@ -21,9 +21,10 @@ constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_PROBE = 8;
 // good: the report is the only place they go. 16 rows hid about half of the calls of a session, and the profiler
 // only runs with -npc_cpp_profile anyway, where a longer table is what is wanted.
 constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT = 64;
-constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 96; // 32 hid the movement/* and script_entity/sound/* sub-stages; 48 the
-                                                // stalker/schedule_update/* breakdown of stage 7; 64 the cheap
-                                                // alife/scheduled/* kinds of the offline simulation (gw_eoc E0)
+constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 128; // 32 hid the movement/* and script_entity/sound/* sub-stages; 48 the
+                                                 // stalker/schedule_update/* breakdown of stage 7; 64 the cheap
+                                                 // alife/scheduled/* kinds of the offline simulation (gw_eoc E0); 96 the
+                                                 // rare alife/create/* and spec_char/* rows (53-create-squad-engine.md)
 
 struct NpcCppProfileCounters
 {
@@ -67,6 +68,41 @@ NpcCppProfileCounters g_npc_cpp_profile_counters[NPC_CPP_PROFILE_STAGE_COUNT];
 ScriptEvaluatorProfileBucket g_script_evaluator_profile_buckets[NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT];
 // The same buckets for the steps of Lua actions ("<action name>/<step>"): script_action_top of the report
 ScriptEvaluatorProfileBucket g_script_action_profile_buckets[NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT];
+// 57-gw-eoc-next-steps.md, E2: the same buckets for the smart zone binders by the section of the zone
+// (binder_section_top of the report): smart_terrain, space_restrictor, anomal_zone, camp_zone...
+ScriptEvaluatorProfileBucket g_binder_section_profile_buckets[NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT];
+
+// 57-gw-eoc-next-steps.md, E2: the "alife peak" capture (npc_cpp_profile::peak_*). Written only by the thread that
+// holds g_alife_peak_busy (the one that opened the capture); t_alife_peak_active is true on that thread only, so the
+// stages of the other threads never reach it.
+constexpr size_t NPC_CPP_PROFILE_ALIFE_PEAK_PLUGINS = 32; // plugin stages of one capture, the rest are dropped
+constexpr size_t NPC_CPP_PROFILE_ALIFE_PEAK_TOP = 5;
+
+struct AlifePeakPluginStage
+{
+    char name[96];
+    u64 qpc;
+    u32 calls;
+};
+
+struct AlifePeakCapture
+{
+    u64 qpc[NPC_CPP_PROFILE_STAGE_COUNT];
+    u32 calls[NPC_CPP_PROFILE_STAGE_COUNT];
+    AlifePeakPluginStage plugins[NPC_CPP_PROFILE_ALIFE_PEAK_PLUGINS];
+    u32 plugin_count;
+    u32 objects; // the scheduled objects updated in the capture
+    u64 worst_qpc; // the most expensive of them
+    u16 worst_id;
+    ENpcCppProfileStage worst_kind;
+    char worst_name[64];
+    char worst_section[64];
+    bool report_inside; // the 5 s report was printed inside the update: its time is in the total
+};
+
+AlifePeakCapture g_alife_peak;
+std::atomic_bool g_alife_peak_busy{false};
+thread_local bool t_alife_peak_active = false;
 Lock g_npc_cpp_profile_flush_lock;
 std::atomic<u32> g_npc_cpp_profile_next_flush_ms{0};
 // Start of the window the next report covers: the frame number and the time, so the report can say how many frames
@@ -281,6 +317,128 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "stalker/best_item/update",
     "stalker/best_item/lua_lookup",
     "stalker/best_item/lua_call",
+    "alife/switch_pass/squad",
+    "alife/switch_pass/stalker",
+    "alife/switch_pass/monster",
+    "alife/switch_pass/item",
+    "alife/switch_pass/smart_terrain",
+    "alife/switch_pass/anomaly",
+    "alife/switch_pass/other",
+    "alife/switch_pass/sync_location",
+    "alife/switch_pass/go_online",
+    "alife/switch_pass/go_offline",
+    "alife/switch_pass/can_online/squad",
+    "alife/switch_pass/can_online/creature",
+    "alife/switch_pass/can_online/other",
+    "alife/switch_pass/can_offline/squad",
+    "alife/switch_pass/can_offline/creature",
+    "alife/switch_pass/can_offline/other",
+    "alife/switch_pass/keep_saved",
+    "alife/switch_pass/keep_saved_empty",
+    "alife/switch_pass/can_skipped",
+    "alife/switch_pass/part_sampled",
+    "alife/switch_pass/part_clean",
+    "alife/switch_pass/sync_fast",
+    "alife/switch_pass/sync_memo",
+    "alife/switch_pass/sync_full",
+    "alife/switch_pass/sync_full_unchanged",
+    "alife/switch_pass/n3_native/can_online",
+    "alife/switch_pass/n3_native/can_offline",
+    "alife/switch_pass/n3_native/keep_saved",
+    "alife/switch_pass/n3_native/used_ai",
+    "alife/switch_pass/n3_lua/can_online",
+    "alife/switch_pass/n3_lua/can_offline",
+    "alife/switch_pass/n3_lua/keep_saved",
+    "alife/switch_pass/n3_lua/used_ai",
+    "alife/switch_pass/n3_luabind",
+    "alife/switch_pass/sync_exit_attached",
+    "alife/switch_pass/sync_exit_offline_invalid",
+    "alife/switch_pass/sync_exit_no_ai",
+    "alife/squad_brain/update",
+    "alife/squad_brain/get_current_task/stalker",
+    "alife/squad_brain/get_current_task/monster",
+    "alife/create/stalker",
+    "alife/create/monster",
+    "alife/create/squad",
+    "alife/create/other",
+    "alife/create/stalker/register",
+    "alife/create/stalker/spawn_supplies",
+    "alife/create/monster/register",
+    "alife/create/monster/spawn_supplies",
+    "alife/on_register/stalker",
+    "alife/on_register/monster",
+    "alife/on_register/squad",
+    "alife/on_register/event",
+    "spec_char/select",
+    "spec_char/select/scanned",
+    "spec_char/select/indexed",
+    "spec_char/select/full",
+    "spec_char/index_build",
+    "spec_char/set",
+    "spec_char/spawn_supplies",
+    "alife/time_skip",
+    "alife/time_skip/step",
+    "alife/time_skip/retarget",
+    "alife/time_skip/move",
+    "alife/time_skip/event",
+    "alife/time_skip/steps",
+    "alife/time_skip/squads_moved",
+    "alife/time_skip/held",
+    "alife/fresh_offline_update",
+    "script_binder/update/smartzone/smart_terrain",
+    "script_binder/update/smartzone/restrictor",
+    "script_binder/update/smartzone/other",
+    "condlist/pick",
+    "condlist/pick/prepare",
+    "condlist/pick/eval",
+    "condlist/pick/fallback",
+    "binder_gate/skipped",
+    "binder_gate/medium_only",
+    "binder_gate/slow",
+    "binder_gate/switch",
+    "binder_gate/callback",
+    "alife/squad_brain/task/native/job",
+    "alife/squad_brain/task/native/smart",
+    "alife/squad_brain/task/native/squad",
+    "alife/squad_brain/task/native/self",
+    "alife/squad_brain/task/lua", // unused since C2 (was mode 0)
+    "alife/squad_brain/task/lua/actor",
+    "alife/squad_brain/task/lua/other_class",
+    "alife/squad_brain/task/lua/odd",
+    "alife/squad_brain/task/lua/no_script",
+    "alife/squad_brain/task/verify", // unused since C2 (was mode 2)
+    "alife/squad_brain/task/verify_mismatch", // unused since C2 (was mode 2)
+    "alife/squad_update/members",
+    "alife/offline_path/first",
+    "alife/offline_path/idle",
+    "alife/offline_path/search",
+    "alife/offline_path/search_failed",
+    "alife/offline_path/follow",
+    "alife/offline_path/vertex_change",
+    "alife/offline_path/vertex_hook",
+    "alife/time_skip/move/squad",
+    "alife/time_skip/move/other",
+    "alife/time_skip/move/squad_moves",
+    "alife/time_skip/retarget/moves",
+    "binder_interval/skipped",
+    "binder_interval/called",
+    "alife/graph/add",
+    "alife/graph/add_stale",
+    "alife/graph/remove_desync",
+    "alife/offline_path/search_deferred",
+    "condlist/pick/fb_structure",
+    "condlist/pick/fb_unknown",
+    "condlist/pick/fb_pattern",
+    "condlist/pick/fb_effect",
+    "condlist/pick/fb_param",
+    "condlist/pick/fb_identity",
+    "condlist/pick/fb_actions",
+    "condlist/pick/fb_types",
+    "condlist/pick/fb_prng",
+    "condlist/pick/identity_cached",
+    "condlist/pick/prepare/identity",
+    "condlist/pick/prepare/rest",
+    "condlist/pick/eval/actions_check",
 };
 
 static_assert((sizeof(g_npc_cpp_profile_stage_names) / sizeof(g_npc_cpp_profile_stage_names[0])) == NPC_CPP_PROFILE_STAGE_COUNT);
@@ -350,13 +508,14 @@ ScriptEvaluatorProfileBucket* script_evaluator_bucket(pcstr evaluator_name)
     return named_bucket(g_script_evaluator_profile_buckets, evaluator_name);
 }
 
-// script_action_top: the steps of Lua actions by total time (the Lua part of stalker/planner/execute)
-void flush_script_action_snapshots()
+// script_action_top: the steps of Lua actions by total time (the Lua part of stalker/planner/execute);
+// binder_section_top (57-gw-eoc-next-steps.md, E2): the smart zone binders by the section of the zone. The same rows.
+void flush_named_bucket_snapshots(ScriptEvaluatorProfileBucket* buckets, pcstr header)
 {
     xr_vector<NpcCppProfileSnapshot> snapshots;
     for (size_t i = 0; i < NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT; ++i)
     {
-        ScriptEvaluatorProfileBucket& bucket = g_script_action_profile_buckets[i];
+        ScriptEvaluatorProfileBucket& bucket = buckets[i];
         const u64 total_qpc = bucket.total_qpc.exchange(0, std::memory_order_relaxed);
         const u64 calls = bucket.calls.exchange(0, std::memory_order_relaxed);
         const u64 max_qpc = bucket.max_qpc.exchange(0, std::memory_order_relaxed);
@@ -369,7 +528,7 @@ void flush_script_action_snapshots()
     std::sort(snapshots.begin(), snapshots.end(),
         [](const NpcCppProfileSnapshot& left, const NpcCppProfileSnapshot& right) { return left.total_qpc > right.total_qpc; });
     const size_t shown = std::min<size_t>(snapshots.size(), NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT);
-    Msg("* npc_cpp_profile script_action_top=%u", static_cast<u32>(shown));
+    Msg("* npc_cpp_profile %s=%u", header, static_cast<u32>(shown));
     for (size_t i = 0; i < shown; ++i)
     {
         const NpcCppProfileSnapshot& row = snapshots[i];
@@ -563,7 +722,106 @@ void flush_snapshots(const u32 now_ms)
     }
 
     flush_script_evaluator_snapshots();
-    flush_script_action_snapshots();
+    flush_named_bucket_snapshots(g_script_action_profile_buckets, "script_action_top");
+    flush_named_bucket_snapshots(g_binder_section_profile_buckets, "binder_section_top");
+}
+
+// 57-gw-eoc-next-steps.md, E2: the threshold of the "alife peak" line, -alife_peak_ms N (whole ms, 5 by default)
+u64 alife_peak_threshold_qpc()
+{
+    static const u64 value = [] {
+        int ms = 5;
+        constexpr char key[] = "-alife_peak_ms ";
+        if (pcstr arg = strstr(Core.Params, key))
+            ms = atoi(arg + sizeof key - 1);
+        return static_cast<u64>(std::max(ms, 1)) * CPU::qpc_freq / 1000;
+    }();
+    return value;
+}
+
+IC void alife_peak_record(const ENpcCppProfileStage stage, const u64 qpc, const u64 calls)
+{
+    g_alife_peak.qpc[to_index(stage)] += qpc;
+    g_alife_peak.calls[to_index(stage)] += static_cast<u32>(calls);
+}
+
+// The stages left out of the top of the line: the update itself and its two parts (printed apart) and the time of the
+// parts of the switch pass (switch_pass/part_*: the same time as alife/update/switch)
+IC bool alife_peak_skip(const ENpcCppProfileStage stage)
+{
+    switch (stage)
+    {
+    case ENpcCppProfileStage::AlifeUpdate:
+    case ENpcCppProfileStage::AlifeUpdateSwitch:
+    case ENpcCppProfileStage::AlifeUpdateScheduled:
+    case ENpcCppProfileStage::AlifeSwitchPartSampled:
+    case ENpcCppProfileStage::AlifeSwitchPartClean: return true;
+    default: return false;
+    }
+}
+
+IC u32 qpc_to_us(const u64 qpc) { return static_cast<u32>(1000000.0 * static_cast<double>(qpc) / CPU::qpc_freq); }
+
+void alife_peak_print(pcstr where, const u64 total_qpc)
+{
+    struct TopRow
+    {
+        pcstr name;
+        u64 qpc;
+        u32 calls;
+    };
+    TopRow top[NPC_CPP_PROFILE_ALIFE_PEAK_TOP]{};
+    // keeps top sorted by qpc, the cheapest row falls off
+    const auto offer = [&top](pcstr name, const u64 qpc, const u32 calls) {
+        if (!qpc || qpc <= top[NPC_CPP_PROFILE_ALIFE_PEAK_TOP - 1].qpc)
+            return;
+        size_t at = NPC_CPP_PROFILE_ALIFE_PEAK_TOP - 1;
+        while (at > 0 && top[at - 1].qpc < qpc)
+        {
+            top[at] = top[at - 1];
+            --at;
+        }
+        top[at] = {name, qpc, calls};
+    };
+    for (size_t i = 0; i < NPC_CPP_PROFILE_STAGE_COUNT; ++i)
+    {
+        if (!alife_peak_skip(static_cast<ENpcCppProfileStage>(i)))
+            offer(g_npc_cpp_profile_stage_names[i], g_alife_peak.qpc[i], g_alife_peak.calls[i]);
+    }
+    for (u32 i = 0; i < g_alife_peak.plugin_count; ++i)
+        offer(g_alife_peak.plugins[i].name, g_alife_peak.plugins[i].qpc, g_alife_peak.plugins[i].calls);
+
+    // One line, the stages as "name=mks(calls)"; built with append_cut (no snprintf in a unity batch, see append_cut)
+    string1024 line{};
+    string256 part{};
+    xr_sprintf(part, "- alife peak: total=%umks %s switch=%u scheduled=%u objects=%u", qpc_to_us(total_qpc), where,
+        qpc_to_us(g_alife_peak.qpc[to_index(ENpcCppProfileStage::AlifeUpdateSwitch)]),
+        qpc_to_us(g_alife_peak.qpc[to_index(ENpcCppProfileStage::AlifeUpdateScheduled)]), g_alife_peak.objects);
+    append_cut(line, sizeof line, part);
+    if (g_alife_peak.worst_qpc)
+    {
+        xr_sprintf(part, " worst=%u:", static_cast<u32>(g_alife_peak.worst_id));
+        append_cut(line, sizeof line, part);
+        append_cut(line, sizeof line, g_alife_peak.worst_name[0] ? g_alife_peak.worst_name : "?");
+        append_cut(line, sizeof line, ":");
+        append_cut(line, sizeof line, g_alife_peak.worst_section[0] ? g_alife_peak.worst_section : "?");
+        xr_sprintf(part, ":%s=%u", g_npc_cpp_profile_stage_names[to_index(g_alife_peak.worst_kind)],
+            qpc_to_us(g_alife_peak.worst_qpc));
+        append_cut(line, sizeof line, part);
+    }
+    if (g_alife_peak.report_inside)
+        append_cut(line, sizeof line, " report_inside=1");
+    append_cut(line, sizeof line, " |");
+    for (const TopRow& row : top)
+    {
+        if (!row.qpc)
+            break;
+        append_cut(line, sizeof line, " ");
+        append_cut(line, sizeof line, row.name);
+        xr_sprintf(part, "=%u(%u)", qpc_to_us(row.qpc), row.calls);
+        append_cut(line, sizeof line, part);
+    }
+    Msg("%s", line);
 }
 } // namespace
 
@@ -630,6 +888,8 @@ void npc_cpp_profile::flush_if_needed()
             static_cast<unsigned long long>(g_npc_cpp_profile_total_add_calls.load(std::memory_order_relaxed)));
         flush_snapshots(now_ms);
         gw::addons::console::FlushProfile(); // stages of plugins (profile_stage), printed with ours
+        if (t_alife_peak_active)
+            g_alife_peak.report_inside = true; // 57 E2: this report is inside the alife/update being captured
     }
 
     g_npc_cpp_profile_flush_lock.Leave();
@@ -645,7 +905,9 @@ void npc_cpp_profile::count(const ENpcCppProfileStage stage, const u64 n)
     NpcCppProfileCounters& counters = g_npc_cpp_profile_counters[to_index(stage)];
     counters.calls.fetch_add(n, std::memory_order_relaxed);
 
-    flush_if_needed();
+    // No flush_if_needed() here (63-wave3-fixes.md S4): a counter runs inside the QPC interval of a timed stage
+    // (the graph registry counters sit inside alife/offline_path/vertex_change) and a flush printed the whole 5 s
+    // report into that sample, skewing its max by ~1 ms. add()/add_many() keep flushing
 }
 
 void npc_cpp_profile::add(const ENpcCppProfileStage stage, const u64 qpc_delta)
@@ -657,6 +919,8 @@ void npc_cpp_profile::add(const ENpcCppProfileStage stage, const u64 qpc_delta)
     counters.total_qpc.fetch_add(qpc_delta, std::memory_order_relaxed);
     counters.calls.fetch_add(1, std::memory_order_relaxed);
     update_max(counters.max_qpc, qpc_delta);
+    if (t_alife_peak_active)
+        alife_peak_record(stage, qpc_delta, 1);
     const unsigned long long add_calls = g_npc_cpp_profile_total_add_calls.fetch_add(1, std::memory_order_relaxed) + 1;
 
     if (!g_npc_cpp_profile_logged_first_add.exchange(true, std::memory_order_relaxed))
@@ -670,6 +934,39 @@ void npc_cpp_profile::add(const ENpcCppProfileStage stage, const u64 qpc_delta)
     {
         Msg("* npc_cpp_profile debug add_milestone add_calls=%llu stage=%s now=%u",
             add_calls, g_npc_cpp_profile_stage_names[to_index(stage)], Device.dwTimeGlobal);
+    }
+
+    flush_if_needed();
+}
+
+// 33-gw-eoc-alife-switch.md section 9: the batch of a part of the switch pass (alife_switch_manager.cpp), the same row as calls
+// add() of its samples would make
+void npc_cpp_profile::add_many(const ENpcCppProfileStage stage, const u64 total_qpc, const u64 calls, const u64 max_qpc)
+{
+    if (!calls || !enabled())
+        return;
+
+    NpcCppProfileCounters& counters = g_npc_cpp_profile_counters[to_index(stage)];
+    counters.total_qpc.fetch_add(total_qpc, std::memory_order_relaxed);
+    counters.calls.fetch_add(calls, std::memory_order_relaxed);
+    update_max(counters.max_qpc, max_qpc);
+    if (t_alife_peak_active)
+        alife_peak_record(stage, total_qpc, calls);
+    const unsigned long long before = g_npc_cpp_profile_total_add_calls.fetch_add(calls, std::memory_order_relaxed);
+    const unsigned long long after = before + calls;
+
+    if (!g_npc_cpp_profile_logged_first_add.exchange(true, std::memory_order_relaxed))
+    {
+        Msg("* npc_cpp_profile debug first_add stage=%s qpc=%llu now=%u",
+            g_npc_cpp_profile_stage_names[to_index(stage)], static_cast<unsigned long long>(max_qpc),
+            Device.dwTimeGlobal);
+    }
+
+    // a batch may step over the milestone of add(): printed when it crosses one
+    if (before / 50000ull != after / 50000ull)
+    {
+        Msg("* npc_cpp_profile debug add_milestone add_calls=%llu stage=%s now=%u",
+            after, g_npc_cpp_profile_stage_names[to_index(stage)], Device.dwTimeGlobal);
     }
 
     flush_if_needed();
@@ -755,4 +1052,88 @@ ScopedNpcCppProfile::~ScopedNpcCppProfile()
         return;
 
     npc_cpp_profile::add(m_stage, CPU::QPC() - m_start_qpc);
+}
+
+// 57-gw-eoc-next-steps.md, E2: the smart zone binders by the section of the zone (script_binder.cpp)
+void npc_cpp_profile::add_binder_section(pcstr section, const u64 qpc_delta)
+{
+    if (!enabled())
+        return;
+    ScriptEvaluatorProfileBucket* bucket =
+        named_bucket(g_binder_section_profile_buckets, section && section[0] ? section : "<unnamed>");
+    if (!bucket)
+        return; // the probe window is full: the script_binder/update/smartzone/* rows still have it
+    bucket->total_qpc.fetch_add(qpc_delta, std::memory_order_relaxed);
+    bucket->calls.fetch_add(1, std::memory_order_relaxed);
+    update_max(bucket->max_qpc, qpc_delta);
+}
+
+// 57-gw-eoc-next-steps.md, E2, "alife peak" (see the header)
+bool npc_cpp_profile::peak_active() { return t_alife_peak_active; }
+
+void npc_cpp_profile::peak_begin()
+{
+    if (!enabled() || t_alife_peak_active || g_alife_peak_busy.exchange(true, std::memory_order_acquire))
+        return;
+    std::memset(g_alife_peak.qpc, 0, sizeof g_alife_peak.qpc);
+    std::memset(g_alife_peak.calls, 0, sizeof g_alife_peak.calls);
+    g_alife_peak.plugin_count = 0;
+    g_alife_peak.objects = 0;
+    g_alife_peak.worst_qpc = 0;
+    g_alife_peak.report_inside = false;
+    t_alife_peak_active = true;
+}
+
+void npc_cpp_profile::peak_object(const u16 id, pcstr name, pcstr section, const ENpcCppProfileStage kind,
+    const u64 qpc_delta)
+{
+    if (!t_alife_peak_active)
+        return;
+    ++g_alife_peak.objects;
+    if (qpc_delta <= g_alife_peak.worst_qpc)
+        return;
+    g_alife_peak.worst_qpc = qpc_delta;
+    g_alife_peak.worst_id = id;
+    g_alife_peak.worst_kind = kind;
+    g_alife_peak.worst_name[0] = 0;
+    g_alife_peak.worst_section[0] = 0;
+    append_cut(g_alife_peak.worst_name, sizeof g_alife_peak.worst_name, name ? name : "");
+    append_cut(g_alife_peak.worst_section, sizeof g_alife_peak.worst_section, section ? section : "");
+}
+
+// A plugin stage (addon_api_console.cpp, profile_add): only those of the thread of the capture
+void npc_cpp_profile::peak_add_plugin(pcstr name, const u64 qpc_delta)
+{
+    if (!t_alife_peak_active || !name || !qpc_delta)
+        return;
+    constexpr char prefix[] = "plugin:"; // the name is kept as the report prints it, compared without the prefix
+    constexpr size_t prefix_length = sizeof prefix - 1;
+    for (u32 i = 0; i < g_alife_peak.plugin_count; ++i)
+    {
+        AlifePeakPluginStage& stage = g_alife_peak.plugins[i];
+        if (std::strncmp(stage.name + prefix_length, name, sizeof stage.name - 1 - prefix_length) == 0)
+        {
+            stage.qpc += qpc_delta;
+            ++stage.calls;
+            return;
+        }
+    }
+    if (g_alife_peak.plugin_count >= NPC_CPP_PROFILE_ALIFE_PEAK_PLUGINS)
+        return;
+    AlifePeakPluginStage& stage = g_alife_peak.plugins[g_alife_peak.plugin_count++];
+    stage.name[0] = 0;
+    append_cut(stage.name, sizeof stage.name, prefix);
+    append_cut(stage.name, sizeof stage.name, name);
+    stage.qpc = qpc_delta;
+    stage.calls = 1;
+}
+
+void npc_cpp_profile::peak_end(pcstr where, const u64 total_qpc)
+{
+    if (!t_alife_peak_active)
+        return;
+    t_alife_peak_active = false;
+    if (total_qpc > alife_peak_threshold_qpc())
+        alife_peak_print(where ? where : "?", total_qpc);
+    g_alife_peak_busy.store(false, std::memory_order_release);
 }
