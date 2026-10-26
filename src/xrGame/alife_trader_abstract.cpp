@@ -19,6 +19,7 @@
 #include "xrServerEntities/xrMessages.h"
 #include "xrCore/Profiling/IniLoadStats.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "npc_cpp_profile.h"
 
 #ifdef DEBUG
 extern Flags32 psAI_Flags;
@@ -26,6 +27,9 @@ extern Flags32 psAI_Flags;
 
 void CSE_ALifeTraderAbstract::spawn_supplies()
 {
+    // 53-create-squad-engine.md: spec_char/spawn_supplies - all of it (only with -npc_cpp_profile)
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::SpecCharSpawnSupplies);
+
     CSE_ALifeDynamicObject* dynamic_object = smart_cast<CSE_ALifeDynamicObject*>(this);
     VERIFY(dynamic_object);
     CSE_Abstract* abstract = dynamic_object->alife().spawn_item(
@@ -34,6 +38,12 @@ void CSE_ALifeTraderAbstract::spawn_supplies()
     pda->m_original_owner = base()->ID;
 
     character_profile();
+    // 53-create-squad-engine.md: a new selection, not the one of on_register again. The character of on_register stays
+    // in registry(specific_characters) during it, so the selection below leaves it out of its candidates (it can come
+    // back only as a team_default fallback) and its Random draw picks another one; it also redoes the name, the visual,
+    // the community and the money. Skipping it would change the NPCs that are made - it stays, only its scan is cheap now
+    // (the index of specific_character()). The character of on_register is freed only after that draw, by
+    // set_specific_character (m_gw_spec_char_counted, plan 53 section 9; it leaked before)
     m_SpecificCharacter = shared_str();
     m_community_index = NO_COMMUNITY_INDEX;
     pda->m_specific_character = specific_character();

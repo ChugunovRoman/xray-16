@@ -22,6 +22,8 @@
 #include "xrAICore/Navigation/level_graph.h"
 #include "inventory_upgrade_manager.h"
 #include "Level.h"
+#include "xrServer_Objects_ALife_Monsters.h"
+#include "npc_cpp_profile.h"
 #include <algorithm>
 
 #ifdef DEBUG
@@ -117,9 +119,37 @@ void CALifeSimulatorBase::reload(LPCSTR section)
     m_initialized = true;
 }
 
+// 53-create-squad-engine.md: the rows of -npc_cpp_profile of a created object by its kind - the whole spawn_item and,
+// for the stalkers and the monsters, its register (on_register) and spawn_supplies parts; only with the profiler on
+struct GwAlifeCreateProfileStages
+{
+    ENpcCppProfileStage whole;
+    ENpcCppProfileStage register_part;
+    ENpcCppProfileStage supplies_part;
+    bool parts;
+};
+
+static GwAlifeCreateProfileStages gw_alife_create_profile_stages(CSE_Abstract* abstract)
+{
+    if (smart_cast<CSE_ALifeHumanAbstract*>(abstract))
+        return {ENpcCppProfileStage::AlifeCreateStalker, ENpcCppProfileStage::AlifeCreateStalkerRegister,
+            ENpcCppProfileStage::AlifeCreateStalkerSupplies, true};
+    if (smart_cast<CSE_ALifeMonsterAbstract*>(abstract))
+        return {ENpcCppProfileStage::AlifeCreateMonster, ENpcCppProfileStage::AlifeCreateMonsterRegister,
+            ENpcCppProfileStage::AlifeCreateMonsterSupplies, true};
+    if (smart_cast<CSE_ALifeOnlineOfflineGroup*>(abstract))
+        return {ENpcCppProfileStage::AlifeCreateSquad, ENpcCppProfileStage::AlifeCreateSquad,
+            ENpcCppProfileStage::AlifeCreateSquad, false};
+    return {ENpcCppProfileStage::AlifeCreateOther, ENpcCppProfileStage::AlifeCreateOther,
+        ENpcCppProfileStage::AlifeCreateOther, false};
+}
+
 CSE_Abstract* CALifeSimulatorBase::spawn_item(LPCSTR section, const Fvector& position, u32 level_vertex_id,
     GameGraph::_GRAPH_ID game_vertex_id, u16 parent_id, bool registration)
 {
+    const bool profile = npc_cpp_profile::enabled();
+    const u64 create_start = profile ? CPU::QPC() : 0;
+
     CSE_Abstract* abstract = F_entity_Create(section);
     R_ASSERT3(abstract, "Cannot find item with section", section);
 
@@ -156,11 +186,26 @@ CSE_Abstract* CALifeSimulatorBase::spawn_item(LPCSTR section, const Fvector& pos
     dynamic_object->m_tGraphID = game_vertex_id;
     dynamic_object->m_tSpawnID = u16(-1);
 
-    if (registration)
-        register_object(dynamic_object, true);
+    const GwAlifeCreateProfileStages stages = profile ? gw_alife_create_profile_stages(abstract) :
+        GwAlifeCreateProfileStages{ENpcCppProfileStage::AlifeCreateOther, ENpcCppProfileStage::AlifeCreateOther,
+            ENpcCppProfileStage::AlifeCreateOther, false};
 
+    if (registration)
+    {
+        const u64 register_start = profile ? CPU::QPC() : 0;
+        register_object(dynamic_object, true);
+        if (profile && stages.parts)
+            npc_cpp_profile::add(stages.register_part, CPU::QPC() - register_start);
+    }
+
+    const u64 supplies_start = profile ? CPU::QPC() : 0;
     dynamic_object->spawn_supplies();
+    if (profile && stages.parts)
+        npc_cpp_profile::add(stages.supplies_part, CPU::QPC() - supplies_start);
     dynamic_object->on_spawn();
+
+    if (profile)
+        npc_cpp_profile::add(stages.whole, CPU::QPC() - create_start);
 
     //  Msg                         ("LSS : SPAWN : [%s],[%s], level
     //%s",*dynamic_object->s_name,dynamic_object->name_replace(),*ai().game_graph().header().level(ai().game_graph().vertex(dynamic_object->m_tGraphID)->level_id()).name());

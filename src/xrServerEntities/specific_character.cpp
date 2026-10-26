@@ -97,7 +97,9 @@ void CSpecificCharacter::load_shared(LPCSTR)
 
     pXML->SetLocalRoot(pXML->GetRoot());
 
-    XML_NODE item_node = pXML->NavigateToNode(id_to_index::tag_name, item_data.pos_in_file);
+    // NavigateToNode(id_to_index::tag_name, item_data.pos_in_file) from the root, found once in InitInternal
+    // (plans/lua_to_cpp/57-gw-eoc-next-steps.md, E1: the walk over the siblings was quadratic for ~5.5k profiles)
+    XML_NODE item_node = item_data.node;
     R_ASSERT3(item_node, "specific_character id=", item_data.id.c_str());
 
     pXML->SetLocalRoot(item_node);

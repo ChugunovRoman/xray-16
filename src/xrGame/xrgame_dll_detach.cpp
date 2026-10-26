@@ -84,6 +84,9 @@ void clean_game_globals()
     CCharacterInfo::DeleteSharedData();
     CCharacterInfo::DeleteIdToIndexData();
 
+    // 53-create-squad-engine.md: the index of the specific characters points to their shared data
+    extern void gw_reset_specific_character_index();
+    gw_reset_specific_character_index();
     CSpecificCharacter::DeleteSharedData();
     CSpecificCharacter::DeleteIdToIndexData();
 

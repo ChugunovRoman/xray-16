@@ -283,6 +283,146 @@ void CSE_ALifeTraderAbstract::OnChangeProfile(PropValue* sender)
 
 #include "game_base_space.h"
 #include "Level.h"
+#include "npc_cpp_profile.h"
+#include "xrCore/Threading/Lock.hpp"
+#include "xrCore/Threading/ScopeLock.hpp"
+#include <atomic>
+
+// 53-create-squad-engine.md: the index of the specific characters for a selection by a template profile
+// (specific_character() below). The full scan looked at every profile (~5.5k in GW) twice per stalker (on_register and
+// spawn_supplies). The index keeps, in the order of the ids, the profiles without no_random: all of them (a template
+// without a class) and, per class, those that have it. It holds only what the XML of a profile fixes and nothing changes
+// later (no_random, class); team_default, rank, reputation and the registry of the taken ids are checked live, as
+// before, on the same shared data of the profile. The first selection builds it with the same loads, in the same order,
+// as the scan made them (load_shared draws ::Random), so the candidates, their order and the one Random draw of the pick
+// are those of the full scan (proof and model test: the plan).
+// Always on since 2026-10-25 (its emergency switch gw_spec_char_index and the full scan removed after the runs 3-4;
+// this file is compiled only in xrGame). The build itself: the loads of all profiles go
+// through CXML_IdToIndex::GetById (a hash since plan 57 E1, was a linear search) and ITEM_DATA::node (was
+// NavigateToNode from the first sibling) - the same profiles, the same order, the same Random draws.
+
+namespace gw_spec_char_index
+{
+struct Candidate
+{
+    shared_str id;
+    const SSpecificCharacterData* data; // the shared data of the profile: lives until clean_game_globals
+};
+using Candidates = xr_vector<Candidate>;
+
+struct Index
+{
+    Candidates all; // every profile without no_random, for a template without a class
+    xr_map<shared_str, Candidates> by_class; // a profile once per distinct class it has
+};
+
+Index g_gw_spec_char_index_data;
+const Candidates g_gw_spec_char_index_none; // a class no profile has: no candidates, as the scan found none
+std::atomic<bool> g_gw_spec_char_index_ready{false};
+Lock g_gw_spec_char_index_lock;
+} // namespace gw_spec_char_index
+
+// clean_game_globals (xrgame_dll_detach.cpp), before CSpecificCharacter::DeleteSharedData frees the data it points to
+void gw_reset_specific_character_index()
+{
+    ScopeLock lock(&gw_spec_char_index::g_gw_spec_char_index_lock);
+    gw_spec_char_index::g_gw_spec_char_index_ready.store(false, std::memory_order_release);
+    gw_spec_char_index::g_gw_spec_char_index_data = gw_spec_char_index::Index{};
+}
+
+// 53-create-squad-engine.md section 9: registry(specific_characters) keeps the ids that are taken, and the
+// selection by a template leaves them out of its candidates. It leaked: spawn_supplies drops the character of
+// on_register and selects again, and nothing ever took an id out when its holder left ALife, so after a long play every
+// candidate of a class was taken and only team_default ones were left. Now the int of an entry (it was always 1) is the
+// number of the objects that hold the id, and an object remembers the id it counted (m_gw_spec_char_counted, not saved):
+// - set_specific_character drops that id and takes the new one. It runs after the Random draw of the selection, so the
+//   second selection of spawn_supplies still sees the character of on_register as taken - its candidates, its draw and
+//   the character of the NPC are those of before; only then the first one is freed;
+// - CALifeSimulatorBase::unregister_object (release: a death removed by the squad or the bodies cleanup, a removed
+//   squad member, any release) drops it;
+// - a load rebuilds the registry from the objects (gw_rebuild_specific_character_registry): the entries leaked in the
+//   saves go away. The save format is the same: a map of an id to an int.
+// The presence of an id - all the selection looks at - is that of before, less the leaked ids. Always on (its emergency
+// switch gw_spec_char_release removed after run 5 of plan 57: 0 leaked entries after an autosave).
+
+namespace gw_spec_char_registry
+{
+// one more holder of the id
+void take(CSpecificCharacterRegistry& registry, const shared_str& id)
+{
+    if (int* count = registry.object(id, true))
+    {
+        ++*count;
+        return;
+    }
+    int count = 1;
+    registry.add(id, count, true);
+}
+
+// one holder less: the entry goes with its last holder
+void drop(CSpecificCharacterRegistry& registry, const shared_str& id)
+{
+    if (!id.size())
+        return;
+    int* count = registry.object(id, true);
+    if (!count)
+        return;
+    if (--*count <= 0)
+        registry.remove(id, true);
+}
+} // namespace gw_spec_char_registry
+
+void CSE_ALifeTraderAbstract::gw_release_specific_character()
+{
+    if (m_gw_spec_char_counted.size() && ai().get_alife())
+        gw_spec_char_registry::drop(ai().alife().registry(specific_characters), m_gw_spec_char_counted);
+    m_gw_spec_char_counted = nullptr;
+}
+
+// CALifeStorageManager::load, right after the registries are read: the registry is made again from the objects of the
+// save, every one of them registered (the dead bodies too, until they are released), so it holds the ids that are really
+// in use, each with the number of its holders
+void gw_rebuild_specific_character_registry(CALifeObjectRegistry& objects, CSpecificCharacterRegistry& registry)
+{
+    xr_map<shared_str, int> holders;
+    u32 holder_objects = 0;
+    for (const auto& it : objects.objects())
+    {
+        CSE_ALifeTraderAbstract* trader = it.second->cast_trader_abstract();
+        if (!trader)
+            continue;
+        trader->m_gw_spec_char_counted = trader->m_SpecificCharacter;
+        if (!trader->m_SpecificCharacter.size())
+            continue;
+        ++holders[trader->m_SpecificCharacter];
+        ++holder_objects;
+    }
+
+    const u32 saved = static_cast<u32>(registry.objects().size());
+    xr_vector<shared_str> leaked;
+    for (const auto& entry : registry.objects())
+    {
+        if (holders.find(entry.first) == holders.end())
+            leaked.push_back(entry.first);
+    }
+    for (const shared_str& id : leaked)
+        registry.remove(id, true);
+
+    u32 added = 0;
+    for (auto& holder : holders)
+    {
+        if (int* count = registry.object(holder.first, true))
+            *count = holder.second;
+        else
+        {
+            registry.add(holder.first, holder.second, true);
+            ++added;
+        }
+    }
+
+    Msg("* spec_char registry: %u used, %u leaked entries dropped (%u in the save, %u not in it added, %u holders)",
+        static_cast<u32>(holders.size()), static_cast<u32>(leaked.size()), saved, added, holder_objects);
+}
 
 #endif
 
@@ -315,48 +455,99 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
         m_CheckedCharacters.clear();
         m_DefaultCharacters.clear();
 
-        for (int i = 0; i <= CSpecificCharacter::GetMaxIndex(); i++)
+#ifdef XRGAME_EXPORTS
+        // 53-create-squad-engine.md: spec_char/select (+ /scanned, /indexed) - only with -npc_cpp_profile
+        const bool profile = npc_cpp_profile::enabled();
+        const u64 select_start = profile ? CPU::QPC() : 0;
+
+        const gw_spec_char_index::Candidates* candidates = nullptr;
         {
-            CSpecificCharacter spec_char;
-            shared_str id = CSpecificCharacter::IndexToId(i);
-            spec_char.Load(id);
-
-            if (spec_char.data()->m_bNoRandom)
-                continue;
-
-            bool class_found = false;
-            for (std::size_t j = 0; j < spec_char.data()->m_Classes.size(); j++)
+            namespace sci = gw_spec_char_index;
+            if (!sci::g_gw_spec_char_index_ready.load(std::memory_order_acquire))
             {
-                if (char_info.data()->m_Class == spec_char.data()->m_Classes[j])
+                ScopeLock lock(&sci::g_gw_spec_char_index_lock);
+                if (!sci::g_gw_spec_char_index_ready.load(std::memory_order_relaxed))
                 {
-                    class_found = true;
-                    break;
+                    const u64 build_start = profile ? CPU::QPC() : 0;
+                    sci::Index& index = sci::g_gw_spec_char_index_data;
+                    index = sci::Index{};
+                    // the loads of the old full scan, in its order: a profile not loaded yet is loaded here, as the
+                    // scan would load it (load_shared may draw ::Random), the loaded ones are only looked up
+                    for (int i = 0; i <= CSpecificCharacter::GetMaxIndex(); i++)
+                    {
+                        CSpecificCharacter spec_char;
+                        shared_str id = CSpecificCharacter::IndexToId(i);
+                        spec_char.Load(id);
+                        const SSpecificCharacterData* data = spec_char.data();
+
+                        if (data->m_bNoRandom)
+                            continue;
+
+                        index.all.push_back({id, data});
+                        // the scan matches a class once per profile (break at the first): a class repeated in the
+                        // profile (load_shared reads the first <class> for each one) goes in once
+                        for (std::size_t j = 0; j < data->m_Classes.size(); j++)
+                        {
+                            bool repeated = false;
+                            for (std::size_t k = 0; k < j; k++)
+                            {
+                                if (data->m_Classes[k] == data->m_Classes[j])
+                                {
+                                    repeated = true;
+                                    break;
+                                }
+                            }
+                            if (!repeated)
+                                index.by_class[data->m_Classes[j]].push_back({id, data});
+                        }
+                    }
+                    sci::g_gw_spec_char_index_ready.store(true, std::memory_order_release);
+                    if (profile)
+                        npc_cpp_profile::add(ENpcCppProfileStage::SpecCharIndexBuild, CPU::QPC() - build_start);
+                    Msg("* [spec_char] index built: %d profiles, %u for random selection, %u classes",
+                        CSpecificCharacter::GetMaxIndex() + 1, static_cast<u32>(index.all.size()),
+                        static_cast<u32>(index.by_class.size()));
                 }
             }
-            if (!char_info.data()->m_Class.size() || class_found)
+
+            const sci::Index& index = sci::g_gw_spec_char_index_data;
+            if (!char_info.data()->m_Class.size())
+                candidates = &index.all;
+            else
             {
+                const auto found = index.by_class.find(char_info.data()->m_Class);
+                candidates = found != index.by_class.end() ? &found->second : &sci::g_gw_spec_char_index_none;
+            }
+        }
+
+        {
+            // the body of the old full scan (over all profiles; removed with gw_spec_char_index on 2026-10-25 - this
+            // file is compiled only in xrGame, XRGAME_EXPORTS) for its profiles that pass no_random and the class, in
+            // the same order
+            for (const gw_spec_char_index::Candidate& candidate : *candidates)
+            {
+                const SSpecificCharacterData* data = candidate.data;
                 //запомнить пподходящий персонаж с флажком m_bDefaultForCommunity
-                if (spec_char.data()->m_bDefaultForCommunity)
-                    m_DefaultCharacters.push_back(id);
+                if (data->m_bDefaultForCommunity)
+                    m_DefaultCharacters.push_back(candidate.id);
 
                 if (char_info.data()->m_Rank == NO_RANK ||
-                    _abs(spec_char.Rank() - char_info.data()->m_Rank) < RANK_DELTA)
+                    _abs(data->m_Rank - char_info.data()->m_Rank) < RANK_DELTA)
                 {
                     if (char_info.data()->m_Reputation == NO_REPUTATION ||
-                        _abs(spec_char.Reputation() - char_info.data()->m_Reputation) < REPUTATION_DELTA)
+                        _abs(data->m_Reputation - char_info.data()->m_Reputation) < REPUTATION_DELTA)
                     {
-#ifdef XRGAME_EXPORTS
                         int* count = NULL;
                         if (ai().get_alife())
-                            count = ai().alife().registry(specific_characters).object(id, true);
+                            count = ai().alife().registry(specific_characters).object(candidate.id, true);
                         //если индекс еще не был использован
                         if (NULL == count)
-#endif
-                            m_CheckedCharacters.push_back(id);
+                            m_CheckedCharacters.push_back(candidate.id);
                     }
                 }
             }
         }
+#endif
         R_ASSERT3(
             !m_DefaultCharacters.empty(), "no default specific character set for class", char_info.data()->m_Class.c_str());
 
@@ -365,6 +556,13 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
             char_info.m_SpecificCharacterId = m_DefaultCharacters[Random.randI(m_DefaultCharacters.size())];
         else
             char_info.m_SpecificCharacterId = m_CheckedCharacters[Random.randI(m_CheckedCharacters.size())];
+
+        if (profile)
+        {
+            npc_cpp_profile::add(ENpcCppProfileStage::SpecCharSelect, CPU::QPC() - select_start);
+            npc_cpp_profile::count(ENpcCppProfileStage::SpecCharSelectScanned, candidates->size());
+            npc_cpp_profile::count(ENpcCppProfileStage::SpecCharSelectIndexed);
+        }
 #else
         char_info.m_SpecificCharacterId = m_DefaultCharacters[Random.randI(m_DefaultCharacters.size())];
 #endif
@@ -377,23 +575,24 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
 void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
 {
     R_ASSERT(new_spec_char.size());
+#ifdef XRGAME_EXPORTS
+    // 53-create-squad-engine.md: spec_char/set (only with -npc_cpp_profile)
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::SpecCharSet);
+#endif
 
 #ifdef XRGAME_EXPORTS
-    //убрать предыдущий номер из реестра
-    if (m_SpecificCharacter.size())
-    {
-        if (ai().get_alife())
-            ai().alife().registry(specific_characters).remove(m_SpecificCharacter, true);
-    }
+    // 53-create-squad-engine.md section 9: the id this object counted is freed - after the selection,
+    // which calls this after its Random draw (in spawn_supplies: the character of on_register)
+    gw_release_specific_character();
 #endif
     m_SpecificCharacter = new_spec_char;
 
 #ifdef XRGAME_EXPORTS
     if (ai().get_alife())
     {
-        //запомнить, то что мы использовали индекс
-        int a = 1;
-        ai().alife().registry(specific_characters).add(m_SpecificCharacter, a, true);
+        // one more holder of the id; the selection looks only at its presence, as before
+        gw_spec_char_registry::take(ai().alife().registry(specific_characters), m_SpecificCharacter);
+        m_gw_spec_char_counted = m_SpecificCharacter;
     }
 #endif
 

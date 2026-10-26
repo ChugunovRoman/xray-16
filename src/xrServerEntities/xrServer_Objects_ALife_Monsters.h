@@ -71,6 +71,13 @@ public:
 
     shared_str m_sCharacterProfile;
     shared_str m_SpecificCharacter;
+    // 53-create-squad-engine.md section 9: the id this object counted in registry(specific_characters)
+    // (empty - none); not saved, a load sets it from m_SpecificCharacter (gw_rebuild_specific_character_registry)
+    shared_str m_gw_spec_char_counted;
+#ifdef XRGAME_EXPORTS
+    // frees the id this object counted (the object leaves ALife: CALifeSimulatorBase::unregister_object)
+    void gw_release_specific_character();
+#endif
 
     //буферный вектор проверенных персонажей
     xr_vector<shared_str> m_CheckedCharacters;

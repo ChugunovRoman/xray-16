@@ -15,6 +15,10 @@ struct ITEM_DATA
     int index;
     int pos_in_file;
     CUIXml* _xml;
+    // plans/lua_to_cpp/57-gw-eoc-next-steps.md (E1): the node NavigateToNode(tag_name, pos_in_file) from the root of
+    // _xml finds - found once in InitInternal (the DOM is not changed after the load); NavigateToNode walks the
+    // siblings from the first one (~12.7M steps for all ~5.5k specific characters, most in one file)
+    XML_NODE node;
 };
 typedef xr_vector<ITEM_DATA> T_VECTOR;
 
@@ -28,6 +32,12 @@ class CXML_IdToIndex
 {
 private:
     static T_VECTOR* m_pItemDataVector;
+    // plans/lua_to_cpp/57-gw-eoc-next-steps.md (E1, 53 section 5): id -> the position in m_pItemDataVector. GetById was
+    // a linear search over all the items (~5.5k specific characters: the index of 53 loads every profile once per
+    // process - ~15M comparisons, spec_char/index_build ~187 ms). The ids are unique (InitInternal skips a duplicate,
+    // the first one wins), the vector is filled only there, so the hash finds the item the linear search found
+    using T_ID_MAP = xr_unordered_map<shared_str, u32>;
+    static T_ID_MAP* m_pIdMap;
 
 protected:
     CXML_IdToIndex() = default;
@@ -62,6 +72,8 @@ public:
 
 TEMPLATE_SPECIALIZATION
 T_VECTOR* CSXML_IdToIndex::m_pItemDataVector = nullptr;
+TEMPLATE_SPECIALIZATION
+typename CSXML_IdToIndex::T_ID_MAP* CSXML_IdToIndex::m_pIdMap = nullptr;
 
 TEMPLATE_SPECIALIZATION
 LPCSTR CSXML_IdToIndex::file_str = nullptr;
@@ -72,26 +84,14 @@ TEMPLATE_SPECIALIZATION
 const ITEM_DATA* CSXML_IdToIndex::GetById(const shared_str& str_id, bool no_assert)
 {
     T_INIT::InitXmlIdToIndex();
-    T_VECTOR::iterator it;
-    for (it = m_pItemDataVector->begin(); m_pItemDataVector->end() != it; ++it)
+    const auto found = m_pIdMap->find(str_id);
+    if (found == m_pIdMap->end())
     {
-        if ((*it).id == str_id)
-            break;
-    }
-
-    if (it == m_pItemDataVector->end())
-    {
-#if 0 // ndef MASTER_GOLD
-        int i = 0;
-        for (it = m_pItemDataVector->begin(); m_pItemDataVector->end() != it; ++it, i++)
-            Msg("[%d]=[%s]", i, *(*it).id);
-#endif
-
         R_ASSERT3(no_assert, "item not found, id", str_id.c_str());
         return nullptr;
     }
 
-    return &(*it);
+    return &(*m_pItemDataVector)[found->second];
 }
 
 TEMPLATE_SPECIALIZATION
@@ -112,6 +112,7 @@ void CSXML_IdToIndex::DeleteIdToIndexData()
     _destroy_item_data_vector_cont(m_pItemDataVector);
 
     xr_delete(m_pItemDataVector);
+    xr_delete(m_pIdMap);
 }
 
 TEMPLATE_SPECIALIZATION
@@ -121,6 +122,7 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
     T_INIT::InitXmlIdToIndex();
 
     m_pItemDataVector = xr_new<T_VECTOR>();
+    m_pIdMap = xr_new<T_ID_MAP>();
 
     Msg("file_str: %s", file_str);
     VERIFY(file_str);
@@ -149,9 +151,12 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
         //общий список
         int items_num = uiXml->GetNodesNum(uiXml->GetRoot(), tag_name);
 
-        for (int i = 0; i < items_num; ++i)
+        // item_node - the i-th node of tag_name, as NavigateToNode(root, tag_name, i) finds it (FirstChild, then i
+        // times NextSibling of the tag), walked once instead of from the first one for every i
+        XML_NODE item_node = items_num > 0 ? uiXml->GetRoot()->FirstChild(tag_name) : nullptr;
+        for (int i = 0; i < items_num; ++i, item_node = item_node ? item_node->NextSibling(tag_name) : nullptr)
         {
-            LPCSTR item_name = uiXml->ReadAttrib(uiXml->GetRoot(), tag_name, i, "id", nullptr);
+            LPCSTR item_name = uiXml->ReadAttrib(item_node, "id", nullptr);
             if (!item_name || !item_name[0])
             {
 #ifndef MASTER_GOLD
@@ -160,15 +165,10 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
                 continue;
             }
 
-            //проверить ID на уникальность
-            T_VECTOR::iterator t_it = m_pItemDataVector->begin();
-            for (; m_pItemDataVector->end() != t_it; ++t_it)
-            {
-                if (shared_str((*t_it).id) == shared_str(item_name))
-                    break;
-            }
-
-            if (m_pItemDataVector->end() != t_it)
+            //проверить ID на уникальность (the hash of the ids instead of the linear search, the first one wins as
+            //before)
+            const shared_str item_id(item_name);
+            if (!m_pIdMap->emplace(item_id, static_cast<u32>(m_pItemDataVector->size())).second)
             {
 #ifndef MASTER_GOLD
                 Msg("! duplicate %s with id[%s] in %s", tag_name, item_name, xml_file_full.c_str());
@@ -177,11 +177,12 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
             }
 
             ITEM_DATA data;
-            data.id = item_name;
+            data.id = item_id;
             data.index = index;
             data.pos_in_file = i;
             //.				data.file_name		= xml_file;
             data._xml = uiXml;
+            data.node = item_node;
             m_pItemDataVector->push_back(data);
 
             index++;
