@@ -21,17 +21,27 @@ void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn fn);
 void XRCORE_API xrSentry_SaveLocalCrashReport(EXCEPTION_POINTERS* exPtrs);
 
 // Non-fatal issue (recovered error): sends a warning event to Sentry with native stack; optional Lua stack text in extra.
+// Deduplicated: one event per unique normalized message per session, plus session/rate caps (excess is dropped with a
+// single "N events suppressed" log line). The event is built here and sent from a background thread - the caller does
+// not wait for serialization or the transport.
 void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua_stack = nullptr);
 
 // Script/engine error (caught Lua, etc.): ERROR level, native stack; lua_stack overrides provider when non-null.
+// Same dedup/limits and background send as xrSentry_CaptureSoftError (run7-freezes-p5.md §6.2).
 void XRCORE_API xrSentry_CaptureError(pcstr logger, pcstr message, pcstr lua_stack = nullptr);
 
 // xrDebug::Fail: compact assertion text + Lua stack (provider or empty). Only queues the event, never waits for the
 // upload: the error dialog comes right after it, and the player may continue the game.
 void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1 = nullptr, pcstr arg2 = nullptr);
 
-// Waits until the queued events are sent, at most timeoutMs. xrDebug::Fail calls it once the player chose to exit.
+// Waits until the queued events are sent, at most timeoutMs (also hands the not-yet-sent events to the transport
+// first). xrDebug::Fail calls it once the player chose to exit.
 void xrSentry_Flush(u32 timeoutMs);
 
 // CInifile::r_string before xrDebug::Fatal: error-level event, native stack, extra ini_file/section/key.
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, pcstr key);
+
+// Review2 SEN-m1: true when CaptureError/CaptureSoftError(message) would actually be sent right now (new this
+// session, session/window caps not hit) - lets a caller skip building an expensive payload (a formatted Lua stack)
+// for a message the gate would drop anyway. Read-only: does not record the key or consume a slot.
+bool XRCORE_API xrSentry_WouldCapture(pcstr message);

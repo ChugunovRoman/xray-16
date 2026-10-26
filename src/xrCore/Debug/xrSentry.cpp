@@ -12,17 +12,23 @@
 #include <sentry.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 #include "xrCore/Compression/miniz/miniz.h"
 #include "LocatorAPI.h"
 #include "xrCore/Platform/HwProfile.h"
 #include "xrCore/Profiling/SysDiag.hpp"
+#include "xrCore/Threading/ThreadUtil.h"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include <Windows.h>
@@ -39,63 +45,510 @@ extern pcstr log_name(); // defined in log.cpp, intentionally not exposed in log
 
 namespace
 {
-bool s_xr_sentry_started = false;
+std::atomic<bool> s_xr_sentry_started{ false };
 
-// Crashpad uploads these paths on crash; register likely logs at startup (after FS + CreateLog).
-constexpr size_t kMaxLogAttachments = 16;
+// Event gate + async send queue (wave 3 review fix, plans/lua_to_cpp/61-wave3-reports/run7-freezes-p5.md §6.2).
+// Before this, every Lua error sent a Sentry event with the whole game log attached, synchronously in the game
+// logic thread (22-70 ms and 75-80 MB per error; ~1950 repeats of one message froze the run). Now: one event per
+// unique message per session (normalized - ids/addresses stripped), a session cap and a rate limit; the event is
+// built on the erroring thread (the native stack must be that thread's and the Lua stack provider walks a live
+// Lua state) and sent by a worker thread. Suppressed events produce at most one summary log line per minute.
+constexpr unsigned kGateMaxEventsPerSession = 20;
+// SEN-m4: CInifile::r_string errors right before xrDebug::Fatal, and the xrDebug::Fail fallback that could not take
+// a live minidump, used to share kGateMaxEventsPerSession with ordinary Lua/engine errors - after 20 of those (not
+// unusual with one broken script) every later critical event was silently dropped for the rest of the session.
+// A budget of its own; deduplication (s_gate_keys) and the rate window below still apply to both kinds.
+constexpr unsigned kGateMaxCriticalEventsPerSession = 20;
+constexpr unsigned kGateMaxEventsPerWindow = 5; // per kGateRateWindowMs, shared by both budgets
+constexpr int64_t kGateRateWindowMs = 60 * 1000;
+constexpr size_t kGateMaxKeys = 256;
+constexpr size_t kGateNormalizedMax = 512;
+constexpr size_t kQueueMaxPending = 64;
+constexpr int64_t kSuppressSummaryIntervalMs = 60 * 1000;
+// The crash-only log attachment is a tail of the game log, never the whole file (75-81 MB, 5 sessions).
+constexpr size_t kLogTailMaxBytes = 1024 * 1024;
+constexpr size_t kLogTailPathSize = 520;
 
-void sentry_add_logs_folder_attachments(sentry_options_t* options)
-{
-    if (!options)
-        return;
-    if (!FS.path_exist("$logs$"))
-        return;
+std::mutex s_gate_mutex; // gate counters + pending queue (low contention: repeats are rejected before any work)
+std::condition_variable s_gate_cv;
+std::vector<u64> s_gate_keys;
+unsigned s_gate_sent_session = 0;
+unsigned s_gate_sent_critical_session = 0; // SEN-m4: ini/assert-fallback events, counted apart from s_gate_sent_session
+unsigned s_gate_sent_window = 0;
+int64_t s_gate_window_start = 0;
+unsigned s_gate_suppressed = 0;
+unsigned s_gate_suppressed_logged = 0;
+int64_t s_gate_summary_last = 0;
+bool s_gate_summary_ever = false;
+std::vector<sentry_value_t> s_queue;
+bool s_queue_stop = false;
+// SEN-1: a std::thread object with static/global storage duration has a non-trivial destructor that calls
+// std::terminate() if the thread is still joinable - and that is exactly what happens on every exit() path that
+// never reaches xrDebug::Finalize (os.exit() from Lua, xr_terminate, xrTheora_Stream.cpp, ppmd_compressor.cpp):
+// ExitProcess tears down the thread, then DLL_PROCESS_DETACH runs this object's destructor, which sees it still
+// joinable and terminates the process a second time, under the loader lock (undefined behaviour: a hang, or an
+// "unexpected application termination" dialog on top of whatever caused the exit). A pointer is never destroyed by
+// anything but xrSentry_Shutdown's own join-then-delete below; every other exit path just leaves it (the OS
+// reclaims the thread handle, nothing of ours runs).
+std::thread* s_queue_thread = nullptr;
+// SEN-5/SEN-m3: guards sentry_capture_event/sentry_capture_minidump themselves (never the queue/gate bookkeeping,
+// which stays under s_gate_mutex): the send worker holds it for its whole batch, xrSentry_CaptureDebugFail for its
+// set-tag -> capture_minidump -> remove-tag sequence, and xrSentry_CaptureIniRStringError and xrSentry_Flush for
+// their own direct sentry_capture_event/sentry_flush calls. Without it a Lua error (queued) and a R_ASSERT/VERIFY
+// that follows it (xrDebug::Fail mutates the GLOBAL sentry scope) could interleave: the worker serializes the Lua
+// event while the assert's tags/extra are still set, and the Lua error ships mislabeled as an assertion failure.
+std::mutex s_capture_mutex;
 
-    string_path logs_dir{};
-    if (!FS.update_path(logs_dir, "$logs$", "", false) || !logs_dir[0])
-        return;
-
-    std::error_code ec;
-    const std::filesystem::path root(logs_dir);
-    if (!std::filesystem::is_directory(root, ec))
-        return;
-
-    struct LogEntry
-    {
-        std::filesystem::path path;
-        std::filesystem::file_time_type mtime{};
-    };
-    std::vector<LogEntry> logs;
-    for (const auto& entry : std::filesystem::directory_iterator(root, ec))
-    {
-        if (ec || !entry.is_regular_file(ec))
-            continue;
-        const auto& p = entry.path();
-        if (!p.has_extension() || p.extension() != ".log")
-            continue;
-        LogEntry le{ p, {} };
-        le.mtime = std::filesystem::last_write_time(p, ec);
-        logs.push_back(std::move(le));
-    }
-    if (logs.empty())
-        return;
-
-    std::sort(logs.begin(), logs.end(),
-        [](const LogEntry& a, const LogEntry& b) { return a.mtime > b.mtime; });
-
-    const size_t n = std::min(logs.size(), kMaxLogAttachments);
-    for (size_t i = 0; i < n; ++i)
-    {
+// The tail file is the single registered attachment: it is written by the crash handlers and deleted at startup.
+// While it is absent, sentry__prepare_event attaches nothing to ordinary events (a missing path is skipped).
+char s_log_tail_path[kLogTailPathSize]{};
 #if defined(XR_PLATFORM_WINDOWS)
-        sentry_options_add_attachmentw(options, logs[i].path.c_str());
-#else
-        const std::string narrow = logs[i].path.string();
-        sentry_options_add_attachment(options, narrow.c_str());
+// SEN-2/SEN-6: computed once in xrSentry_Initialize and used as-is on every crash path - never recomputed there,
+// where XRay::Utf8::ToWide's heap allocation must not run (the crash may be an out-of-memory or a corrupted heap).
+// s_log_path_w is also the SEN-6 fix: it comes from log_name(), which the engine already keeps as real UTF-8, so
+// converting it to wide here is correct - unlike s_log_tail_path_w's old narrow form, which used to be built from
+// an ANSI (code-page) LOCALAPPDATA and then re-decoded as UTF-8 (see xrSentry_Initialize).
+wchar_t s_log_tail_path_w[kLogTailPathSize]{};
+wchar_t s_log_path_w[kLogTailPathSize]{};
+// SEN-2: guards sentry_write_log_tail_file's static scratch buffer and the tail file itself against two threads
+// crashing at (almost) the same moment - the heap-corruption VEH and the top-level filter can both reach it.
+volatile LONG s_in_log_tail_write = 0;
 #endif
+
+int64_t sentry_now_ms()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+bool sentry_is_hex(char h)
+{
+    return (h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F');
+}
+
+// SEN-3: a digit run glued to a letter or underscore is part of an identifier (a section/object name: "zat_b14"
+// vs "zat_b22" must stay distinct), not a value to collapse away.
+bool sentry_is_ident_lead(char h)
+{
+    return (h >= 'a' && h <= 'z') || (h >= 'A' && h <= 'Z') || h == '_';
+}
+
+// Word-boundary check for a bare hex run (see below): alnum or underscore on either side means the run is part of
+// a longer token, not a standalone address, so it is left untouched rather than risking a truncated identifier.
+bool sentry_is_ident_glue(char h)
+{
+    return sentry_is_ident_lead(h) || (h >= '0' && h <= '9');
+}
+
+// True when msg[i] starts the line number right after "<name>.script:" / ".lua:" / ".cpp:" / ".h:" - two different
+// bugs in the same file with the same wording ("attempt to index local 'npc'") but different lines must stay two
+// distinct dedup keys, so that line number is kept verbatim instead of collapsing to '#'.
+bool sentry_is_script_line_number(pcstr msg, size_t i)
+{
+    if (i == 0 || msg[i - 1] != ':')
+        return false;
+    static constexpr pcstr kExts[] = { ".script", ".lua", ".cpp", ".h" };
+    for (pcstr ext : kExts)
+    {
+        const size_t len = xr_strlen(ext);
+        if (i >= len + 1 && std::strncmp(msg + i - 1 - len, ext, len) == 0)
+            return true;
     }
-#ifndef MASTER_GOLD
-    Msg("[Sentry]: attached %zu log file(s) from [%s]", n, logs_dir);
+    return false;
+}
+
+// Normalizes the message and returns the FNV-1a 64 key of the normalized text. Collapsed to '#':
+//  - a 0x-prefixed hex number (an address, a pointer-sized id), as before;
+//  - a bare hex run of 8+ characters not glued to an identifier on either side: MSVC prints %p without "0x"
+//    ("000001F2A3B4C5D6"), and the old rule only collapsed the digit sub-runs inside such a run, leaving the
+//    letters A-F in place ("#F#A#B#C#D#") - two different addresses of the very same repeated error then produced
+//    two different keys, so only the first ever reached Sentry;
+//  - any other free-standing digit run (an object id, a count, a coordinate), as before.
+// Kept verbatim, so it keeps two otherwise-identical messages apart (see the two helpers above):
+//  - the line number right after ".script:" / ".lua:" / ".cpp:" / ".h:";
+//  - a digit run glued to a letter or underscore ("zat_b14", "wpn_ak74") - a section/object id, not a value.
+u64 sentry_message_key(pcstr msg, char* norm, size_t normSize)
+{
+    size_t o = 0;
+    size_t i = 0;
+    while (msg[i] && o + 1 < normSize)
+    {
+        const char c = msg[i];
+        if (c == '0' && (msg[i + 1] == 'x' || msg[i + 1] == 'X') && sentry_is_hex(msg[i + 2]))
+        {
+            size_t len = 0;
+            while (sentry_is_hex(msg[i + 2 + len]))
+                ++len;
+            if (o + 3 < normSize)
+            {
+                norm[o++] = '0';
+                norm[o++] = 'x';
+                norm[o++] = '#';
+            }
+            i += 2 + len;
+            continue;
+        }
+        if (sentry_is_hex(c))
+        {
+            size_t len = 0;
+            while (sentry_is_hex(msg[i + len]))
+                ++len;
+            const bool leftOk = i == 0 || !sentry_is_ident_glue(msg[i - 1]);
+            const bool rightOk = !sentry_is_ident_glue(msg[i + len]);
+            if (len >= 8 && leftOk && rightOk)
+            {
+                norm[o++] = '#';
+                i += len;
+                continue;
+            }
+            // too short to be a bare address, or glued to a token: fall through (a decimal digit goes through the
+            // digit-run rule below, a bare hex letter A-F is copied as an ordinary character at the end)
+        }
+        if (c >= '0' && c <= '9')
+        {
+            size_t len = 0;
+            while (msg[i + len] >= '0' && msg[i + len] <= '9')
+                ++len;
+            const bool attached = i > 0 && sentry_is_ident_lead(msg[i - 1]);
+            const bool lineNumber = sentry_is_script_line_number(msg, i);
+            if (attached || lineNumber)
+            {
+                for (size_t k = 0; k < len && o + 1 < normSize; ++k)
+                    norm[o++] = msg[i + k];
+            }
+            else
+                norm[o++] = '#';
+            i += len;
+            continue;
+        }
+        norm[o++] = c;
+        ++i;
+    }
+    norm[o] = 0;
+
+    u64 h = 14695981039346656037ULL;
+    for (size_t k = 0; k < o; ++k)
+    {
+        h ^= static_cast<u8>(norm[k]);
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+// Caller holds s_gate_mutex. One event per unique message per session, then the session cap and the rate window
+// bound the total. A rate-limited message is NOT recorded as seen - its next occurrence may still go out (once).
+// critical (SEN-m4): counts against kGateMaxCriticalEventsPerSession instead of kGateMaxEventsPerSession, so a
+// flood of ordinary Lua/engine errors cannot starve the ini/assert-fallback events for the rest of the session;
+// deduplication and the rate window are shared by both kinds.
+bool sentry_gate_admit(u64 key, bool critical)
+{
+    const int64_t now = sentry_now_ms();
+    if (now - s_gate_window_start >= kGateRateWindowMs)
+    {
+        s_gate_window_start = now;
+        s_gate_sent_window = 0;
+    }
+    for (u64 seen : s_gate_keys)
+    {
+        if (seen == key)
+            return false;
+    }
+    if (critical ? s_gate_sent_critical_session >= kGateMaxCriticalEventsPerSession
+                 : s_gate_sent_session >= kGateMaxEventsPerSession)
+        return false;
+    if (s_gate_sent_window >= kGateMaxEventsPerWindow)
+        return false;
+    if (s_gate_keys.size() < kGateMaxKeys)
+        s_gate_keys.push_back(key);
+    if (critical)
+        ++s_gate_sent_critical_session;
+    else
+        ++s_gate_sent_session;
+    ++s_gate_sent_window;
+    return true;
+}
+
+// Read-only peek for xrSentry_WouldCapture (SEN-m1): predicts sentry_gate_admit's answer for a NEW (not yet seen)
+// non-critical message without recording anything - a caller that is about to do real work to build the payload
+// (formatting a Lua stack trace) can skip it when the event would be dropped anyway. Mirrors sentry_gate_admit's
+// window-reset prediction but never writes back s_gate_window_start/s_gate_sent_window: the real call still owns
+// that transition, so the window is free to look "not yet due" if the real capture never follows this peek.
+bool sentry_gate_would_admit_locked(u64 key)
+{
+    for (u64 seen : s_gate_keys)
+    {
+        if (seen == key)
+            return false;
+    }
+    if (s_gate_sent_session >= kGateMaxEventsPerSession)
+        return false;
+    const int64_t now = sentry_now_ms();
+    const unsigned windowCount =
+        (now - s_gate_window_start >= kGateRateWindowMs) ? 0 : s_gate_sent_window;
+    return windowCount < kGateMaxEventsPerWindow;
+}
+
+// Caller holds s_gate_mutex. One summary line instead of one line per suppressed event, at most once per minute.
+void sentry_gate_note_suppressed()
+{
+    ++s_gate_suppressed;
+    const int64_t now = sentry_now_ms();
+    if (!s_gate_summary_ever || now - s_gate_summary_last >= kSuppressSummaryIntervalMs)
+    {
+        Msg("! [Sentry]: %u events suppressed", s_gate_suppressed);
+        s_gate_suppressed_logged = s_gate_suppressed;
+        s_gate_summary_last = now;
+        s_gate_summary_ever = true;
+    }
+}
+
+// Caller holds s_gate_mutex. Final count on flush/shutdown when it grew past the last printed line.
+void sentry_gate_flush_summary()
+{
+    if (s_gate_suppressed > s_gate_suppressed_logged)
+    {
+        Msg("! [Sentry]: %u events suppressed", s_gate_suppressed);
+        s_gate_suppressed_logged = s_gate_suppressed;
+    }
+}
+
+// Caller holds s_gate_mutex. The worker runs sentry_capture_event off the game logic thread.
+void sentry_queue_push(sentry_value_t event)
+{
+    if (s_queue.size() >= kQueueMaxPending)
+    {
+        sentry_value_decref(event);
+        sentry_gate_note_suppressed();
+        return;
+    }
+    s_queue.push_back(event);
+    s_gate_cv.notify_one();
+}
+
+// SEN-1/SEN-m6: waits on the condition variable with a predicate - no more periodic 250 ms wake-ups with nothing to
+// do (the thread's name and per-thread init now come from Threading::RunThread, see xrSentry_Initialize).
+// SEN-5/SEN-m3: sentry_capture_event itself runs under s_capture_mutex, for the whole batch, so
+// xrSentry_CaptureDebugFail's tag/extra scope mutation and xrSentry_Flush's own capture calls cannot interleave
+// with it (see s_capture_mutex's own comment above).
+void sentry_queue_worker()
+{
+    for (;;)
+    {
+        std::vector<sentry_value_t> batch;
+        {
+            std::unique_lock<std::mutex> lock(s_gate_mutex);
+            s_gate_cv.wait(lock, [] { return !s_queue.empty() || s_queue_stop; });
+            batch.swap(s_queue);
+            if (batch.empty() && s_queue_stop)
+                return;
+        }
+        std::lock_guard<std::mutex> captureLock(s_capture_mutex);
+        for (sentry_value_t event : batch)
+            sentry_capture_event(event);
+    }
+}
+
+// Copies the last <= 1 MB of the game log into the attachment file. Crash-safe on Windows: WinAPI, the precomputed
+// wide paths (s_log_path_w / s_log_tail_path_w - SEN-2/SEN-6, set once in xrSentry_Initialize) and a static buffer
+// only; the crash paths must not allocate from a possibly damaged heap, and must not re-derive a UTF-8 path from
+// an ANSI environment variable either (SEN-6). stdio elsewhere (no wide/narrow mismatch there: HOME is read as-is).
+bool sentry_write_log_tail_file_impl()
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    if (!s_log_tail_path_w[0] || !s_log_path_w[0])
+        return false;
+#else
+    if (!s_log_tail_path[0])
+        return false;
+    const pcstr logPath = log_name();
+    if (!logPath || !*logPath)
+        return false;
 #endif
+
+    static unsigned char s_log_tail_buf[kLogTailMaxBytes];
+    u64 got = 0;
+    bool truncated = false; // the window does not start at the real beginning of the log (SEN-m7)
+#if defined(XR_PLATFORM_WINDOWS)
+    const HANDLE hIn = CreateFileW(s_log_path_w, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hIn == INVALID_HANDLE_VALUE)
+        return false;
+    LARGE_INTEGER size{};
+    GetFileSizeEx(hIn, &size);
+    const u64 total = static_cast<u64>(size.QuadPart);
+    const u64 tail = total < kLogTailMaxBytes ? total : kLogTailMaxBytes;
+    truncated = total > tail;
+    LARGE_INTEGER pos{};
+    pos.QuadPart = static_cast<LONGLONG>(total - tail);
+    SetFilePointerEx(hIn, pos, nullptr, FILE_BEGIN);
+    DWORD read = 0;
+    ReadFile(hIn, s_log_tail_buf, static_cast<DWORD>(tail), &read, nullptr);
+    CloseHandle(hIn);
+    got = read;
+#else
+    FILE* in = std::fopen(logPath, "rb");
+    if (!in)
+        return false;
+    std::fseek(in, 0, SEEK_END);
+    const long total = std::ftell(in);
+    if (total < 0)
+    {
+        std::fclose(in);
+        return false;
+    }
+    const long tail = static_cast<size_t>(total) < kLogTailMaxBytes ? total : static_cast<long>(kLogTailMaxBytes);
+    truncated = static_cast<long>(total) > tail;
+    std::fseek(in, total - tail, SEEK_SET);
+    got = std::fread(s_log_tail_buf, 1, tail, in);
+    std::fclose(in);
+#endif
+    if (!got)
+        return false;
+
+    // SEN-m7: when the 1 MB window does not start at the real beginning of the log, start the tail at the next
+    // '\n' instead - otherwise the first line is a fragment cut off mid-text (possibly mid-UTF-8-character). The
+    // buffer is already fully read, so this costs a scan, no extra I/O.
+    unsigned char* writeFrom = s_log_tail_buf;
+    u64 writeLen = got;
+    if (truncated)
+    {
+        u64 skip = 0;
+        while (skip < writeLen && writeFrom[skip] != '\n')
+            ++skip;
+        if (skip < writeLen)
+        {
+            ++skip;
+            writeFrom += skip;
+            writeLen -= skip;
+        }
+    }
+    if (!writeLen)
+        return false;
+
+#if defined(XR_PLATFORM_WINDOWS)
+    const HANDLE hOut = CreateFileW(
+        s_log_tail_path_w, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hOut == INVALID_HANDLE_VALUE)
+        return false;
+    DWORD written = 0;
+    WriteFile(hOut, writeFrom, static_cast<DWORD>(writeLen), &written, nullptr);
+    CloseHandle(hOut);
+    return written == writeLen;
+#else
+    FILE* out = std::fopen(s_log_tail_path, "wb");
+    if (!out)
+        return false;
+    const size_t written = std::fwrite(writeFrom, 1, writeLen, out);
+    std::fclose(out);
+    return written == writeLen;
+#endif
+}
+
+// SEN-2: FlushLog (takes logCS) plus the read/write above are now reached from inside a crash handler (the on_crash
+// hook of Crashpad fires on STATUS_HEAP_CORRUPTION too) with no protection at all - a damaged heap or an
+// out-of-memory condition (the usual causes of a crash in the first place) could fault again right here, and an
+// unguarded second exception inside the UEF/VEH never reaches Crashpad: no report, no minidump, the process just
+// dies. __try/__except around the whole thing (as save_local_crash_report below already does), plus a one-at-a-
+// time guard so a second thread crashing at (nearly) the same moment cannot write into the same static buffer and
+// the same file concurrently. A plain wrapper, not the function itself: __try cannot be used in a function holding
+// objects that require unwinding (none here, but see save_local_crash_report for why this split exists).
+bool sentry_write_log_tail_file()
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    if (InterlockedCompareExchange(&s_in_log_tail_write, 1, 0) != 0)
+        return false;
+    bool ok = false;
+    __try
+    {
+        FlushLog();
+        ok = sentry_write_log_tail_file_impl();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        ok = false;
+    }
+    InterlockedExchange(&s_in_log_tail_write, 0);
+    return ok;
+#else
+    FlushLog();
+    return sentry_write_log_tail_file_impl();
+#endif
+}
+
+// Registers the crash-only log tail as the single attachment and removes a stale tail left by a previous crash
+// (an existing file would be attached to every event until overwritten).
+void sentry_add_log_tail_attachment(sentry_options_t* options)
+{
+    if (!options || !s_log_tail_path[0])
+        return;
+    // Remove a stale tail from a previous crash: an existing file would be attached to every event.
+#if defined(XR_PLATFORM_WINDOWS)
+    DeleteFileW(s_log_tail_path_w);
+    sentry_options_add_attachmentw(options, s_log_tail_path_w);
+#else
+    std::error_code ec;
+    std::filesystem::remove(std::filesystem::path(s_log_tail_path), ec);
+    sentry_options_add_attachment(options, s_log_tail_path);
+#endif
+#ifndef MASTER_GOLD
+    Msg("[Sentry]: crash log tail attachment [%s]", s_log_tail_path);
+#endif
+}
+
+#if defined(XR_PLATFORM_WINDOWS)
+// SEN-4: before sentry_init, which otherwise reads every "<dbPath>\<uuid>.run\*.envelope" synchronously into
+// memory and queues it for upload (sentry_database.c: sentry__process_old_runs). A build before this fix also
+// attached the whole game log to every Sentry event (sentry_add_logs_folder_attachments), so a player who had not
+// started the game in a while could accumulate hundreds of envelopes at tens to hundreds of MB each: sentry_init
+// would read and hold all of that in memory on the first start of a fixed build, and try to upload envelopes far
+// past Sentry's own size limit (rejected there anyway). An ordinary event's envelope is on the order of 10-20 KB;
+// anything far larger is leftover from that old format.
+void prune_old_envelopes(const wchar_t* dbPathW)
+{
+    constexpr uintmax_t kMaxEnvelopeBytes = 2u * 1024 * 1024;
+    size_t pruned = 0;
+    uintmax_t prunedBytes = 0;
+    std::error_code ec;
+    std::filesystem::directory_iterator runDirs(dbPathW, ec);
+    if (ec)
+        return;
+    for (const auto& runEntry : runDirs)
+    {
+        std::error_code dirEc;
+        if (!runEntry.is_directory(dirEc) || dirEc || runEntry.path().extension() != L".run")
+            continue;
+        std::error_code innerEc;
+        std::filesystem::directory_iterator files(runEntry.path(), innerEc);
+        if (innerEc)
+            continue;
+        for (const auto& fileEntry : files)
+        {
+            std::error_code fileEc;
+            if (!fileEntry.is_regular_file(fileEc) || fileEc || fileEntry.path().extension() != L".envelope")
+                continue;
+            const uintmax_t size = fileEntry.file_size(fileEc);
+            if (fileEc || size <= kMaxEnvelopeBytes)
+                continue;
+            std::error_code removeEc;
+            if (std::filesystem::remove(fileEntry.path(), removeEc))
+            {
+                ++pruned;
+                prunedBytes += size;
+            }
+        }
+    }
+    if (pruned)
+        Msg("[Sentry]: pruned %zu old envelopes (%llu MB)", pruned, static_cast<unsigned long long>(prunedBytes >> 20));
+}
+#endif
+
+// Crashpad invokes this in its first-chance handler, before the handler process reads the attachment files.
+// Crashpad ignores the returned event contents (the minidump carries the crash state) - the side effect is the point.
+sentry_value_t sentry_on_crash_hook(const sentry_ucontext_t* /*uctx*/, sentry_value_t event, void* /*closure*/)
+{
+    sentry_write_log_tail_file(); // flushes the log and writes the tail itself (SEN-2), guarded
+    return event;
 }
 
 sentry_value_t before_send_hook(sentry_value_t event, void* /*hint*/, void* /*closure*/)
@@ -712,6 +1165,12 @@ LONG WINAPI local_crash_report_filter(EXCEPTION_POINTERS* exPtrs)
     // This is the only place a native call stack reaches the log: Crashpad's filter never returns,
     // and xrDebug::UnhandledFilter sits below it, so it is not reached once Sentry is up.
     xrDebug::LogCrashInfoGuarded(exPtrs, nullptr);
+    // The crash-only log tail for the crashpad upload: written after the crash block above so the tail
+    // includes it. The file is absent during normal play (deleted at startup), so ordinary events attach
+    // nothing. No queue drain here: the pending events are deduped repeats and a crash handler must not
+    // block on sentry locks. sentry_write_log_tail_file flushes the log and writes the tail itself (SEN-2),
+    // under its own InterlockedCompareExchange guard and __try/__except.
+    sentry_write_log_tail_file();
     // Chain into the previously installed filter (Crashpad / engine) to keep the existing flow.
     if (s_prev_uef)
         return s_prev_uef(exPtrs);
@@ -803,26 +1262,52 @@ void xrSentry_Initialize(pcstr commandLine)
         sentry_options_set_dsn(options, "");
 
 #if defined(XR_PLATFORM_WINDOWS)
-    char dbPath[MAX_PATH * 2]{};
+    // SEN-6: LOCALAPPDATA read wide. _dupenv_s returns it in the ANSI code page (cp1251 on a Cyrillic Windows
+    // install), while sentry_options_set_database_path and every narrow path built from it downstream are treated
+    // as UTF-8 (sentry_string.c, XRay::Utf8::ToWide): a profile name with Cyrillic letters produced a path nothing
+    // could open - CreateFileW/sentry pointed at bytes that do not spell that path in either encoding. The tail
+    // never got written (and never deleted either), and the database itself ended up somewhere unreachable.
+    wchar_t dbPathW[MAX_PATH * 2]{};
     {
-        char* localAppData = nullptr;
-        size_t len = 0;
-        if (_dupenv_s(&localAppData, &len, "LOCALAPPDATA") == 0 && localAppData && localAppData[0])
+        wchar_t* localAppDataW = nullptr;
+        size_t lenW = 0;
+        if (_wdupenv_s(&localAppDataW, &lenW, L"LOCALAPPDATA") == 0 && localAppDataW && localAppDataW[0])
         {
             std::error_code ec;
-            std::filesystem::create_directories(
-                std::filesystem::path(localAppData) / "OpenXRay" / "sentry-native", ec);
-            xr_sprintf(dbPath, sizeof(dbPath), "%s\\OpenXRay\\sentry-native", localAppData);
-            free(localAppData);
+            const std::filesystem::path dbDir =
+                std::filesystem::path(localAppDataW) / L"OpenXRay" / L"sentry-native";
+            std::filesystem::create_directories(dbDir, ec);
+            wcsncpy_s(dbPathW, dbDir.c_str(), _TRUNCATE);
+            free(localAppDataW);
         }
         else
         {
             std::error_code ec;
-            std::filesystem::create_directories(".\\OpenXRay\\sentry-native", ec);
-            xr_strcpy(dbPath, sizeof(dbPath), ".\\OpenXRay\\sentry-native");
+            std::filesystem::create_directories(L".\\OpenXRay\\sentry-native", ec);
+            wcsncpy_s(dbPathW, L".\\OpenXRay\\sentry-native", _TRUNCATE);
         }
     }
-    sentry_options_set_database_path(options, dbPath);
+    sentry_options_set_database_pathw(options, dbPathW);
+    // SEN-4: before sentry_init reads the whole database back in.
+    prune_old_envelopes(dbPathW);
+
+    // Narrow UTF-8 form, for the log line only (xrSentry_UpdateHwTags/install_local_crash_reporter print it);
+    // never round-tripped back into a WinAPI/sentry call.
+    char dbPath[MAX_PATH * 2]{};
+    xr_strcpy(dbPath, sizeof(dbPath), XRay::Utf8::FromWide(dbPathW).c_str());
+    xr_strcpy(s_log_tail_path, sizeof(s_log_tail_path), dbPath);
+    xr_strcat(s_log_tail_path, sizeof(s_log_tail_path), "\\log_tail.txt");
+
+    // SEN-2: the wide tail path and the wide log path, computed once here - never on the crash path, where
+    // XRay::Utf8::ToWide's heap allocation must not run (the crash may be an out-of-memory or a corrupted heap).
+    // The log path is fixed for the whole run once CreateLog ran, which is well before Sentry starts.
+    wcsncpy_s(s_log_tail_path_w, dbPathW, _TRUNCATE);
+    wcsncat_s(s_log_tail_path_w, L"\\log_tail.txt", _TRUNCATE);
+    if (const pcstr logPath = log_name(); logPath && *logPath)
+    {
+        const std::wstring logPathW = XRay::Utf8::ToWide(logPath);
+        wcsncpy_s(s_log_path_w, logPathW.c_str(), _TRUNCATE);
+    }
 
     char handlerPath[MAX_PATH]{};
     if (build_path_next_to_exe("crashpad_handler.exe", handlerPath, sizeof(handlerPath)))
@@ -835,13 +1320,16 @@ void xrSentry_Initialize(pcstr commandLine)
         std::error_code ec;
         std::filesystem::create_directories(db, ec);
         sentry_options_set_database_path(options, db.string().c_str());
+        xr_strcpy(s_log_tail_path, sizeof(s_log_tail_path), db.string().c_str());
     }
     else
     {
         std::error_code ec;
         std::filesystem::create_directories(".sentry-native", ec);
         sentry_options_set_database_path(options, ".sentry-native");
+        xr_strcpy(s_log_tail_path, sizeof(s_log_tail_path), ".sentry-native");
     }
+    xr_strcat(s_log_tail_path, sizeof(s_log_tail_path), "/log_tail.txt");
 #endif
 
     if (const char* env = std::getenv("SENTRY_ENVIRONMENT"))
@@ -868,7 +1356,10 @@ void xrSentry_Initialize(pcstr commandLine)
 
     sentry_options_set_before_send(options, before_send_hook, nullptr);
 
-    sentry_add_logs_folder_attachments(options);
+    // Crash-only attachments (run7-freezes-p5.md §6.2): the tail file, not the whole log - and only while it
+    // exists, which is just around a crash. Ordinary events attach nothing.
+    sentry_add_log_tail_attachment(options);
+    sentry_options_set_on_crash(options, sentry_on_crash_hook, nullptr);
 
     // sentry_init() takes ownership of `options` on success (freed in sentry_close).
     // On failure it frees them internally. The caller must not sentry_options_free()
@@ -885,6 +1376,10 @@ void xrSentry_Initialize(pcstr commandLine)
     // between the two there would otherwise be a window where the dump writer is not resolved yet.
     install_local_crash_reporter();
     s_xr_sentry_started = true;
+    // The send worker: sentry_capture_event never runs on the game logic thread again. See s_queue_thread's own
+    // comment (SEN-1) for why it is a pointer, never joined except from xrSentry_Shutdown below.
+    s_queue_stop = false;
+    s_queue_thread = new std::thread(Threading::RunThread("Sentry Send", &sentry_queue_worker));
     // Sentry starts after the render device: the profile has all three stages here
     xrSentry_UpdateHwTags();
 
@@ -923,8 +1418,23 @@ void xrSentry_UpdateHwTags()
 void xrSentry_Shutdown()
 {
     uninstall_local_crash_reporter();
+    if (s_queue_thread)
+    {
+        {
+            std::lock_guard<std::mutex> lock(s_gate_mutex);
+            s_queue_stop = true;
+        }
+        s_gate_cv.notify_all();
+        s_queue_thread->join(); // the worker drains the queue before it exits
+        delete s_queue_thread;
+        s_queue_thread = nullptr;
+    }
     if (!s_xr_sentry_started)
         return;
+    {
+        std::lock_guard<std::mutex> lock(s_gate_mutex);
+        sentry_gate_flush_summary();
+    }
     sentry_close();
     s_xr_sentry_started = false;
 }
@@ -955,22 +1465,44 @@ static void sentry_event_attach_lua_stack(sentry_value_t event, pcstr lua_stack)
     sentry_value_set_by_key(event, "extra", extra);
 }
 
-void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua_stack)
+// Common path of CaptureError/CaptureSoftError: the gate rejects repeats and floods before any work; the event
+// is built on the calling thread (the native stack must be the erroring one, the Lua stack provider walks a live
+// Lua state) and only sentry_capture_event runs on the send worker.
+static void sentry_capture_gated(
+    sentry_level_t level, pcstr logger, pcstr message, pcstr lua_stack, pcstr tag_key, bool critical = false)
 {
-    if (!s_xr_sentry_started || !message || !*message)
-        return;
+    char norm[kGateNormalizedMax];
+    {
+        std::lock_guard<std::mutex> lock(s_gate_mutex);
+        const u64 key = sentry_message_key(message, norm, sizeof(norm));
+        if (!sentry_gate_admit(key, critical))
+        {
+            sentry_gate_note_suppressed();
+            return;
+        }
+    }
 
-    sentry_value_t event = sentry_value_new_message_event(SENTRY_LEVEL_WARNING, logger ? logger : "OpenXRay", message);
+    sentry_value_t event = sentry_value_new_message_event(level, logger, message);
 
-    // Tag for issue search / alert rules in Sentry: soft_error:true
     sentry_value_t tags = sentry_value_new_object();
-    sentry_value_set_by_key(tags, "soft_error", sentry_value_new_string("true"));
+    sentry_value_set_by_key(tags, tag_key, sentry_value_new_string("true"));
     sentry_value_set_by_key(event, "tags", tags);
 
     sentry_event_attach_lua_stack(event, lua_stack);
 
     sentry_event_value_add_stacktrace(event, nullptr, 0);
-    sentry_capture_event(event);
+
+    std::lock_guard<std::mutex> lock(s_gate_mutex);
+    sentry_queue_push(event);
+}
+
+void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua_stack)
+{
+    if (!s_xr_sentry_started || !message || !*message)
+        return;
+
+    // Tag for issue search / alert rules in Sentry: soft_error:true
+    sentry_capture_gated(SENTRY_LEVEL_WARNING, logger ? logger : "OpenXRay", message, lua_stack, "soft_error");
 }
 
 void XRCORE_API xrSentry_CaptureError(pcstr logger, pcstr message, pcstr lua_stack)
@@ -978,16 +1510,7 @@ void XRCORE_API xrSentry_CaptureError(pcstr logger, pcstr message, pcstr lua_sta
     if (!s_xr_sentry_started || !message || !*message)
         return;
 
-    sentry_value_t event = sentry_value_new_message_event(SENTRY_LEVEL_ERROR, logger ? logger : "OpenXRay", message);
-
-    sentry_value_t tags = sentry_value_new_object();
-    sentry_value_set_by_key(tags, "engine_error", sentry_value_new_string("true"));
-    sentry_value_set_by_key(event, "tags", tags);
-
-    sentry_event_attach_lua_stack(event, lua_stack);
-
-    sentry_event_value_add_stacktrace(event, nullptr, 0);
-    sentry_capture_event(event);
+    sentry_capture_gated(SENTRY_LEVEL_ERROR, logger ? logger : "OpenXRay", message, lua_stack, "engine_error");
 }
 
 void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pcstr arg2)
@@ -1023,10 +1546,6 @@ void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pc
         m.resize(cap);
 
 #if defined(XR_PLATFORM_WINDOWS)
-    sentry_set_tag("xrDebug.Fail", "true");
-    sentry_set_tag("logger", "xrCore.xrDebug.Fail");
-    sentry_set_extra("assertion", sentry_value_new_string(m.c_str()));
-
     xr_string lua_for_extra;
     const auto lua_stack_provider = xrDebug::GetLuaStackProvider();
     if (lua_stack_provider)
@@ -1035,31 +1554,47 @@ void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pc
         constexpr size_t kMaxLua = 12000;
         if (lua_for_extra.size() > kMaxLua)
             lua_for_extra.resize(kMaxLua);
-        if (!lua_for_extra.empty())
-            sentry_set_extra("lua_stack", sentry_value_new_string(lua_for_extra.c_str()));
     }
 
     char dumpPath[MAX_PATH]{};
-    const bool dumped = write_live_minidump_to_temp(dumpPath, sizeof(dumpPath));
-    if (dumped)
+    bool dumped = false;
     {
-        // The minidump is read into the envelope right here, so the file can go at once. No flush: the WinHTTP
-        // transport uploads in the background, and waiting for it here (up to 10 s, it timed out on players' machines)
-        // held up the error dialog. xrDebug::Fail flushes with xrSentry_Flush only when the player chose to exit.
-        sentry_capture_minidump(dumpPath);
-        DeleteFileW(XRay::Utf8::ToWide(dumpPath).c_str());
-    }
+        // SEN-5: the scope mutation below (tags/extra, then sentry_capture_minidump reading the event) is global
+        // state - sentry__prepare_event applies it to whatever event the send worker is serializing at that exact
+        // moment, which is now a different thread. Without this lock a queued Lua error could ship tagged
+        // "xrDebug.Fail=true" with this assertion's text in extra.assertion, mislabeled as an assertion failure.
+        std::lock_guard<std::mutex> captureLock(s_capture_mutex);
+        sentry_set_tag("xrDebug.Fail", "true");
+        sentry_set_tag("logger", "xrCore.xrDebug.Fail");
+        sentry_set_extra("assertion", sentry_value_new_string(m.c_str()));
+        if (!lua_for_extra.empty())
+            sentry_set_extra("lua_stack", sentry_value_new_string(lua_for_extra.c_str()));
 
-    if (!lua_for_extra.empty())
-        sentry_remove_extra("lua_stack");
-    sentry_remove_extra("assertion");
-    sentry_remove_tag("logger");
-    sentry_remove_tag("xrDebug.Fail");
+        dumped = write_live_minidump_to_temp(dumpPath, sizeof(dumpPath));
+        if (dumped)
+        {
+            // The minidump is read into the envelope right here, so the file can go at once. No flush: the WinHTTP
+            // transport uploads in the background, and waiting for it here (up to 10 s, it timed out on players'
+            // machines) held up the error dialog. xrDebug::Fail flushes with xrSentry_Flush only when the player
+            // chose to exit.
+            sentry_capture_minidump(dumpPath);
+            DeleteFileW(XRay::Utf8::ToWide(dumpPath).c_str());
+        }
+
+        if (!lua_for_extra.empty())
+            sentry_remove_extra("lua_stack");
+        sentry_remove_extra("assertion");
+        sentry_remove_tag("logger");
+        sentry_remove_tag("xrDebug.Fail");
+    }
 
     if (!dumped)
 #endif
     {
-        xrSentry_CaptureError("xrCore.xrDebug.Fail", m.c_str(), nullptr);
+        // SEN-m4: a budget of its own (not xrSentry_CaptureError's shared one) - an assert that could not take a
+        // live minidump must not be starved by a flood of ordinary Lua errors that already filled that budget.
+        sentry_capture_gated(SENTRY_LEVEL_ERROR, "xrCore.xrDebug.Fail", m.c_str(), nullptr, "engine_error",
+            /*critical=*/true);
     }
 }
 
@@ -1067,11 +1602,24 @@ void xrSentry_Flush(u32 timeoutMs)
 {
     if (!s_xr_sentry_started)
         return;
-    if (sentry_flush(timeoutMs) != 0)
+    // Hand everything we hold to the transport first (the worker may still be capturing; both paths are
+    // thread-safe), then wait for the transport itself.
+    std::vector<sentry_value_t> batch;
     {
+        std::lock_guard<std::mutex> lock(s_gate_mutex);
+        batch.swap(s_queue);
+        sentry_gate_flush_summary();
+    }
+    {
+        std::lock_guard<std::mutex> captureLock(s_capture_mutex);
+        for (sentry_value_t event : batch)
+            sentry_capture_event(event);
+        if (sentry_flush(timeoutMs) != 0)
+        {
 #ifndef MASTER_GOLD
-        Msg("! [Sentry]: sentry_flush timed out after %u ms (report may be incomplete)", timeoutMs);
+            Msg("! [Sentry]: sentry_flush timed out after %u ms (report may be incomplete)", timeoutMs);
 #endif
+        }
     }
 }
 
@@ -1082,6 +1630,17 @@ void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, p
 
     char message[768];
     xr_sprintf(message, sizeof(message), "Can't find variable %s in [%s]", key ? key : "?", section ? section : "?");
+
+    char norm[kGateNormalizedMax];
+    {
+        std::lock_guard<std::mutex> lock(s_gate_mutex);
+        const u64 msgKey = sentry_message_key(message, norm, sizeof(norm));
+        if (!sentry_gate_admit(msgKey, /*critical=*/true))
+        {
+            sentry_gate_note_suppressed();
+            return;
+        }
+    }
 
     sentry_value_t event = sentry_value_new_message_event(SENTRY_LEVEL_ERROR, "xrCore.Inifile", message);
 
@@ -1099,7 +1658,28 @@ void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, p
     sentry_value_set_by_key(event, "extra", extra);
 
     sentry_event_value_add_stacktrace(event, nullptr, 0);
-    sentry_capture_event(event);
+    // Captured synchronously on purpose: the caller is about to xrDebug::Fatal, and a queued event would be
+    // lost if the process goes down before the send worker runs. The envelope is tiny (no log attachment).
+    // SEN-5: under s_capture_mutex, same as every other sentry_capture_event/sentry_capture_minidump call.
+    {
+        std::lock_guard<std::mutex> captureLock(s_capture_mutex);
+        sentry_capture_event(event);
+    }
+}
+
+// SEN-m1: lets a caller skip building an expensive payload (formatting a Lua stack trace, for one) when the event
+// would be dropped anyway. Read-only: does not record the key or consume a slot - the real xrSentry_CaptureError /
+// xrSentry_CaptureSoftError call still does that admission, so this is a cheap, synchronized prediction, not a
+// second gate. Not wired into any caller yet (script_engine.cpp's print_output/on_error/format_lua_stack run on
+// every error today, before this gate); this is the API for whoever does that next.
+bool XRCORE_API xrSentry_WouldCapture(pcstr message)
+{
+    if (!s_xr_sentry_started || !message || !*message)
+        return false;
+    char norm[kGateNormalizedMax];
+    std::lock_guard<std::mutex> lock(s_gate_mutex);
+    const u64 key = sentry_message_key(message, norm, sizeof(norm));
+    return sentry_gate_would_admit_locked(key);
 }
 
 #else // !USE_SENTRY
@@ -1113,6 +1693,7 @@ void XRCORE_API xrSentry_CaptureError(pcstr /*logger*/, pcstr /*message*/, pcstr
 void XRCORE_API xrSentry_CaptureDebugFail(pcstr /*expr*/, pcstr /*desc*/, pcstr /*arg1*/, pcstr /*arg2*/) {}
 void xrSentry_Flush(u32 /*timeoutMs*/) {}
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr /*ini_path*/, pcstr /*section*/, pcstr /*key*/) {}
+bool XRCORE_API xrSentry_WouldCapture(pcstr /*message*/) { return false; }
 void xrSentry_UpdateHwTags() {}
 
 #endif // USE_SENTRY
