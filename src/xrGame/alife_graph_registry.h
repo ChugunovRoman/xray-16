@@ -35,6 +35,10 @@ public:
     typedef xr_vector<CGraphPointInfo> GRAPH_REGISTRY;
     typedef xr_vector<GameGraph::_GRAPH_ID> TERRAIN_REGISTRY;
 
+    // 63-wave3-fixes.md S3: the "not registered" mark of m_id_to_vertex (a valid game vertex id is < vertex_count,
+    // far below u16(-1))
+    static constexpr GameGraph::_GRAPH_ID kNotRegistered = (GameGraph::_GRAPH_ID)(-1);
+
 protected:
     GRAPH_REGISTRY m_objects;
     TERRAIN_REGISTRY m_terrain[GameGraph::LOCATION_TYPE_COUNT][GameGraph::LOCATION_COUNT];
@@ -42,6 +46,12 @@ protected:
     CSE_ALifeCreatureActor* m_actor;
     float m_process_time;
     xr_vector<CSE_ALifeDynamicObject*> m_temp;
+    // 63-wave3-fixes.md S3: the id -> vertex index of the registrations above (the engine invariant #2058, fd6cecd15:
+    // at most one vertex map holds a given id). add() drops a stale registration through it and remove() finds the
+    // vertex the object really sits at - both O(1), no all-vertices sweeps (the wave-3 dedup scan cost O(V) per
+    // inventory item on the offline switch of a squad). Object ids are u16 (ALife::_OBJECT_ID), one slot per id.
+    // Kept in add()/remove()/on_load() - the only writers of m_objects; u16(-1) - not registered
+    xr_vector<GameGraph::_GRAPH_ID> m_id_to_vertex;
 
 protected:
     void setup_current_level();
@@ -58,8 +68,15 @@ public:
     void detach(CSE_Abstract& object, CSE_ALifeInventoryItem* item, GameGraph::_GRAPH_ID game_vertex_id,
         bool alife_query = true, bool remove_children = true);
     IC void assign(CSE_ALifeMonsterAbstract* object);
+    // 61-wave3-spec.md E6 / 63-wave3-fixes.md S3: every add checks the id -> vertex index and drops a stale
+    // registration (fd6cecd15, #2058) in O(1) - the known_unique shortcut of the wave-3 code is gone with the
+    // all-vertices sweep it used to skip
     void add(CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_ID game_vertex_id, bool bUpdateSwitchObjects = true);
-    void remove(CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_ID game_vertex_id, bool bUpdateSwitchObjects = true);
+    // true - the object was found and removed from its vertex map (the index says where; on a graph/level desync -
+    // the vertex it was actually registered at, not the claimed one); false - it was in no vertex map
+    bool remove(CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_ID game_vertex_id, bool bUpdateSwitchObjects = true);
+    // true - the object has an entry in SOME vertex map right now (O(1), the id -> vertex index); does not say which
+    IC bool is_registered(ALife::_OBJECT_ID id) const;
     IC void change(
         CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_ID game_vertex_id, GameGraph::_GRAPH_ID next_game_vertex_id);
     IC CALifeLevelRegistry& level() const;
