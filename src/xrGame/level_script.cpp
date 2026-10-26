@@ -31,6 +31,7 @@
 #include "map_location.h"
 #include "alife_simulator.h"
 #include "alife_time_manager.h"
+#include "alife_time_skip.h"
 #include "ui/UIGameTutorial.h"
 #include "ui/UIInventoryUtilities.h"
 #include "alife_object_registry.h"
@@ -173,6 +174,8 @@ void change_game_time(u32 days, u32 hours, u32 mins)
         value *= 1000; // msec
         g_pGamePersistent->Environment().ChangeGameTime(fValue);
         tpGame->alife().time_manager().change_game_time(value);
+        // plans/lua_to_cpp/55-timeskip-squad-movement.md: the offline movement catches up step by step
+        alife_time_skip::Begin(tpGame->alife(), value);
     }
 }
 
@@ -300,6 +303,18 @@ void map_change_spot_hint(u16 id, LPCSTR spot_type, LPCSTR text)
     if (!ml)
         return;
     ml->SetHint(text);
+}
+
+// H2 (plans/lua_to_cpp/36-gw-eoc-e8-spots.md): the hint of the spot is built by the script function `function`
+// ("module.function", called with the object id, answers a string) when the hint is shown, not when the spot changes.
+// An empty name removes the provider. false - the object has no such spot. Not saved with the spot.
+bool map_set_spot_hint_provider(u16 id, LPCSTR spot_type, LPCSTR function)
+{
+    CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return false;
+    ml->SetHintProvider(function);
+    return true;
 }
 
 void map_remove_object_spot(u16 id, LPCSTR spot_type) { Level().MapManager().RemoveMapLocation(spot_type, id); }
@@ -939,6 +954,7 @@ void CLevel::script_register(lua_State* luaState)
         def("map_remove_object_spot", map_remove_object_spot),
         def("map_has_object_spot", map_has_object_spot),
         def("map_change_spot_hint", map_change_spot_hint),
+        def("map_set_spot_hint_provider", map_set_spot_hint_provider),
 
         def("start_stop_menu", start_stop_menu),
         def("add_dialog_to_render", add_dialog_to_render),
@@ -992,7 +1008,10 @@ void CLevel::script_register(lua_State* luaState)
         {
             // Original luabind converts 4294967295 (which is u32(-1)) to 4294967296
             const u32 id = ai().level_graph().vertex_id(position);
-            return id == u32(-1) ? id + 1 : id; // reproduce original behaviour
+            // reproduce original behaviour: 2^32 for a position off the level graph. The sum in u64 (plan 57, B1):
+            // `id + 1` in u32 wrapped to 0 - the valid vertex 0 for Lua. u64 goes to Lua as a number (luabind
+            // native_converter: lua_pushnumber), 4294967296 exactly
+            return id == u32(-1) ? u64(id) + 1 : u64(id);
         }),
         def("game_id", &GameID),
         def("ray_pick", &ray_pick)

@@ -165,6 +165,9 @@ constexpr pcstr kBuiltinNames[] = {
     "npc_on_before_hit",
     "monster_on_before_hit",
     "relation_on_changed",
+    "alife_on_time_skip_begin",
+    "alife_on_time_skip_step",
+    "alife_on_time_skip_end",
 };
 static_assert(std::size(kBuiltinNames) == static_cast<size_t>(EBuiltin::Count_) - 1, "kBuiltinNames != EBuiltin");
 
@@ -211,6 +214,9 @@ constexpr pcstr kBuiltinSchemas[] = {
     "oNvo?IIN", // npc_on_before_hit (npc, power, dir, who, bone, hit type, impulse)
     "oNvo?IIN", // monster_on_before_hit (monster, power, dir, who, bone, hit type, impulse)
     "s*?*?N?N?", // relation_on_changed (kind, a, b, old, new)
+    "NN",   // alife_on_time_skip_begin (total ms, steps)
+    "NNNb", // alife_on_time_skip_step (step ms, index from 1, steps, tick)
+    "NN",   // alife_on_time_skip_end (total ms, steps)
 };
 static_assert(std::size(kBuiltinSchemas) == std::size(kBuiltinNames), "kBuiltinSchemas != kBuiltinNames");
 

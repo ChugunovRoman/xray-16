@@ -108,6 +108,8 @@ target_sources(xrGame PRIVATE
     addon_storage.h
     addon_callbacks.cpp
     addon_callbacks.h
+    addon_alife_hooks.cpp
+    addon_alife_hooks.h
     addon_goap.cpp
     addon_goap.h
     addon_api_npc.cpp
@@ -234,6 +236,7 @@ target_sources(xrGame PRIVATE
     alife_online_offline_group_brain.h
     alife_online_offline_group_brain_inline.h
     alife_online_offline_group.cpp
+    alife_squad_task_native.h
     alife_registry_container_composition.h
     alife_registry_container.cpp
     alife_registry_container.h
@@ -284,6 +287,8 @@ target_sources(xrGame PRIVATE
     alife_time_manager.cpp
     alife_time_manager.h
     alife_time_manager_inline.h
+    alife_time_skip.cpp
+    alife_time_skip.h
     spawn_smart_terrain_map_data_source.cpp
     spawn_smart_terrain_map_data_source.h
     alife_trader_abstract.cpp

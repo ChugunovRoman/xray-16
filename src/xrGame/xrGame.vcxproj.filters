@@ -2988,6 +2988,9 @@
     <ClInclude Include="alife_time_manager.h">
       <Filter>AI\ALife\simulator_base\time_manager</Filter>
     </ClInclude>
+    <ClInclude Include="alife_time_skip.h">
+      <Filter>AI\ALife\simulator_base\time_manager</Filter>
+    </ClInclude>
     <ClInclude Include="alife_time_manager_inline.h">
       <Filter>AI\ALife\simulator_base\time_manager</Filter>
     </ClInclude>
@@ -3106,6 +3109,9 @@
       <Filter>AI\ALife\server_entities\online_offline_group\brain</Filter>
     </ClInclude>
     <ClInclude Include="alife_online_offline_group_brain_inline.h">
+      <Filter>AI\ALife\server_entities\online_offline_group\brain</Filter>
+    </ClInclude>
+    <ClInclude Include="alife_squad_task_native.h">
       <Filter>AI\ALife\server_entities\online_offline_group\brain</Filter>
     </ClInclude>
     <ClInclude Include="CustomMonster.h">
@@ -4618,6 +4624,9 @@
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_callbacks.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_alife_hooks.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_goap.h">
@@ -6751,6 +6760,9 @@
     <ClCompile Include="alife_time_manager.cpp">
       <Filter>AI\ALife\simulator_base\time_manager</Filter>
     </ClCompile>
+    <ClCompile Include="alife_time_skip.cpp">
+      <Filter>AI\ALife\simulator_base\time_manager</Filter>
+    </ClCompile>
     <ClCompile Include="spawn_smart_terrain_map_data_source.cpp">
       <Filter>AI\ALife\simulator_base\time_manager</Filter>
     </ClCompile>
@@ -7790,6 +7802,9 @@
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_callbacks.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_alife_hooks.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_goap.cpp">

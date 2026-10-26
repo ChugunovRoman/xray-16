@@ -11,6 +11,7 @@
 #include "ai_space.h"
 #include "alife_simulator.h"
 #include "alife_time_manager.h"
+#include "alife_time_skip.h"
 #include "game_sv_single.h"
 #include "script_game_object.h"
 #include "xrServer.h"
@@ -362,6 +363,8 @@ GwpResult GWP_CALL ApiGameTimeAdvance(const GwpPlugin* self, uint64_t millisecon
     clock.set_game_time_factor(clock.game_time() + milliseconds, clock.time_factor());
     constexpr u64 day_ms = 24ull * 60 * 60 * 1000;
     g_pGamePersistent->Environment().ChangeGameTime(static_cast<float>(milliseconds % day_ms) / 1000.f);
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md: the offline movement catches up step by step (as change_game_time)
+    alife_time_skip::Begin(game->alife(), milliseconds);
     return GWP_OK;
 }
 

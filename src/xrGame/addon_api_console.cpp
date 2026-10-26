@@ -660,6 +660,10 @@ void GWP_CALL ApiProfileAdd(uint32_t stage, uint64_t ticks)
     ProfileStage& entry = g_stages[stage - 1];
     entry.ticks.fetch_add(ticks, std::memory_order_relaxed);
     entry.calls.fetch_add(1, std::memory_order_relaxed);
+    // 57-gw-eoc-next-steps.md, E2: into the "alife peak" capture too, when this thread has one open (only with
+    // -npc_cpp_profile: without it profile_stage hands out no stage and this call returns above)
+    if (npc_cpp_profile::peak_active())
+        npc_cpp_profile::peak_add_plugin(entry.name.c_str(), ticks);
 }
 
 uint64_t GWP_CALL ApiProfileTicks() { return CPU::QPC(); }
@@ -882,8 +886,15 @@ void FlushProfile()
         ProfileStage& stage = g_stages[i];
         const u64 ticks = stage.ticks.exchange(0, std::memory_order_relaxed);
         const u64 calls = stage.calls.exchange(0, std::memory_order_relaxed);
-        if (!calls || !ticks)
+        if (!calls)
             continue;
+        // A counter of a plugin (profile_count: calls without time, e.g. smart_hook/show_skipped, */fallback/*,
+        // verify_mismatch) - printed as a count, as the counters of npc_cpp_profile are
+        if (!ticks)
+        {
+            Msg("*   plugin:%s count=%llu", stage.name.c_str(), static_cast<unsigned long long>(calls));
+            continue;
+        }
         const double total_ms = 1000.0 * static_cast<double>(ticks) / CPU::qpc_freq;
         const double avg_us = 1000000.0 * static_cast<double>(ticks) / (CPU::qpc_freq * calls);
         Msg("*   plugin:%s total=%.2fms calls=%llu avg=%.2fus", stage.name.c_str(), total_ms,

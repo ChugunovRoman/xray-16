@@ -23,6 +23,8 @@
 #include "level_changer.h"
 #include "actor_memory.h"
 #include "visual_memory_manager.h"
+#include "xrScriptEngine/script_engine.hpp"
+#include "xrEngine/EngineThreading.h"
 #include "location_manager.h"
 #include "GameTask.h"
 #include "GametaskManager.h"
@@ -795,14 +797,97 @@ void CMapLocation::SetColor(u32 color)
     m_level_spot->SetTextureColor(color);
 };
 
+// The hint provider of a location is called at most this often, real time (CMapLocation::GetHint)
+constexpr u32 kHintPullPeriodMs = 400;
+
 pcstr CMapLocation::GetHint() const
 {
     if (!HintEnabled())
     {
         return nullptr;
     }
+    // A location is never a const object: GetHint is const for its readers only. m_pulling_hint: the provider itself
+    // asks this hint (CMapLocation:GetHint) - the last text, no second call
+    if (m_hint_provider.size() && !m_pulling_hint)
+    {
+        // At most once per kHintPullPeriodMs of real time: a text that changes on every call (a timer) must not
+        // change the size of the hint window on every show, and the PDA may show it several times a frame
+        CMapLocation* self = const_cast<CMapLocation*>(this);
+        const u32 now = Device.dwTimeContinual;
+        if (!m_hint_pulled || now - m_hint_pull_time >= kHintPullPeriodMs)
+        {
+            self->m_hint_pulled = true;
+            self->m_hint_pull_time = now;
+            self->PullHint();
+        }
+    }
+    if (!HintEnabled())
+        return nullptr; // the provider called SetHint("disable_hint") / map_change_spot_hint of this spot
     return StringTable().translate(m_hint).c_str();
 };
+
+void CMapLocation::SetHintProvider(pcstr function)
+{
+    m_hint_provider = function && function[0] ? function : nullptr;
+    m_hint_pulled = false; // the next GetHint calls the (new) provider at once
+}
+
+namespace
+{
+// The failed calls of hint providers in the log: at most this many lines a run
+constexpr u32 kHintProviderLogLines = 20;
+u32 g_hint_provider_log_lines = 0;
+
+void LogHintProvider(pcstr function, u16 id, pcstr message)
+{
+    if (g_hint_provider_log_lines >= kHintProviderLogLines)
+        return;
+    ++g_hint_provider_log_lines;
+    Msg("! map spot hint provider '%s' (object %u): %s%s", function, static_cast<u32>(id), message,
+        g_hint_provider_log_lines == kHintProviderLogLines ? " (further errors are not logged)" : "");
+}
+} // namespace
+
+void CMapLocation::PullHint()
+{
+    // The UI thread outside of any Lua call (the mouse of the map, the properties box): the main state. Lua of the
+    // Game thread must not run at the same time (the UI frame runs on main before the Game thread is kicked)
+    VERIFY(!XRay::Engine::IsGameThreadRunning() || XRay::Engine::IsGameLogicThread());
+    CScriptEngine* engine = GEnv.ScriptEngine;
+    lua_State* L = engine ? engine->lua() : nullptr;
+    if (!L || !lua_checkstack(L, 4))
+        return;
+    // A copy: the provider may set another provider of this spot (map_set_spot_hint_provider) during the call
+    const shared_str function_name = m_hint_provider;
+    luabind::object function;
+    // function_object loads the script of the namespace when needed, the same path as the engine's own calls
+    if (!engine->function_object(function_name.c_str(), function, LUA_TFUNCTION))
+    {
+        LogHintProvider(function_name.c_str(), m_objectID, "no such function");
+        return;
+    }
+    const int top = lua_gettop(L);
+    function.push(L);
+    lua_pushnumber(L, static_cast<lua_Number>(m_objectID));
+    // The provider may remove this location (map_remove_object_spot / map_set_object_spot): CMapManager::Destroy
+    // only queues it till the next CMapManager::Update, so `this` stays valid here; the callers check Released()
+    m_pulling_hint = true;
+    const int status = lua_pcall(L, 1, 1, 0);
+    m_pulling_hint = false;
+    if (status != 0)
+    {
+        LogHintProvider(function_name.c_str(), m_objectID, lua_isstring(L, -1) ? lua_tostring(L, -1) : "an error");
+        lua_settop(L, top);
+        return;
+    }
+    // lua_type, not lua_isstring: a number answer is a bug of the provider, not a text. The answer is plain text, not
+    // SetHint: "disable_hint" from a provider must not switch the hint off for good (the flag goes to the save)
+    if (lua_type(L, -1) == LUA_TSTRING)
+        m_hint = lua_tostring(L, -1);
+    else
+        LogHintProvider(function_name.c_str(), m_objectID, "the answer is not a string");
+    lua_settop(L, top);
+}
 
 CMapSpotPointer* CMapLocation::GetSpotPointer(CMapSpot* sp)
 {

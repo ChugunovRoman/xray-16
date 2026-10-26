@@ -372,35 +372,18 @@ GwpObjectId GWP_CALL ApiAlifeObjectByName(const char* name)
     return GWP_INVALID_OBJECT_ID;
 }
 
+// Every test below is a pure function of the object and all of them must pass, so their order does not change the
+// result. The cheap ones go first (fields of the object, the class and section text, the level of its game vertex),
+// the casts last, each done at most once and only when a test reads it: most of the registry is items, and a failed
+// dynamic_cast walks the whole RTTI hierarchy of the object (the class-filtered walk was 3 failed casts per item).
 bool AlifeExtPasses(CSE_ALifeDynamicObject* object, const GwpAlifeFilter& filter)
 {
-    const u32 kinds = filter.flags & kAlifeExtKindFlags;
-    const auto* creature = smart_cast<const CSE_ALifeCreatureAbstract*>(object);
-    if (kinds)
-    {
-        const bool actor = smart_cast<const CSE_ALifeCreatureActor*>(object) != nullptr;
-        const bool stalker = smart_cast<const CSE_ALifeHumanAbstract*>(object) != nullptr;
-        bool match = false;
-        match |= (kinds & GWP_ALIFE_STALKER) && stalker;
-        match |= (kinds & GWP_ALIFE_ACTOR) && actor;
-        match |= (kinds & GWP_ALIFE_MONSTER) && creature && !stalker && !actor;
-        match |= (kinds & GWP_ALIFE_ITEM) && smart_cast<const CSE_ALifeInventoryItem*>(object);
-        match |= (kinds & GWP_ALIFE_SQUAD) && smart_cast<const CSE_ALifeOnlineOfflineGroup*>(object);
-        match |= (kinds & GWP_ALIFE_SMART) && smart_cast<const CSE_ALifeSmartZone*>(object);
-        if (!match)
-            return false;
-    }
-    if ((filter.flags & GWP_ALIFE_ONLINE) && !object->m_bOnline)
+    const u32 flags = filter.flags;
+    if ((flags & GWP_ALIFE_ONLINE) && !object->m_bOnline)
         return false;
-    if ((filter.flags & GWP_ALIFE_OFFLINE) && object->m_bOnline)
+    if ((flags & GWP_ALIFE_OFFLINE) && object->m_bOnline)
         return false;
-    if ((filter.flags & GWP_ALIFE_ALIVE) && !(creature && creature->g_Alive()))
-        return false;
-    if ((filter.flags & GWP_ALIFE_DEAD) && !(creature && !creature->g_Alive()))
-        return false;
-    if ((filter.flags & GWP_ALIFE_NO_PARENT) && object->ID_Parent != ALife::_OBJECT_ID(-1))
-        return false;
-    if (filter.level_id >= 0 && AlifeExtLevelOfGameVertex(object->m_tGraphID) != filter.level_id)
+    if ((flags & GWP_ALIFE_NO_PARENT) && object->ID_Parent != ALife::_OBJECT_ID(-1))
         return false;
     if (filter.class_id && *filter.class_id)
     {
@@ -411,6 +394,47 @@ bool AlifeExtPasses(CSE_ALifeDynamicObject* object, const GwpAlifeFilter& filter
     }
     if (filter.section_mask && *filter.section_mask && !AlifeExtWildcard(filter.section_mask, object->s_name.c_str()))
         return false;
+    if (filter.level_id >= 0 && AlifeExtLevelOfGameVertex(object->m_tGraphID) != filter.level_id)
+        return false;
+
+    // the casts on demand: 0 - not done yet, 1 - the object is of the class, 2 - it is not
+    const CSE_ALifeCreatureAbstract* creature = nullptr;
+    int creature_state = 0, stalker_state = 0, actor_state = 0;
+    const auto is_creature = [&]() {
+        if (!creature_state)
+        {
+            creature = smart_cast<const CSE_ALifeCreatureAbstract*>(object);
+            creature_state = creature ? 1 : 2;
+        }
+        return creature_state == 1;
+    };
+    const auto is_stalker = [&]() {
+        if (!stalker_state)
+            stalker_state = smart_cast<const CSE_ALifeHumanAbstract*>(object) ? 1 : 2;
+        return stalker_state == 1;
+    };
+    const auto is_actor = [&]() {
+        if (!actor_state)
+            actor_state = smart_cast<const CSE_ALifeCreatureActor*>(object) ? 1 : 2;
+        return actor_state == 1;
+    };
+    if ((flags & GWP_ALIFE_ALIVE) && !(is_creature() && creature->g_Alive()))
+        return false;
+    if ((flags & GWP_ALIFE_DEAD) && !(is_creature() && !creature->g_Alive()))
+        return false;
+    const u32 kinds = flags & kAlifeExtKindFlags;
+    if (kinds)
+    {
+        // any kind of the filter: the first one that matches ends the casts
+        const bool match = ((kinds & GWP_ALIFE_STALKER) && is_stalker()) ||
+            ((kinds & GWP_ALIFE_ACTOR) && is_actor()) ||
+            ((kinds & GWP_ALIFE_MONSTER) && is_creature() && !is_stalker() && !is_actor()) ||
+            ((kinds & GWP_ALIFE_ITEM) && smart_cast<const CSE_ALifeInventoryItem*>(object) != nullptr) ||
+            ((kinds & GWP_ALIFE_SQUAD) && smart_cast<const CSE_ALifeOnlineOfflineGroup*>(object) != nullptr) ||
+            ((kinds & GWP_ALIFE_SMART) && smart_cast<const CSE_ALifeSmartZone*>(object) != nullptr);
+        if (!match)
+            return false;
+    }
     return true;
 }
 

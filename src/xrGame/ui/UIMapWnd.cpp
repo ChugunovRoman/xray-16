@@ -195,7 +195,9 @@ CUIMapWnd::~CUIMapWnd()
         delete_data( m_dbg_info );
     #endif // DEBUG
     */
-    g_map_wnd = NULL;
+    // Another map window (the faction editor) must not take the notifications (MapLocationRelcase) from the live one
+    if (g_map_wnd == this)
+        g_map_wnd = NULL;
 }
 
 EPdaMapLayer CUIMapWnd::ResolveLayerForGlobalMap(const CUIGlobalMap* global_map) const
@@ -1167,7 +1169,7 @@ void CUIMapWnd::MapLocationRelcase(CMapLocation* ml)
     {
         CMapSpot* ms = smart_cast<CMapSpot*>(owner);
         if (ms && ms->MapLocation() == ml) // CUITaskItem also can be a HintOwner
-            m_map_location_hint->SetOwner(NULL);
+            HideCurHint();
     }
 }
 
@@ -1403,7 +1405,15 @@ void CUIMapWnd::ActivatePropertiesBox(CUIWindow* w)
     luabind::functor<void> funct;
     if (GEnv.ScriptEngine->functor("pda.property_box_add_properties", funct))
     {
-        funct(m_UIPropertiesBox, m_cur_location->ObjectID(), (LPCSTR)m_cur_location->GetLevelName().c_str(), m_cur_location->GetHint());
+        // GetHint may run the hint provider of the spot, which may remove this very location (it is deleted in the
+        // next CMapManager::Update): then no box, m_cur_location must not outlive the frame
+        LPCSTR hint = m_cur_location->GetHint();
+        if (m_cur_location->Released())
+        {
+            m_cur_location = nullptr;
+            return;
+        }
+        funct(m_UIPropertiesBox, m_cur_location->ObjectID(), (LPCSTR)m_cur_location->GetLevelName().c_str(), hint);
     }
 
     // Только для меток игрока
@@ -1481,6 +1491,11 @@ void CUIMapWnd::MoveScrollH(float dx)
 
 void CUIMapWnd::Update()
 {
+    // The hint of a spot that stopped asking for it (not updated any more: disabled, out of the map) - hidden, as
+    // HideHintUnlessSpotHovered does; a pointer comparison only
+    if (m_hint_spot && m_map_location_hint->GetOwner() == m_hint_spot && Device.dwFrame - m_hint_spot_frame > 1)
+        HideCurHint();
+
     if (IsShown() && !UsingExternalDataSource() && g_pGameLevel != nullptr)
         CheckForActorLevelChange();
 
@@ -1601,25 +1616,48 @@ void CUIMapWnd::ShowHintStr(CUIWindow* parent, LPCSTR text) // map name
     ShowHint();
 }
 
+// The hint of a map spot that stays hovered is built again at most this often, real time (a live timer in the text)
+constexpr u32 kHintSpotRefreshMs = 1000;
+
 void CUIMapWnd::ShowHintSpot(CMapSpot* spot)
 {
     CUIWindow* owner = m_map_location_hint->GetOwner();
-    if (!owner)
+    if (owner && owner == spot && owner == m_hint_spot)
     {
+        // The same spot asks again (CMapSpot::Update, every frame while hovered): the heartbeat of
+        // HideHintUnlessSpotHovered, and the text once per kHintSpotRefreshMs - not on every request, a text that
+        // changes (a timer) would change the size of the window every frame
+        m_hint_spot_frame = Device.dwFrame;
+        if (Device.dwTimeContinual - m_hint_spot_time < kHintSpotRefreshMs)
+            return;
+        m_hint_spot_time = Device.dwTimeContinual;
         m_map_location_hint->SetInfoMSpot(spot);
-        m_map_location_hint->SetOwner(spot);
+        if (spot->MapLocation()->Released())
+        {
+            HideCurHint();
+            return;
+        }
         ShowHint();
         return;
     }
+    CMapSpot* prev_spot = owner ? smart_cast<CMapSpot*>(owner) : nullptr;
+    if (owner && !(prev_spot && (prev_spot->get_location_level() < spot->get_location_level())))
+        return;
 
-    CMapSpot* prev_spot = smart_cast<CMapSpot*>(owner);
-    if (prev_spot && (prev_spot->get_location_level() < spot->get_location_level()))
+    // SetInfoMSpot -> CMapLocation::GetHint may run the hint provider of the spot, which may remove this very
+    // location (MapLocationRelcase has run already, the location is deleted in the next CMapManager::Update): do not
+    // make its spot the owner of the hint
+    m_map_location_hint->SetInfoMSpot(spot);
+    if (spot->MapLocation()->Released())
     {
-        m_map_location_hint->SetInfoMSpot(spot);
-        m_map_location_hint->SetOwner(spot);
-        ShowHint();
+        HideCurHint();
         return;
     }
+    m_map_location_hint->SetOwner(spot);
+    m_hint_spot = spot;
+    m_hint_spot_frame = Device.dwFrame;
+    m_hint_spot_time = Device.dwTimeContinual;
+    ShowHint();
 }
 
 void CUIMapWnd::ShowHintTask(CGameTask* task, CUIWindow* owner)
@@ -1661,7 +1699,22 @@ void CUIMapWnd::HideHint(CUIWindow* parent)
     }
 }
 
-void CUIMapWnd::HideCurHint() { m_map_location_hint->SetOwner(NULL); }
+void CUIMapWnd::HideCurHint()
+{
+    m_map_location_hint->SetOwner(NULL);
+    m_hint_spot = nullptr;
+}
+
+void CUIMapWnd::HideHintUnlessSpotHovered()
+{
+    // A pointer comparison only: the owner spot asked for its hint this or the previous frame (it is still hovered).
+    // CUITaskWnd::Update hid the hint of a hovered spot on every update (several a frame), so the spot showed it again
+    // right away and built its text every time (H2: the hint provider of the script, plans/lua_to_cpp/36)
+    CUIWindow* owner = m_map_location_hint->GetOwner();
+    if (owner && owner == m_hint_spot && Device.dwFrame - m_hint_spot_frame <= 1)
+        return;
+    HideCurHint();
+}
 void CUIMapWnd::Hint(const shared_str& text)
 {
     /*

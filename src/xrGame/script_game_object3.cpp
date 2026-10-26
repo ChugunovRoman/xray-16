@@ -1653,3 +1653,8 @@ void CScriptGameObject::SetRestrictionType(u8 type)
 //-Alundaio
 
 u32 CScriptGameObject::binder_phase_mask() const { return object().binder_phase_mask(); }
+
+// plans/lua_to_cpp/57-gw-eoc-next-steps.md, L2 step D: the engine gate of the restrictor and camp binders
+// (CGameObject::set_binder_interval). Lua calls it only on transitions (idle / active), not on every update.
+void CScriptGameObject::set_binder_interval(u32 interval_ms) { object().set_binder_interval(interval_ms); }
+u32 CScriptGameObject::binder_interval() const { return object().binder_interval(); }

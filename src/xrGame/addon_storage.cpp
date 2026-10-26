@@ -179,6 +179,14 @@ constexpr pcstr kKeys[] = {
     "monster_follow_lvid",   // teleport: the level vertex of the target
     "monster_follow_gvid",   // teleport: the game vertex of the target
     "monster_follow_squad",  // teleport: the squad id
+    // plans/lua_to_cpp/65-next-steps.md item 4 (plan 58 M6 + plan 59 N4): time_global() (ms) until which the last
+    // pass of the native state manager (gw_npc, StateManager::update) was idle and safe to repeat without calling
+    // it again - no set_state switch, no new look target, no due or pending timeout callback, not a fire/
+    // unstrapped-reequip state, medium or far lane only (state_manager.cpp, StateManager::update). 0/nil: call it
+    // every time, as before. Written only by StateManager::update of an NPC whose state manager is native
+    // (gw_npc_state_mgr 1); an NPC of the Lua manager never writes it, so xr_motivator.native_medium_skip always
+    // answers false for it and behaviour there is unchanged.
+    "state_mgr_skip_until",
 };
 constexpr u32 kKeyCount = static_cast<u32>(std::size(kKeys));
 constexpr u32 kObjectSlots = 65536;

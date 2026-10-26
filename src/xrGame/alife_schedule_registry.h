@@ -14,6 +14,7 @@
 #include "xrEngine/profiler.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "npc_cpp_profile.h"
+#include "addon_alife_hooks.h"
 
 class CALifeScheduleRegistry
     : public CSafeMapIterator<ALife::_OBJECT_ID, CSE_ALifeSchedulable, std::less<ALife::_OBJECT_ID>, false>
@@ -22,6 +23,15 @@ private:
     // -npc_cpp_profile: the update() of an object timed by its kind (alife/scheduled/*), out of line so the casts and
     // their includes stay in alife_schedule_registry.cpp
     static void update_profiled(CSE_ALifeSchedulable& object);
+
+    // The update() of a scheduled object. GlobalWar Plugin API (alife_update_hook_*, addon_alife_hooks.cpp): while a
+    // plugin hook of a class is active, a squad or a smart terrain may be updated through it; without one (the
+    // default) this is the virtual update() as before, plus one load and compare.
+    static IC void update_object(CSE_ALifeSchedulable& object)
+    {
+        if (!gw::addons::alife_hooks::g_active || !gw::addons::alife_hooks::Update(object))
+            object.update();
+    }
 
     struct CUpdatePredicate
     {
@@ -54,7 +64,7 @@ private:
             if (npc_cpp_profile::enabled())
                 update_profiled(*(*i).second);
             else
-                (*i).second->update();
+                update_object(*(*i).second);
             STOP_PROFILE
         }
     };

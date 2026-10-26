@@ -149,6 +149,14 @@ protected:
 
     bool binder_gate_update(u32 now); // GameObject.cpp: computes the mask, false = skip the Lua binder update
 
+    // plans/lua_to_cpp/57-gw-eoc-next-steps.md, L2 step D (engine gate of the restrictor and camp binders): the least
+    // time between two Lua binder updates, asked by the binder itself (game_object:set_binder_interval). 0 = every
+    // update, as before (the default; reset on net_Spawn). Not saved: the binder asks again after a load.
+    u32 m_binder_interval{0};
+    u32 m_binder_interval_next{0}; // Device.dwTimeGlobal of the next due call while m_binder_interval != 0
+    bool binder_interval_due(u32 now); // GameObject.cpp: false = skip the Lua binder update this pass
+    void binder_interval_schedule(u32 now); // GameObject.cpp: the next due call after a call at now
+
 public:
     // The phase mask of this binder update, 0 when the engine gate is off (see motivator_binder:update)
     u32 binder_phase_mask()
@@ -156,6 +164,12 @@ public:
         m_binder_gate.consumer = true;
         return m_binder_gate.mask;
     }
+    // L2 step D: interval_ms 0 = call the Lua binder on every update again (from the next update on); > 0 = at most
+    // once per interval_ms (clamped to kBinderIntervalMax). Only the Lua binder update is skipped: the rest of
+    // shedule_Update and the engine events of the binder pass (npc_on_update, actor_on_update) are not touched.
+    static constexpr u32 kBinderIntervalMax = 10000;
+    void set_binder_interval(u32 interval_ms);
+    u32 binder_interval() const { return m_binder_interval; }
 
 protected:
     bool m_bObjectRemoved;

@@ -597,6 +597,9 @@ public:
     void set_movement_selection_type(ESelectionType selection_type);
     u32 level_vertex_id() const;
     u32 binder_phase_mask() const; // stage D, W3-1: phases of the NPC binder update computed by the engine
+    // plan 57 L2 step D: the least time between two Lua binder updates of this object, ms (0 = every update)
+    void set_binder_interval(u32 interval_ms);
+    u32 binder_interval() const;
     u32 game_vertex_id() const;
     void add_animation(LPCSTR animation, bool hand_usage, bool use_movement_controller);
     void add_animation(LPCSTR animation, bool hand_usage, Fvector position, Fvector rotation, bool local_animation);

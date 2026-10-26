@@ -73,6 +73,13 @@ private:
     CMapActionPlanner* m_ActionPlanner;
     CUIFrameLineWnd* m_UIMainMapHeader;
     CUIMapLocationHint* m_map_location_hint;
+    // The map spot that owns the hint (ShowHintSpot) and the frame it last asked for it (CMapSpot::Update sends
+    // MAP_SHOW_HINT every frame while hovered): HideHintUnlessSpotHovered keeps the hint of a hovered spot. Compared
+    // as a pointer only, never dereferenced; dropped by HideCurHint
+    CUIWindow* m_hint_spot{};
+    u32 m_hint_spot_frame{};
+    // Device.dwTimeContinual of the last build of the hint text of m_hint_spot (SetInfoMSpot)
+    u32 m_hint_spot_time{};
     CMapLocation* m_cur_location;
     IMapDataSource* m_externalDataSource;
     u32 m_externalDataRevision;
@@ -203,6 +210,9 @@ public:
 
     void HideHint(CUIWindow* parent);
     void HideCurHint();
+    /** HideCurHint, unless the hint belongs to a map spot that asked for it this or the previous frame (the cursor is
+        still over it): for windows that hide the hint of their own items every frame (CUITaskWnd::Update) */
+    void HideHintUnlessSpotHovered();
     void Hint(const shared_str& text);
     virtual bool OnMouseAction(float x, float y, EUIMessages mouse_action);
     virtual bool OnKeyboardAction(int dik, EUIMessages keyboard_action);

@@ -6,6 +6,8 @@
 // Docs: wiki/doc/plugins/api/npc.md, wiki/doc/plugins/api/script.md
 
 #include "addon_api_common.h"
+#include "addon_api_alife_ext.h"
+#include "addon_binders.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
 // CScriptGameObject::object() is an inline defined in script_game_object_impl.h: without it the CMake
@@ -54,6 +56,8 @@ static_assert(GWP_DANGER_ENEMY_SOUND == CDangerObject::eDangerTypeEnemySound);
 #include "script_game_object.h"
 #include "stalker_planner.h"
 #include "xrScriptEngine/script_engine.hpp"
+#include "xr_time.h"
+#include "date_time.h"
 
 // The item states of gwp_api.h are CHUDState::EHudStates and CWeapon::EWeaponStates (item_state hands the engine
 // value on)
@@ -617,6 +621,80 @@ uint32_t GWP_CALL ApiAlifeSquadNpcCount(GwpObjectId squad)
     return group ? static_cast<uint32_t>(group->npc_count()) : 0;
 }
 
+// alife_squads_state: the fields of the accessors above for many squads in one pass (the level counters of gw_eoc,
+// plans/lua_to_cpp/52-gw-eoc-e44-squads-state.md). Per id one lookup in the object registry, one cast and, for the
+// Lua fields, one PushScriptSelf, instead of one lookup (and cast) per accessor. Every field is read exactly as its
+// accessor reads it: level_id - ApiAlifeObjectLevelId, npc_count - ApiAlifeSquadNpcCount, current_action -
+// ScriptSelfNumber of ApiAlifeSquadCurrentAction, registered - ScriptSelfTruthy of ApiAlifeSquadRegistered.
+constexpr uint32_t kSquadStateFields =
+    GWP_SQUAD_STATE_LEVEL | GWP_SQUAD_STATE_NPC_COUNT | GWP_SQUAD_STATE_ACTION | GWP_SQUAD_STATE_REGISTERED;
+
+GwpResult GWP_CALL ApiAlifeSquadsState(
+    const GwpObjectId* ids, uint32_t count, GwpSquadState* out, uint32_t stride, uint32_t fields)
+{
+    if (!CheckNpcCall("alife", "alife_squads_state"))
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (fields & ~kSquadStateFields)
+        return GWP_ERROR_NOT_SUPPORTED; // a field of a later version
+    if (count == 0)
+        return GWP_OK;
+    if (!ids || !out)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    // out[0].size is the sizeof(GwpSquadState) of the plugin: an older (shorter) struct gets only its own bytes
+    const uint32_t size = out->size;
+    if (size < offsetof(GwpSquadState, found) + sizeof(out->found) || stride < size)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!ai().get_alife()) // the condition of FindServerObject: the accessors answer "none" without ALife
+        return GWP_ERROR_INVALID_STATE;
+    const size_t filled = std::min<size_t>(size, sizeof(GwpSquadState));
+    const CGameGraph* graph = ai().get_game_graph();
+    const bool lua_fields = (fields & (GWP_SQUAD_STATE_ACTION | GWP_SQUAD_STATE_REGISTERED)) != 0;
+    auto* item = reinterpret_cast<u8*>(out);
+    for (uint32_t i = 0; i < count; ++i, item += stride)
+    {
+        GwpSquadState state{};
+        state.size = static_cast<uint32_t>(filled);
+        state.level_id = -1;
+        state.current_action = INT32_MIN; // nil
+        const GwpObjectId id = ids[i];
+        // true: no fatal error for a missing id
+        CSE_Abstract* object = id != GWP_INVALID_OBJECT_ID ? ai().alife().objects().object(id, true) : nullptr;
+        auto* group = smart_cast<CSE_ALifeOnlineOfflineGroup*>(object);
+        if (group)
+        {
+            state.found = 1;
+            // Lua errors on a bad vertex: answered as "no level", as alife_object_level_id does
+            if ((fields & GWP_SQUAD_STATE_LEVEL) && graph && group->m_tGraphID < graph->header().vertex_count())
+                state.level_id = static_cast<int32_t>(graph->vertex(group->m_tGraphID)->level_id());
+            if (fields & GWP_SQUAD_STATE_NPC_COUNT)
+                state.npc_count = static_cast<uint32_t>(group->npc_count());
+            lua_State* L = lua_fields ? PushScriptSelf(object) : nullptr;
+            if (L)
+            {
+                const int top = lua_gettop(L);
+                if (fields & GWP_SQUAD_STATE_ACTION)
+                {
+                    lua_pushstring(L, "current_action");
+                    lua_gettable(L, -2); // the dot of Lua: the class metatables are in the chain
+                    if (lua_isnumber(L, -1)) // anything not a number (nil included) is the nil of the accessor
+                        state.current_action = static_cast<int32_t>(lua_tonumber(L, -1));
+                    lua_settop(L, top);
+                }
+                if (fields & GWP_SQUAD_STATE_REGISTERED)
+                {
+                    lua_pushstring(L, "registered_in_simultaion"); // the spelling of the scripts
+                    lua_gettable(L, -2);
+                    state.registered = lua_toboolean(L, -1) ? 1 : 0;
+                    lua_settop(L, top);
+                }
+                lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+            }
+        }
+        std::memcpy(item, &state, filled);
+    }
+    return GWP_OK;
+}
+
 GwpObjectId GWP_CALL ApiAlifeObjectSmart(GwpObjectId id)
 {
     const auto* monster = smart_cast<const CSE_ALifeMonsterAbstract*>(FindServerObject(id, "alife_object_smart"));
@@ -789,6 +867,502 @@ int GWP_CALL ApiAlifeSmartGlobalPosition(GwpObjectId smart, float out_xyz[3])
     }
     // nil before the first update of the smart (and anything that is not a vector): 0, out_xyz untouched
     lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+    return result;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Plugin API (group alife): alife_field_get / alife_field_set - a whitelist of Lua fields of squads and smart terrains
+// (GWP_FIELD_*, plans/lua_to_cpp/31-gw-eoc-e36-spawn-api.md, 4.2). Read and written in place on the Lua instance of
+// the server object (PushScriptSelf), as the dot of Lua does; a write is a pure assignment, no Lua function of the mod
+// runs.
+// ---------------------------------------------------------------------------------------------
+
+enum class EAlifeFieldClass : u8
+{
+    Squad, // CSE_ALifeOnlineOfflineGroup (sim_squad_scripted, "ON_OFF_S")
+    Smart, // CSE_ALifeSmartZone (se_smart_terrain, "SMRTTRRN")
+};
+
+enum class EAlifeFieldType : u8
+{
+    String, // GWP_T_STRING
+    Time,   // a CTime (xrTime) of Lua, GWP_T_INT game ms
+    Number, // GWP_T_NUMBER
+    Id,     // an object id, GWP_T_SERVER_OBJECT
+    Action, // current_action: GWP_T_INT 0 or 1
+    Bool,   // GWP_T_BOOL
+    IdSet,  // {[id] = true}: GWP_T_ARRAY of GWP_T_SERVER_OBJECT
+};
+
+struct AlifeFieldSpec
+{
+    pcstr name; // the Lua field; nullptr: no field has this id
+    EAlifeFieldClass object_class;
+    EAlifeFieldType type;
+    bool writable;
+};
+
+// Indexed by GWP_FIELD_*. An id is never reused: a new field goes to the end. Writable are only the fields whose
+// assignment is the whole change in Lua too (the owner of a smart, the smart of a squad, the registration in the
+// simulation go through Lua functions with their bookkeeping: read-only here).
+constexpr AlifeFieldSpec kAlifeFields[] = {
+    { nullptr, EAlifeFieldClass::Squad, EAlifeFieldType::Number, false }, // 0: no field
+    { "scripted_target", EAlifeFieldClass::Squad, EAlifeFieldType::String, true }, // GWP_FIELD_SQUAD_SCRIPTED_TARGET
+    { "arrive_time", EAlifeFieldClass::Squad, EAlifeFieldType::Time, true }, // GWP_FIELD_SQUAD_ARRIVE_TIME
+    { "wait_time", EAlifeFieldClass::Squad, EAlifeFieldType::Number, true }, // GWP_FIELD_SQUAD_WAIT_TIME
+    { "assigned_target_id", EAlifeFieldClass::Squad, EAlifeFieldType::Id, true }, // GWP_FIELD_SQUAD_ASSIGNED_TARGET
+    { "combat_target_id", EAlifeFieldClass::Squad, EAlifeFieldType::Id, true }, // GWP_FIELD_SQUAD_COMBAT_TARGET
+    { "current_action", EAlifeFieldClass::Squad, EAlifeFieldType::Action, true }, // GWP_FIELD_SQUAD_CURRENT_ACTION
+    { "target_smarts", EAlifeFieldClass::Smart, EAlifeFieldType::IdSet, true }, // GWP_FIELD_SMART_TARGETS
+    { "max_population", EAlifeFieldClass::Smart, EAlifeFieldType::Number, false }, // GWP_FIELD_SMART_MAX_POPULATION
+    { "current_target_id", EAlifeFieldClass::Squad, EAlifeFieldType::Id, true }, // GWP_FIELD_SQUAD_CURRENT_TARGET
+    { "latest_target_id", EAlifeFieldClass::Squad, EAlifeFieldType::Id, true }, // GWP_FIELD_SQUAD_LATEST_TARGET
+    { "stay_time", EAlifeFieldClass::Squad, EAlifeFieldType::Time, true }, // GWP_FIELD_SQUAD_STAY_TIME
+    { "idle_time", EAlifeFieldClass::Squad, EAlifeFieldType::Number, false }, // GWP_FIELD_SQUAD_IDLE_TIME
+    { "__lock", EAlifeFieldClass::Squad, EAlifeFieldType::Bool, true }, // GWP_FIELD_SQUAD_LOCKED
+    { "registered_in_simultaion", EAlifeFieldClass::Squad, EAlifeFieldType::Bool, false }, // GWP_FIELD_SQUAD_REGISTERED
+    { "smart_id", EAlifeFieldClass::Squad, EAlifeFieldType::Id, false }, // GWP_FIELD_SQUAD_SMART
+    { "disabled", EAlifeFieldClass::Squad, EAlifeFieldType::Bool, false }, // GWP_FIELD_SQUAD_DISABLED
+    { "owning_faction", EAlifeFieldClass::Smart, EAlifeFieldType::String, false }, // GWP_FIELD_SMART_OWNER
+    { "disabled", EAlifeFieldClass::Smart, EAlifeFieldType::Bool, false }, // GWP_FIELD_SMART_DISABLED
+    { "rush_to_target", EAlifeFieldClass::Squad, EAlifeFieldType::Bool, true }, // GWP_FIELD_SQUAD_RUSH_TO_TARGET
+    { "protect", EAlifeFieldClass::Squad, EAlifeFieldType::Bool, true }, // GWP_FIELD_SQUAD_PROTECT
+    { "dist_to_actor", EAlifeFieldClass::Squad, EAlifeFieldType::Number, true }, // GWP_FIELD_SQUAD_DIST_TO_ACTOR
+    // GWP_FIELD_SQUAD_META_COMBAT_SMART
+    { "meta_combat_smart_id", EAlifeFieldClass::Squad, EAlifeFieldType::Id, true },
+};
+constexpr u32 kAlifeFieldCount = static_cast<u32>(sizeof(kAlifeFields) / sizeof(kAlifeFields[0]));
+static_assert(kAlifeFieldCount == GWP_FIELD_SQUAD_META_COMBAT_SMART + 1,
+    "every GWP_FIELD_* has its line in kAlifeFields");
+static_assert(GWP_FIELD_SQUAD_SCRIPTED_TARGET == 1 && GWP_FIELD_SMART_TARGETS == 7 && GWP_FIELD_SQUAD_LOCKED == 13 &&
+        GWP_FIELD_SQUAD_RUSH_TO_TARGET == 19,
+    "kAlifeFields is indexed by the GWP_FIELD_* ids");
+
+// The most items a GWP_T_ARRAY of the API carries (gwp_api.h, "Arrays")
+constexpr u32 kAlifeFieldMaxItems = 4096;
+// The longest string a plugin passes (gwp_api.h: a single string is at most 1 MiB)
+constexpr u32 kAlifeFieldMaxText = 1048576;
+
+const AlifeFieldSpec* AlifeFieldFind(uint32_t field)
+{
+    return field < kAlifeFieldCount && kAlifeFields[field].name ? &kAlifeFields[field] : nullptr;
+}
+
+bool AlifeFieldHasGame() { return ai().get_alife() && ai().alife().initialized(); }
+
+// The object of a field: GWP_OK and the object, NOT_FOUND (no such id in ALife) or INVALID_ARGUMENT (another class)
+GwpResult AlifeFieldObject(GwpObjectId id, const AlifeFieldSpec& spec, CSE_Abstract*& object)
+{
+    object = nullptr;
+    if (id == GWP_INVALID_OBJECT_ID)
+        return GWP_ERROR_NOT_FOUND;
+    CSE_Abstract* found = ai().alife().objects().object(id, true); // true: no fatal error for a missing id
+    if (!found)
+        return GWP_ERROR_NOT_FOUND;
+    const bool of_class = spec.object_class == EAlifeFieldClass::Squad ?
+        smart_cast<CSE_ALifeOnlineOfflineGroup*>(found) != nullptr :
+        found->cast_smart_zone() != nullptr;
+    if (!of_class)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    object = found;
+    return GWP_OK;
+}
+
+// Storage of the answers of alife_field_get that point to memory: valid until the next call (main thread only)
+xr_string& AlifeFieldTextBuffer()
+{
+    static xr_string text;
+    return text;
+}
+
+xr_vector<GwpValue>& AlifeFieldItemBuffer()
+{
+    static xr_vector<GwpValue> items;
+    return items;
+}
+
+// An object id stored in Lua as a number: 0 (the actor) .. 65534, integral
+bool AlifeFieldLuaId(lua_State* L, int index, GwpObjectId& out)
+{
+    if (lua_type(L, index) != LUA_TNUMBER) // lua_type: a string must not be converted in place
+        return false;
+    const double id = lua_tonumber(L, index);
+    if (!(id >= 0. && id < static_cast<double>(GWP_INVALID_OBJECT_ID)) || id != std::floor(id))
+        return false;
+    out = static_cast<GwpObjectId>(id);
+    return true;
+}
+
+// The Lua value at the top of the stack as the type of the field. false: a value of another type (nil is not one,
+// it is GWP_T_NIL). Leaves the stack as it is.
+bool AlifeFieldRead(lua_State* L, const AlifeFieldSpec& spec, GwpValue& out)
+{
+    out = {};
+    out.type = GWP_T_NIL;
+    const int type = lua_type(L, -1);
+    if (type == LUA_TNIL)
+        return true;
+    switch (spec.type)
+    {
+    case EAlifeFieldType::String:
+    {
+        if (type != LUA_TSTRING)
+            return false;
+        size_t size = 0;
+        const char* text = lua_tolstring(L, -1, &size);
+        xr_string& buffer = AlifeFieldTextBuffer();
+        buffer.assign(text, size); // the Lua string may go with the next write of the field: a copy of the engine
+        out.type = GWP_T_STRING;
+        out.u.s.ptr = buffer.c_str();
+        out.u.s.len = static_cast<uint32_t>(size);
+        return true;
+    }
+    case EAlifeFieldType::Time:
+    {
+        if (type != LUA_TUSERDATA)
+            return false;
+        const luabind::object value(luabind::from_stack(L, -1));
+        const auto* game_time =
+            luabind::object_cast_nothrow<const xrTime*>(value, static_cast<const xrTime*>(nullptr));
+        if (!game_time)
+            return false;
+        // xrTime keeps its game ms private: split into the date and back (generate_time and split_time are exact
+        // inverses, the debug build of date_time.cpp checks it) - the value of game_time_ms for the same moment
+        xrTime copy(*game_time);
+        u32 years = 0, months = 0, days = 0, hours = 0, minutes = 0, seconds = 0, milliseconds = 0;
+        copy.get(years, months, days, hours, minutes, seconds, milliseconds);
+        out.type = GWP_T_INT;
+        out.u.i = static_cast<int64_t>(generate_time(years, months, days, hours, minutes, seconds, milliseconds));
+        return true;
+    }
+    case EAlifeFieldType::Number:
+        if (type != LUA_TNUMBER)
+            return false;
+        out.type = GWP_T_NUMBER;
+        out.u.n = lua_tonumber(L, -1);
+        return true;
+    case EAlifeFieldType::Id:
+    {
+        GwpObjectId id = GWP_INVALID_OBJECT_ID;
+        if (!AlifeFieldLuaId(L, -1, id))
+            return false;
+        out.type = GWP_T_SERVER_OBJECT;
+        out.u.id = id;
+        return true;
+    }
+    case EAlifeFieldType::Action:
+    {
+        if (type != LUA_TNUMBER)
+            return false;
+        const double action = lua_tonumber(L, -1);
+        if (action != std::floor(action) || std::fabs(action) > 2147483647.)
+            return false;
+        out.type = GWP_T_INT;
+        out.u.i = static_cast<int64_t>(action);
+        return true;
+    }
+    case EAlifeFieldType::Bool:
+        if (type != LUA_TBOOLEAN)
+            return false;
+        out.type = GWP_T_BOOL;
+        out.u.b = lua_toboolean(L, -1) ? 1 : 0;
+        return true;
+    case EAlifeFieldType::IdSet:
+    {
+        if (type != LUA_TTABLE)
+            return false;
+        // As alife_smart_targets: the keys that are object ids with a value true for Lua, in ascending order
+        static xr_vector<GwpObjectId> ids;
+        ids.clear();
+        lua_pushnil(L); // the first key of lua_next
+        while (lua_next(L, -2) != 0)
+        {
+            GwpObjectId id = GWP_INVALID_OBJECT_ID;
+            if (lua_toboolean(L, -1) && AlifeFieldLuaId(L, -2, id))
+                ids.push_back(id);
+            lua_pop(L, 1); // the value; the key stays for the next lua_next
+        }
+        std::sort(ids.begin(), ids.end());
+        if (ids.size() > kAlifeFieldMaxItems)
+            ids.resize(kAlifeFieldMaxItems);
+        xr_vector<GwpValue>& items = AlifeFieldItemBuffer();
+        items.clear();
+        for (const GwpObjectId id : ids)
+        {
+            GwpValue item{};
+            item.type = GWP_T_SERVER_OBJECT;
+            item.u.id = id;
+            items.push_back(item);
+        }
+        out.type = GWP_T_ARRAY;
+        out.u.a.items = items.empty() ? nullptr : items.data();
+        out.u.a.count = static_cast<uint32_t>(items.size());
+        return true;
+    }
+    }
+    return false;
+}
+
+GwpResult GWP_CALL ApiAlifeFieldGet(GwpObjectId id, uint32_t field, GwpValue* out)
+{
+    if (out)
+    {
+        *out = {};
+        out->type = GWP_T_NIL;
+    }
+    if (!CheckNpcCall("alife", "alife_field_get"))
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!out)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!AlifeFieldHasGame())
+        return GWP_ERROR_INVALID_STATE;
+    const AlifeFieldSpec* spec = AlifeFieldFind(field);
+    if (!spec)
+        return GWP_ERROR_NOT_SUPPORTED; // a field id of a later version
+    CSE_Abstract* object = nullptr;
+    const GwpResult found = AlifeFieldObject(id, *spec, object);
+    if (found != GWP_OK)
+        return found;
+    lua_State* L = PushScriptSelf(object);
+    if (!L)
+        return GWP_ERROR_INVALID_ARGUMENT; // a pure C++ class: no Lua fields
+    const int top = lua_gettop(L);
+    lua_pushstring(L, spec->name);
+    lua_gettable(L, -2); // the dot of Lua: the class metatables are in the chain
+    GwpValue value{};
+    if (!AlifeFieldRead(L, *spec, value))
+    {
+        static bool logged[kAlifeFieldCount] = {};
+        if (!logged[field])
+        {
+            logged[field] = true;
+            Msg("! [alife] alife_field_get: field %u (%s) of object %u holds a Lua %s, answered as nil (logged once)",
+                field, spec->name, static_cast<u32>(id), lua_typename(L, lua_type(L, -1)));
+        }
+        value = {};
+        value.type = GWP_T_NIL;
+    }
+    lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+    *out = value;
+    return GWP_OK;
+}
+
+// An id argument of a write: an object in ALife
+bool AlifeFieldIdValue(const GwpValue& value, GwpObjectId& out)
+{
+    if (value.type != GWP_T_SERVER_OBJECT && value.type != GWP_T_OBJECT)
+        return false;
+    out = value.u.id;
+    return out != GWP_INVALID_OBJECT_ID && ai().alife().objects().object(out, true) != nullptr;
+}
+
+// *value against the field: nullptr when it fits, else why it does not (the code is GWP_ERROR_INVALID_ARGUMENT)
+pcstr AlifeFieldCheckValue(const AlifeFieldSpec& spec, const GwpValue& value)
+{
+    if (value.reserved != 0)
+        return "a non-zero reserved field of the value";
+    if (value.type == GWP_T_NIL)
+        return nullptr;
+    switch (spec.type)
+    {
+    case EAlifeFieldType::String:
+        if (value.type != GWP_T_STRING)
+            return "the field takes GWP_T_STRING";
+        if (!value.u.s.ptr && value.u.s.len)
+            return "a string without a pointer";
+        return value.u.s.len > kAlifeFieldMaxText ? "a string over 1 MiB" : nullptr;
+    case EAlifeFieldType::Time:
+        return value.type == GWP_T_INT && value.u.i >= 0 ? nullptr : "the field takes GWP_T_INT game ms >= 0";
+    case EAlifeFieldType::Number:
+        if (value.type == GWP_T_INT)
+            return nullptr;
+        return value.type == GWP_T_NUMBER && std::isfinite(value.u.n) ? nullptr :
+                                                                          "the field takes a finite GWP_T_NUMBER";
+    case EAlifeFieldType::Id:
+    {
+        GwpObjectId id = GWP_INVALID_OBJECT_ID;
+        return AlifeFieldIdValue(value, id) ? nullptr : "the field takes the id of an object in ALife";
+    }
+    case EAlifeFieldType::Action:
+        return value.type == GWP_T_INT && (value.u.i == 0 || value.u.i == 1) ? nullptr :
+                                                                              "the field takes GWP_T_INT 0 or 1";
+    case EAlifeFieldType::Bool: return value.type == GWP_T_BOOL ? nullptr : "the field takes GWP_T_BOOL";
+    case EAlifeFieldType::IdSet:
+    {
+        if (value.type != GWP_T_ARRAY)
+            return "the field takes GWP_T_ARRAY";
+        if (value.u.a.count > kAlifeFieldMaxItems)
+            return "an array over 4096 items";
+        if (value.u.a.count && !value.u.a.items)
+            return "an array without items";
+        for (uint32_t i = 0; i < value.u.a.count; ++i)
+        {
+            const GwpValue& item = value.u.a.items[i];
+            GwpObjectId id = GWP_INVALID_OBJECT_ID;
+            if (item.reserved != 0 || !AlifeFieldIdValue(item, id) ||
+                !ai().alife().objects().object(id, true)->cast_smart_zone())
+                return "an item that is not the id of a smart terrain in ALife";
+        }
+        return nullptr;
+    }
+    }
+    return "an unknown field type";
+}
+
+// (self, key, value) -> self[key] = value, the dot of Lua (under lua_pcall: a metamethod may raise an error)
+int AlifeFieldAssignLua(lua_State* L)
+{
+    lua_settable(L, 1);
+    return 0;
+}
+
+// Pushes the Lua form of a checked *value (AlifeFieldCheckValue). May throw for a CTime (luabind).
+void AlifeFieldPushValue(lua_State* L, const AlifeFieldSpec& spec, const GwpValue& value)
+{
+    if (value.type == GWP_T_NIL)
+    {
+        lua_pushnil(L);
+        return;
+    }
+    switch (spec.type)
+    {
+    case EAlifeFieldType::String:
+        if (!value.u.s.ptr) // ptr NULL and len 0: nil in Lua (gwp_api.h, GwpValue)
+            lua_pushnil(L);
+        else
+            lua_pushlstring(L, value.u.s.ptr, value.u.s.len);
+        return;
+    case EAlifeFieldType::Time:
+    {
+        // A new CTime, as game.get_game_time() gives one: the scripts keep and compare these objects
+        const luabind::object game_time(L, xrTime(static_cast<ALife::_TIME_ID>(value.u.i)));
+        game_time.push(L);
+        return;
+    }
+    case EAlifeFieldType::Number:
+        lua_pushnumber(L, value.type == GWP_T_INT ? static_cast<lua_Number>(value.u.i) : value.u.n);
+        return;
+    case EAlifeFieldType::Id: lua_pushnumber(L, static_cast<lua_Number>(value.u.id)); return;
+    case EAlifeFieldType::Action: lua_pushnumber(L, static_cast<lua_Number>(value.u.i)); return;
+    case EAlifeFieldType::Bool: lua_pushboolean(L, value.u.b ? 1 : 0); return;
+    case EAlifeFieldType::IdSet: break; // filled in place by AlifeFieldWriteSet
+    }
+    lua_pushnil(L);
+}
+
+// target_smarts: the table the field holds gets exactly the keys of *value ({[id] = true}); other Lua code may keep
+// a reference to it, so it is changed in place (a plain table: raw access). Without a table a new one is assigned.
+// The self of the instance is at self_index. GWP_OK or GWP_ERROR_CRASHED (the assignment of a new table failed).
+GwpResult AlifeFieldWriteSet(lua_State* L, int self_index, const AlifeFieldSpec& spec, const GwpValue& value,
+    xr_string& error)
+{
+    lua_pushstring(L, spec.name);
+    lua_gettable(L, self_index);
+    const bool existing = lua_istable(L, -1);
+    if (!existing)
+    {
+        lua_pop(L, 1);
+        lua_newtable(L);
+    }
+    const int table = lua_gettop(L);
+    // Clearing an existing key during lua_next is allowed (assigning nil to a field that exists)
+    lua_pushnil(L);
+    while (lua_next(L, table) != 0)
+    {
+        lua_pop(L, 1); // the value
+        lua_pushvalue(L, -1); // the key again: one for rawset, one for the next lua_next
+        lua_pushnil(L);
+        lua_rawset(L, table);
+    }
+    const uint32_t count = value.type == GWP_T_ARRAY ? value.u.a.count : 0;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        lua_pushnumber(L, static_cast<lua_Number>(value.u.a.items[i].u.id));
+        lua_pushboolean(L, 1);
+        lua_rawset(L, table);
+    }
+    if (existing)
+        return GWP_OK;
+    lua_pushcfunction(L, &AlifeFieldAssignLua);
+    lua_pushvalue(L, self_index);
+    lua_pushstring(L, spec.name);
+    lua_pushvalue(L, table);
+    if (lua_pcall(L, 3, 0, 0) == 0)
+        return GWP_OK;
+    error = lua_isstring(L, -1) ? lua_tostring(L, -1) : "error without a message";
+    return GWP_ERROR_CRASHED;
+}
+
+GwpResult GWP_CALL ApiAlifeFieldSet(const GwpPlugin* self, GwpObjectId id, uint32_t field, const GwpValue* value)
+{
+    constexpr pcstr function = "alife_field_set";
+    if (!api::CheckPluginMutation(self, "alife", function))
+        return api::PluginCallRefused(self);
+    if (!value)
+        return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "no value");
+    // The write gate of the ALife functions (AlifeExtWriteGate): a game, not inside a registry event or a save
+    if (!AlifeFieldHasGame())
+        return GWP_ERROR_INVALID_STATE;
+    if (alife_ext::InRegistryEvent())
+    {
+        Msg("! [plugin:%s] %s: refused inside server_object_on_register / _on_unregister", PluginAddonId(self),
+            function);
+        return GWP_ERROR_INVALID_STATE;
+    }
+    if (binders::IsSaving())
+    {
+        Msg("! [plugin:%s] %s: refused inside binder on_save while the game is being saved", PluginAddonId(self),
+            function);
+        return GWP_ERROR_INVALID_STATE;
+    }
+    const AlifeFieldSpec* spec = AlifeFieldFind(field);
+    if (!spec)
+        return api::PluginRefusal(self, function, GWP_ERROR_NOT_SUPPORTED, "an unknown field id");
+    if (!spec->writable)
+        return api::PluginRefusal(self, function, GWP_ERROR_ACCESS_DENIED, "a read-only field");
+    CSE_Abstract* object = nullptr;
+    const GwpResult found = AlifeFieldObject(id, *spec, object);
+    if (found != GWP_OK)
+        return api::PluginRefusal(self, function, found, "no such object, or an object of another class");
+    if (const pcstr why = AlifeFieldCheckValue(*spec, *value))
+        return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, why);
+    lua_State* L = PushScriptSelf(object);
+    if (!L)
+        return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "a pure C++ class: no Lua fields");
+    const int top = lua_gettop(L);
+    GwpResult result = GWP_OK;
+    xr_string error;
+    try
+    {
+        if (spec->type == EAlifeFieldType::IdSet)
+            result = AlifeFieldWriteSet(L, top, *spec, *value, error);
+        else
+        {
+            lua_pushcfunction(L, &AlifeFieldAssignLua);
+            lua_pushvalue(L, top); // the self
+            lua_pushstring(L, spec->name);
+            AlifeFieldPushValue(L, *spec, *value);
+            if (lua_pcall(L, 3, 0, 0) != 0)
+            {
+                error = lua_isstring(L, -1) ? lua_tostring(L, -1) : "error without a message";
+                result = GWP_ERROR_CRASHED;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        error = e.what();
+        result = GWP_ERROR_CRASHED;
+    }
+    catch (...)
+    {
+        error = "an exception without a message";
+        result = GWP_ERROR_CRASHED;
+    }
+    lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+    if (result != GWP_OK)
+        Msg("! [plugin:%s] %s: field %u (%s) of object %u: %s", PluginAddonId(self), function, field, spec->name,
+            static_cast<u32>(id), error.c_str());
     return result;
 }
 
@@ -1139,6 +1713,9 @@ void FillNpcApi(GwpEngineApi& api)
     api.alife_smart_owner = &ApiAlifeSmartOwner;
     api.alife_smart_targets = &ApiAlifeSmartTargets;
     api.alife_smart_global_position = &ApiAlifeSmartGlobalPosition;
+    api.alife_field_get = &ApiAlifeFieldGet;
+    api.alife_field_set = &ApiAlifeFieldSet;
+    api.alife_squads_state = &ApiAlifeSquadsState;
     api.npc_critically_wounded = &ApiNpcCriticallyWounded;
     api.npc_in_smart_cover = &ApiNpcInSmartCover;
     api.character_is_talking = &ApiCharacterIsTalking;

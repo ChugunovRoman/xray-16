@@ -807,6 +807,78 @@ typedef struct GwpAlifeFilter
                                  matter); NULL = any */
 } GwpAlifeFilter;
 
+/* Lua fields of the server objects of the simulation (alife_field_get / alife_field_set), a whitelist. The squads
+   (sim_squad_scripted, class id "ON_OFF_S") and the smart terrains (se_smart_terrain, "SMRTTRRN") of the mod are
+   script classes and keep their state in Lua fields of the server object. A field id names the Lua field, its type
+   and its class; ids are never reused, a later version only adds them. r: readable, rw: writable too. A write is a
+   pure assignment (`squad.field = value` of Lua): no Lua function runs and nothing else changes, the scripts see the
+   value at their next read. A field whose change has side effects (the owner of a smart, the smart of a squad, the
+   registration in the simulation) is read-only here: the Lua functions of the mod change it (script_call, the group
+   squads). Times are game time in ms, the time base of game_time_ms (a CTime in Lua). */
+#define GWP_FIELD_SQUAD_SCRIPTED_TARGET 1u /* scripted_target: GWP_T_STRING ("actor", a smart name, ""); rw */
+#define GWP_FIELD_SQUAD_ARRIVE_TIME 2u     /* arrive_time: GWP_T_INT, game ms (CTime); rw */
+#define GWP_FIELD_SQUAD_WAIT_TIME 3u       /* wait_time: GWP_T_NUMBER, game seconds; rw */
+#define GWP_FIELD_SQUAD_ASSIGNED_TARGET 4u /* assigned_target_id: GWP_T_SERVER_OBJECT; rw */
+#define GWP_FIELD_SQUAD_COMBAT_TARGET 5u   /* combat_target_id: GWP_T_SERVER_OBJECT; rw */
+#define GWP_FIELD_SQUAD_CURRENT_ACTION 6u  /* current_action: GWP_T_INT, 0 (goes to its target) or 1 (stays); rw */
+#define GWP_FIELD_SMART_TARGETS 7u         /* target_smarts: GWP_T_ARRAY of GWP_T_SERVER_OBJECT (the keys of
+                                              {[smart id] = true}, ascending); rw: the table gets exactly these keys */
+#define GWP_FIELD_SMART_MAX_POPULATION 8u  /* max_population: GWP_T_NUMBER (squads); r */
+#define GWP_FIELD_SQUAD_CURRENT_TARGET 9u  /* current_target_id: GWP_T_SERVER_OBJECT; rw */
+#define GWP_FIELD_SQUAD_LATEST_TARGET 10u  /* latest_target_id: GWP_T_SERVER_OBJECT; rw */
+#define GWP_FIELD_SQUAD_STAY_TIME 11u      /* stay_time: GWP_T_INT, game ms (CTime); rw */
+#define GWP_FIELD_SQUAD_IDLE_TIME 12u      /* idle_time: GWP_T_NUMBER, game seconds (from the ltx); r */
+#define GWP_FIELD_SQUAD_LOCKED 13u         /* __lock: GWP_T_BOOL (generic_update looks for no new target); rw */
+#define GWP_FIELD_SQUAD_REGISTERED 14u     /* registered_in_simultaion: GWP_T_BOOL; r */
+#define GWP_FIELD_SQUAD_SMART 15u          /* smart_id: GWP_T_SERVER_OBJECT; r */
+#define GWP_FIELD_SQUAD_DISABLED 16u       /* disabled: GWP_T_BOOL; r */
+#define GWP_FIELD_SMART_OWNER 17u          /* owning_faction: GWP_T_STRING ("none": no owner); r */
+#define GWP_FIELD_SMART_DISABLED 18u       /* disabled: GWP_T_BOOL; r */
+#define GWP_FIELD_SQUAD_RUSH_TO_TARGET 19u /* rush_to_target: GWP_T_BOOL (the members run to the target); rw */
+#define GWP_FIELD_SQUAD_PROTECT 20u        /* protect: GWP_T_BOOL (sent to protect its target; nil on arrival); rw */
+#define GWP_FIELD_SQUAD_DIST_TO_ACTOR 21u  /* dist_to_actor: GWP_T_NUMBER, meters (the scripts refresh it); rw */
+#define GWP_FIELD_SQUAD_META_COMBAT_SMART 22u /* meta_combat_smart_id: GWP_T_SERVER_OBJECT (the smart of its meta
+                                                 combat, sim_offline_control); rw */
+
+/* The offline update of squads and smart terrains by a plugin (alife_update_hook_register). Modes: */
+#define GWP_UPDATE_LUA 0u    /* the Lua update of the class, as without the plugin; fn is not called */
+#define GWP_UPDATE_NATIVE 1u /* fn decides: GWP_UPDATE_PHASE_QUERY, then on GWP_UPDATE_HANDLE the C++ update of the
+                                class and GWP_UPDATE_PHASE_RUN instead of the Lua update; on GWP_UPDATE_FALLBACK the
+                                Lua update as usual */
+#define GWP_UPDATE_SHADOW 2u /* the Lua update runs, then fn with GWP_UPDATE_PHASE_SHADOW (it only observes) */
+/* The phase argument of GwpAlifeUpdateFn. */
+#define GWP_UPDATE_PHASE_QUERY 0u  /* take this update? GWP_UPDATE_HANDLE or GWP_UPDATE_FALLBACK, change nothing */
+#define GWP_UPDATE_PHASE_RUN 1u    /* the plugin took the update: the C++ update of the class has run, do the work */
+#define GWP_UPDATE_PHASE_SHADOW 2u /* the Lua update has run (GWP_UPDATE_SHADOW): look, do not change the world */
+/* Answers to GWP_UPDATE_PHASE_QUERY (the other phases ignore the answer). Only GWP_UPDATE_HANDLE takes the update:
+   any other value (0, garbage, a crash in fn) means GWP_UPDATE_FALLBACK. Compare with the names, not 0 / 1. */
+#define GWP_UPDATE_FALLBACK 0
+#define GWP_UPDATE_HANDLE 1
+typedef int(GWP_CALL* GwpAlifeUpdateFn)(void* user, GwpObjectId id, uint32_t phase);
+typedef uint32_t GwpUpdateHookId; /* 0 = invalid */
+#define GWP_INVALID_UPDATE_HOOK_ID ((GwpUpdateHookId)0u)
+
+/* One squad of alife_squads_state: several squad fields of the simulation read in one pass. Each field is the answer
+   of its own accessor for that squad (named next to it), or its "none" when the field was not asked for, the id is
+   gone or is not a squad. Fields may be appended in later versions: the caller sets size in the first item, the
+   engine fills min(size, its own sizeof) bytes of every item and writes that into size of every item. */
+typedef struct GwpSquadState
+{
+    uint32_t size;          /* in (first item): sizeof(GwpSquadState) of the plugin; out: the bytes the engine filled */
+    uint32_t found;         /* 1 - a squad in ALife (class "ON_OFF_S"); 0 - gone or not a squad: the rest is "none" */
+    int32_t level_id;       /* GWP_SQUAD_STATE_LEVEL: alife_object_level_id; -1 = none (no game vertex either) */
+    uint32_t npc_count;     /* GWP_SQUAD_STATE_NPC_COUNT: alife_squad_npc_count; 0 = none */
+    int32_t current_action; /* GWP_SQUAD_STATE_ACTION: alife_squad_current_action; INT32_MIN = nil or none */
+    int32_t registered;     /* GWP_SQUAD_STATE_REGISTERED: alife_squad_registered (1 / 0); 0 = none */
+} GwpSquadState;
+
+/* The fields alife_squads_state reads (the `fields` mask). The Lua ones (ACTION, REGISTERED) cost one cast to the Lua
+   object of the squad and a table read each; LEVEL and NPC_COUNT need no Lua. */
+#define GWP_SQUAD_STATE_LEVEL 0x1u
+#define GWP_SQUAD_STATE_NPC_COUNT 0x2u
+#define GWP_SQUAD_STATE_ACTION 0x4u
+#define GWP_SQUAD_STATE_REGISTERED 0x8u
+
 /* ------------------------------------------------------------------------- */
 /* Characters, inventories, objects (groups character, items, object_ext)    */
 /* ------------------------------------------------------------------------- */
@@ -2519,6 +2591,58 @@ typedef struct GwpEngineApi
        "ON_OFF_S") or its class is pure C++.
        @group alife @thread main */
     int(GWP_CALL* alife_squad_registered)(GwpObjectId squad);
+
+    /* Whitelisted Lua fields of squads and smart terrains (GWP_FIELD_*, wiki/doc/plugins/api/alife.md), read and
+       written on demand, as fresh as the dot in Lua (around a microsecond), online or offline.
+       alife_field_get: the value into *out. GWP_T_NIL for nil. A Lua value of another type than the field has is
+       answered as GWP_T_NIL too (logged once per field). A string and the items of an array live until the next
+       alife_field_get call: copy them to keep.
+       alife_field_set: only the fields marked rw. *value must have the type of the field (a time GWP_T_INT >= 0, a
+       number GWP_T_NUMBER or GWP_T_INT, an id GWP_T_SERVER_OBJECT or GWP_T_OBJECT of an object in ALife, the smarts of
+       GWP_FIELD_SMART_TARGETS smart terrains; current_action 0 or 1); GWP_T_NIL writes nil (GWP_FIELD_SMART_TARGETS:
+       empties the table). A pure assignment: no Lua function runs, see GWP_FIELD_*.
+       Codes: GWP_ERROR_NOT_SUPPORTED an unknown field id (one of a later version); GWP_ERROR_ACCESS_DENIED a write of
+       a read-only field; GWP_ERROR_NOT_FOUND no such object in ALife; GWP_ERROR_INVALID_ARGUMENT an object of another
+       class (or of a pure C++ class: no Lua fields), out or value NULL, a value of a wrong type or range, a non-zero
+       reserved; GWP_ERROR_INVALID_STATE no game, and for writes the write gate of the ALife functions (inside
+       server_object_on_register / _on_unregister, binder on_save during a save); GWP_ERROR_CRASHED the Lua
+       assignment failed (logged).
+       @group alife @thread main */
+    GwpResult(GWP_CALL* alife_field_get)(GwpObjectId id, uint32_t field, GwpValue* out);
+    GwpResult(GWP_CALL* alife_field_set)(const GwpPlugin* self, GwpObjectId id, uint32_t field, const GwpValue* value);
+
+    /* The offline update of the ALife scheduler (CALifeScheduleRegistry) for every object of class_id: "ON_OFF_S"
+       (squads) or "SMRTTRRN" (smart terrains); other classes are refused. Online objects are updated by their Lua
+       binders and are not covered. mode GWP_UPDATE_*: LUA - as without the hook; NATIVE - fn(QUERY) is asked first,
+       GWP_UPDATE_HANDLE runs the C++ update of the class (the brain and position of a squad; nothing for a smart)
+       and then fn(RUN), the Lua update of the class is skipped; any other answer runs the Lua update as usual
+       (a squad without members always gets the Lua update: Lua releases it). SHADOW - the Lua update, then
+       fn(SHADOW). fn runs inside the ALife pass and its frame budget (the time counts as the Lua update did).
+       One hook per class (any plugin): a second one is refused. A crash in fn stops the plugin as any crash does:
+       its hooks go, the objects get the Lua update again (the update of the crash: the Lua one after a crash in
+       QUERY, none after one in RUN). register: GWP_INVALID_UPDATE_HOOK_ID for a NULL self or fn, another class, a
+       taken class, an unknown mode or a flag bit (GWP_MODE_FLAGS_MASK). set_mode / unregister:
+       GWP_ERROR_NOT_FOUND no such hook, GWP_ERROR_ACCESS_DENIED a hook of another plugin, GWP_ERROR_NOT_SUPPORTED
+       an unknown mode or a flag bit. Both may be called from fn itself: a new mode applies from the next update,
+       a hook unregistered in QUERY is not called again (the object gets the Lua update).
+       @group alife @thread main */
+    GwpUpdateHookId(GWP_CALL* alife_update_hook_register)(const GwpPlugin* self, const char* class_id,
+        GwpAlifeUpdateFn fn, void* user, uint32_t mode);
+    GwpResult(GWP_CALL* alife_update_hook_set_mode)(const GwpPlugin* self, GwpUpdateHookId hook, uint32_t mode);
+    GwpResult(GWP_CALL* alife_update_hook_unregister)(const GwpPlugin* self, GwpUpdateHookId hook);
+
+    /* Several squad fields for many squads in one call (GwpSquadState, wiki/doc/plugins/api/alife.md): per id one
+       lookup in the object registry, one cast and, for the Lua fields, one cast to the Lua object - instead of one of
+       each per accessor. out[i] gets the state of ids[i]; the items are `stride` bytes apart (stride >= out[0].size,
+       sizeof(GwpSquadState) of the plugin for a plain array). `fields`: GWP_SQUAD_STATE_* bits; a field not asked
+       for holds its "none". An id that is gone or not a squad: found = 0 and every field "none", the call goes on.
+       Codes: GWP_OK - all `count` items filled (count 0: nothing to do); GWP_ERROR_NOT_SUPPORTED - an unknown bit in
+       fields (a field of a later version); GWP_ERROR_INVALID_ARGUMENT - ids or out NULL, out[0].size below the size
+       and found fields, stride below out[0].size; GWP_ERROR_INVALID_STATE - no ALife; GWP_ERROR_NOT_MAIN_THREAD.
+       Nothing is written on an error.
+       @group alife @thread main */
+    GwpResult(GWP_CALL* alife_squads_state)(const GwpObjectId* ids, uint32_t count, GwpSquadState* out,
+        uint32_t stride, uint32_t fields);
 } GwpEngineApi;
 
 /* True when the engine table provides the member `field` (minor compatibility check). */
@@ -2573,6 +2697,7 @@ GWP_STATIC_ASSERT(offsetof(GwpActionVTable, initialize) == 8, "GwpActionVTable: 
 GWP_STATIC_ASSERT(offsetof(GwpDanger, type) == 4, "GwpDanger: size first");
 GWP_STATIC_ASSERT(offsetof(GwpSightParams, sight_type) == 4, "GwpSightParams: size first");
 GWP_STATIC_ASSERT(sizeof(GwpBinderUpdate) == 8, "GwpBinderUpdate: id, reserved, dt_ms");
+GWP_STATIC_ASSERT(offsetof(GwpSquadState, level_id) == 8, "GwpSquadState: size and found first");
 #if defined(_WIN64) || defined(__LP64__)
 GWP_STATIC_ASSERT(sizeof(GwpValue) == 24, "GwpValue: 8 bytes of header and a 16-byte union");
 GWP_STATIC_ASSERT(sizeof(GwpEvent) == 40, "GwpEvent: size, flags, id, argc, name, argv, result");

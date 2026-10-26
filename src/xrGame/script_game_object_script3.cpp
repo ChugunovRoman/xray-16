@@ -222,6 +222,8 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
 
         .def("is_talking", &CScriptGameObject::IsTalking)
         .def("binder_phase_mask", &CScriptGameObject::binder_phase_mask)
+        .def("set_binder_interval", &CScriptGameObject::set_binder_interval)
+        .def("binder_interval", &CScriptGameObject::binder_interval)
         .def("stop_talk", &CScriptGameObject::StopTalk)
         .def("enable_talk", &CScriptGameObject::EnableTalk)
         .def("disable_talk", &CScriptGameObject::DisableTalk)

@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 
 #include "addon_callbacks.h"
+#include "addon_alife_hooks.h"
 #include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
@@ -330,15 +331,17 @@ void PrintList()
     const u32 count = g_enemy_count + g_patrol_count;
     Msg("- [callbacks] %u engine callback(s): %u enemy filter(s), %u patrol extrapolate", count, g_enemy_count,
         g_patrol_count);
-    if (!g_callbacks)
-        return;
-    for (const Callback& callback : *g_callbacks)
+    if (g_callbacks)
     {
-        if (callback.id == GWP_INVALID_CALLBACK_ID)
-            continue;
-        Msg("-   #%-4u %-24s %-18s calls=%llu vetoes=%llu", callback.id, PluginAddonId(callback.plugin),
-            callback.kind == EKind::Enemy ? "enemy_filter" : "patrol_extrapolate",
-            static_cast<unsigned long long>(callback.calls), static_cast<unsigned long long>(callback.vetoes));
+        for (const Callback& callback : *g_callbacks)
+        {
+            if (callback.id == GWP_INVALID_CALLBACK_ID)
+                continue;
+            Msg("-   #%-4u %-24s %-18s calls=%llu vetoes=%llu", callback.id, PluginAddonId(callback.plugin),
+                callback.kind == EKind::Enemy ? "enemy_filter" : "patrol_extrapolate",
+                static_cast<unsigned long long>(callback.calls), static_cast<unsigned long long>(callback.vetoes));
+        }
     }
+    alife_hooks::PrintList(); // the update hooks of ALife are engine callbacks too (addon_alife_hooks.cpp)
 }
 } // namespace gw::addons::callbacks

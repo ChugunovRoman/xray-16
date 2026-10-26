@@ -148,7 +148,13 @@ CMapLocation* CMapManager::AddRelationLocation(CInventoryOwner* pInvOwner)
     return l;
 }
 
-void CMapManager::Destroy(CMapLocation* ml) { m_deffered_destroy_queue.push_back(ml); }
+// Deleted in the next Update: a caller up the stack (a hint provider removed its own spot, CMapLocation::GetHint) may
+// still touch the location this frame; Released() tells it not to keep the location or its spots
+void CMapManager::Destroy(CMapLocation* ml)
+{
+    ml->MarkReleased();
+    m_deffered_destroy_queue.push_back(ml);
+}
 
 void CMapManager::OnUIReset()
 {

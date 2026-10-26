@@ -510,8 +510,61 @@ bool CGameObject::binder_gate_update(u32 now)
         mask |= kGatePhaseCallback;
 
     g.mask = mask;
+    constexpr u32 phases = kGatePhaseMedium | kGatePhaseSlow | kGatePhaseSwitch | kGatePhaseCallback;
+    // plans/lua_to_cpp/58-npc-motivator.md sec. 7 (counters, measurement only; without -npc_cpp_profile one test):
+    // the passes of the binder that reads the mask by the phases due - skipped, medium only (plan 58 M6), slow,
+    // switch, callback
+    if (g.consumer && npc_cpp_profile::enabled())
+    {
+        if (!(mask & phases))
+            npc_cpp_profile::count(ENpcCppProfileStage::BinderGateSkipped);
+        else if ((mask & phases) == kGatePhaseMedium)
+            npc_cpp_profile::count(ENpcCppProfileStage::BinderGateMediumOnly);
+        if (mask & kGatePhaseSlow)
+            npc_cpp_profile::count(ENpcCppProfileStage::BinderGateSlow);
+        if (mask & kGatePhaseSwitch)
+            npc_cpp_profile::count(ENpcCppProfileStage::BinderGateSwitch);
+        if (mask & kGatePhaseCallback)
+            npc_cpp_profile::count(ENpcCppProfileStage::BinderGateCallback);
+    }
     // Only a binder that reads the mask may be skipped: another Lua binder on a stalker keeps every update.
-    return !g.consumer || (mask & (kGatePhaseMedium | kGatePhaseSlow | kGatePhaseSwitch | kGatePhaseCallback)) != 0;
+    return !g.consumer || (mask & phases) != 0;
+}
+
+// plans/lua_to_cpp/57-gw-eoc-next-steps.md, L2 step D: the binder interval (game_object:set_binder_interval).
+// The due calls of an object sit on its own slots k * interval + ID() % interval: the binders that ask for the
+// interval on one frame (camps on spawn) are spread over it, and a late scheduler pass does not move the next slot.
+void CGameObject::binder_interval_schedule(u32 now)
+{
+    const u32 interval = m_binder_interval;
+    if (!interval)
+        return;
+    const u32 phase = u32(ID()) % interval;
+    // the first slot after now: (now + interval - phase) / interval slots of the phase have started by now + interval
+    m_binder_interval_next = ((now + interval - phase) / interval) * interval + phase;
+}
+
+void CGameObject::set_binder_interval(u32 interval_ms)
+{
+    interval_ms = std::min(interval_ms, kBinderIntervalMax);
+    if (interval_ms == m_binder_interval)
+        return;
+    m_binder_interval = interval_ms;
+    m_binder_interval_next = 0; // 0: the next update calls the binder (a section or a sound came, the camp story)
+    binder_interval_schedule(Device.dwTimeGlobal);
+}
+
+bool CGameObject::binder_interval_due(u32 now)
+{
+    if (!m_binder_interval)
+        return true;
+    // Counters only with -npc_cpp_profile (without it one test): binder_interval/skipped - the Lua binder updates the
+    // interval skipped; binder_interval/called - the due calls of the binders with an interval. The skipped share is
+    // skipped / (skipped + called).
+    const bool due = now >= m_binder_interval_next;
+    if (npc_cpp_profile::enabled())
+        npc_cpp_profile::count(due ? ENpcCppProfileStage::BinderIntervalCalled : ENpcCppProfileStage::BinderIntervalSkipped);
+    return due;
 }
 
 void CGameObject::net_Destroy()
@@ -688,6 +741,9 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
     VERIFY(!m_spawned);
     m_spawned = true;
     m_spawn_time = Device.dwFrame;
+    // 57-gw-eoc-next-steps.md, L2 step D: the new Lua binder starts without an interval (it asks for one itself)
+    m_binder_interval = 0;
+    m_binder_interval_next = 0;
     m_ai_obstacle = xr_new<ai_obstacle>(this);
 
     CSE_Abstract* E = (CSE_Abstract*)DC;
@@ -1806,15 +1862,24 @@ void CGameObject::shedule_Update(u32 dt)
         {
             ZoneScopedN("sh_CGameObject_shedule/scriptBinder");
             START_PROFILE("game_object/schedule_update/script_binder")
-            if (binder_gate_update(now_ms)) // stage D, W3-1: false = the Lua binder has nothing due this pass
+            // stage D, W3-1: false = the Lua binder has nothing due this pass (always computed: it moves the timers)
+            const bool gate_run = binder_gate_update(now_ms);
+            // 57-gw-eoc-next-steps.md, L2 step D: false = the binder asked for an interval and it has not elapsed
+            // (idle restrictor, camp without a story: game_object:set_binder_interval); the events below still go
+            if (gate_run && binder_interval_due(now_ms))
             {
-                // 22-game-thread.md (diagnostics only): the Lua binder update (xr_motivator, bind_monster...) by class
-                xray::perf::ScopedTime binder_time(cast_stalker() ? xray::perf::Metric::go_shed_binder_stalker :
-                        cast_base_monster() ? xray::perf::Metric::go_shed_binder_monster :
-                                              xray::perf::Metric::go_shed_binder_other);
-                scriptBinder.shedule_Update(dt);
+                {
+                    // 22-game-thread.md (diagnostics only): the Lua binder update (xr_motivator, bind_monster...) by
+                    // class
+                    xray::perf::ScopedTime binder_time(cast_stalker() ? xray::perf::Metric::go_shed_binder_stalker :
+                            cast_base_monster() ? xray::perf::Metric::go_shed_binder_monster :
+                                                  xray::perf::Metric::go_shed_binder_other);
+                    scriptBinder.shedule_Update(dt);
+                }
+                // after the call: the binder may have changed its interval in it (0 - nothing to schedule)
+                binder_interval_schedule(now_ms);
             }
-            else
+            else if (!gate_run)
                 PERF_INC(binder_skip_gate);
             // W3-2: with the gate on, npc_on_update comes from the engine on the callback phase (Lua skips its emit)
             // Only for the binder that reads the mask: it is the one that skips its own emit then.

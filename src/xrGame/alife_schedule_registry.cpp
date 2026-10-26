@@ -26,8 +26,14 @@ void CALifeScheduleRegistry::update_profiled(CSE_ALifeSchedulable& object)
     else if (smart_cast<CSE_ALifeMonsterAbstract*>(base))
         stage = ENpcCppProfileStage::AlifeScheduledMonster;
 
-    NPC_CPP_PROFILE_SCOPE(stage);
-    object.update();
+    const u64 start = CPU::QPC();
+    update_object(object); // a plugin update hook included (addon_alife_hooks.cpp)
+    const u64 delta = CPU::QPC() - start;
+    npc_cpp_profile::add(stage, delta);
+    // 57-gw-eoc-next-steps.md, E2, "alife peak": the object for the line of a long alife/update. Read after update(),
+    // as describe_spike does: a released object is deleted only when the pass ends.
+    if (base && npc_cpp_profile::peak_active())
+        npc_cpp_profile::peak_object(base->ID, base->name_replace(), base->s_name.c_str(), stage, delta);
 }
 void CALifeScheduleRegistry::add(CSE_ALifeDynamicObject* object)
 {

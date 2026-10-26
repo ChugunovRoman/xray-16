@@ -39,6 +39,11 @@ enum class EBuiltin : GwpEventId
     NpcOnBeforeHit,           // (npc, power, dir, who, bone, hit type, impulse) -> power / false (addon_api_character.cpp)
     MonsterOnBeforeHit,       // the same for a monster (addon_api_character.cpp)
     RelationOnChanged,        // (kind, a, b, old, new) a goodwill or a community relation changed (addon_api_character.cpp)
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md: the catch-up of the offline movement after a jump of the game
+    // clock (alife_time_skip.h)
+    AlifeOnTimeSkipBegin, // (total_ms, steps) before the first step
+    AlifeOnTimeSkipStep,  // (step_ms, index, steps, tick) the offline movement is at the cursor of the step
+    AlifeOnTimeSkipEnd,   // (total_ms, steps) after the last step, the cursor is gone
     Count_
 };
 

@@ -133,7 +133,9 @@ void CUITaskWnd::Update()
     }
     else
     {
-        m_pMapWnd->HideCurHint();
+        // The hint of a task item that is not hovered any more; the hint of a hovered map spot stays (hiding it here
+        // made the spot build it again on every update of this window, several times a frame)
+        m_pMapWnd->HideHintUnlessSpotHovered();
     }
     inherited::Update();
 }

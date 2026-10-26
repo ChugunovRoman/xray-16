@@ -10,6 +10,7 @@
 #include "addon_api_feedback.h"
 #include "addon_api_character.h"
 #include "addon_api_inventory_ext.h"
+#include "addon_alife_hooks.h"
 #include "addon_binders.h"
 #include "addon_callbacks.h"
 #include "addon_data_bus.h"
@@ -865,6 +866,7 @@ void FillEngineApi()
     threads::FillEngineApi(g_engine_api);
     services::FillEngineApi(g_engine_api);
     FillAlifeExtApi(g_engine_api);
+    alife_hooks::FillEngineApi(g_engine_api);
     FillWorldApi(g_engine_api);
     feedback::FillEngineApi(g_engine_api);
     character::FillEngineApi(g_engine_api);
@@ -1693,6 +1695,7 @@ void StopPlugin(const GwpPlugin* plugin)
     events::RemovePluginSubscriptions(plugin);
     binders::RemovePluginBinders(plugin);
     callbacks::RemovePluginCallbacks(plugin);
+    alife_hooks::RemovePluginHooks(plugin); // its objects get the Lua update again
     goap::RemovePluginEvaluators(plugin);
     goap::StopPluginPlanners(plugin);
     RemovePluginExports(plugin);
@@ -1979,6 +1982,7 @@ void Shutdown()
     binders::Shutdown();
     storage::Shutdown();
     callbacks::Shutdown();
+    alife_hooks::Shutdown();
     goap::Shutdown();
     goap::ShutdownPlanners();
     ShutdownNpcApi();

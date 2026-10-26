@@ -30,6 +30,18 @@ public:
 protected:
     flags32 m_flags{};
     shared_str m_hint;
+    // The script function ("module.function") that builds the hint text when it is shown (SetHintProvider); empty -
+    // the text of SetHint
+    shared_str m_hint_provider;
+    // CMapManager::Destroy queued the location (deleted in the next CMapManager::Update): see Released()
+    bool m_released{};
+    // PullHint runs the hint provider: a nested GetHint (the provider asks CMapLocation:GetHint) does not call it again
+    bool m_pulling_hint{};
+    // The provider was called (GetHint) and when, Device.dwTimeContinual: it is called again only after
+    // kHintPullPeriodMs of real time (the PDA asks GetHint on every show of the hint), the text between the calls is
+    // the last one built. SetHintProvider drops it: the first GetHint after it calls the provider at once
+    bool m_hint_pulled{};
+    u32 m_hint_pull_time{};
     CMapSpot* m_level_spot{};
     CMapSpotPointer* m_level_spot_pointer{};
     CMiniMapSpot* m_minimap_spot{};
@@ -75,6 +87,8 @@ protected:
     void UpdateSpot(CUICustomMap* map, CMapSpot* sp);
     void UpdateSpotPointer(CUICustomMap* map, CMapSpotPointer* sp);
     void CalcLevelName();
+    // GetHint with a hint provider: the text of the script into m_hint
+    void PullHint();
     CMapSpotPointer* GetSpotPointer(CMapSpot* sp);
     CMapSpot* GetSpotBorder(CMapSpot* sp);
 
@@ -90,8 +104,25 @@ public:
     virtual pcstr SpotTypeForXmlReload() const { return nullptr; }
 
     IC bool HintEnabled() const { return !!m_flags.test(eHintEnabled); }
+    /** The hint text; with a hint provider (SetHintProvider) it is built by the script right now. The provider may
+        remove this location (level.map_remove_object_spot / map_set_object_spot): its memory stays valid till the
+        next CMapManager::Update (CMapManager::Destroy only queues it), but a caller that keeps the location or its
+        spot after GetHint (the hint owner, the properties box) must check Released() first. */
     pcstr GetHint() const;
     void SetHint(const shared_str& hint);
+    /** H2 (plans/lua_to_cpp/36-gw-eoc-e8-spots.md): the hint text is built lazily, only when the hint is shown
+        (GetHint: the hint of the PDA map, the properties of a spot): function(object_id) -> string, called by its name
+        ("module.function"), at most once per kHintPullPeriodMs of real time per location (the text in between is the
+        last one built); the string becomes the hint text as is (plain text: "disable_hint" of SetHint has no
+        special meaning here), so the hint of the save is the last text built. A failed call or a non-string answer
+        keeps the last text. Empty or nullptr - no provider. Not saved: the owner of the spot sets it again with the
+        spot (level.map_set_spot_hint_provider). */
+    void SetHintProvider(pcstr function);
+    bool HasHintProvider() const { return m_hint_provider.size() != 0; }
+    /** The location is removed from the map manager and queued for deletion (CMapManager::Destroy): it is deleted in
+        the next CMapManager::Update, so nothing may keep a pointer to it or to its spots past this frame. */
+    bool Released() const { return m_released; }
+    void MarkReleased() { m_released = true; }
     void SetSize(const float width, const float height);
     void SetTexture(LPCSTR path);
     void SetTextureRect(Frect rect);
