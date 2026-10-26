@@ -19,6 +19,8 @@
 #include "xrAICore/Navigation/level_graph.h"
 #include "alife_monster_movement_manager.h"
 #include "alife_monster_detail_path_manager.h"
+#include "alife_time_skip.h"
+#include "npc_cpp_profile.h"
 #include <cstring>
 
 extern void setup_location_types_line(GameGraph::TERRAIN_VECTOR& m_vertex_types, LPCSTR string);
@@ -27,7 +29,24 @@ namespace
 {
 bool squad_trace_enabled()
 {
-    return Core.Params && std::strstr(Core.Params, "-squad_trace");
+    // 33-gw-eoc-alife-switch.md N6: the command line does not change in a session - searched once, not on every call
+    // (log_squad_trace_basic: 1-2 calls a squad a switch pass)
+    static const bool enabled = Core.Params && std::strstr(Core.Params, "-squad_trace");
+    return enabled;
+}
+
+// 33-gw-eoc-alife-switch.md section 9 (always on since 2026-10-25): the squad whose members synchronize_location has just
+// checked against the registry (sanitize_members). The switch pass (CALifeSwitchManager::switch_object, the only
+// caller of both) calls try_switch_online / try_switch_offline of the squad right after it, with nothing in between
+// that could touch the registry or the members: their own sanitize_members would find nothing and change nothing, it is
+// skipped once. Any other way to these calls finds another squad (or none) here and checks as before
+thread_local const CSE_ALifeOnlineOfflineGroup* g_squad_members_checked = nullptr;
+
+bool squad_members_just_checked(const CSE_ALifeOnlineOfflineGroup* squad)
+{
+    const bool checked = g_squad_members_checked == squad;
+    g_squad_members_checked = nullptr;
+    return checked;
 }
 
 // Rate limit for the repair diagnostics: the first occurrences verbatim, then one in 512.
@@ -73,9 +92,16 @@ void pull_member_to_squad_level(
         game_graph.header().level(squad_level).name().c_str(), u32(squad.m_tGraphID));
 
     // the teleport registered the member on its own (graph registry, scheduler) as register_member had not: undone
-    // here as register_member does it for an offline member
-    const CALifeGraphRegistry::OBJECT_REGISTRY& at_vertex = alife.graph().objects()[member.m_tGraphID].objects();
-    if (at_vertex.objects().find(member.ID) != at_vertex.objects().end())
+    // here as register_member does it for an offline member. review2 G-m4: the precheck now asks the id -> vertex
+    // index (is_registered, O(1)) whether the member is registered at ALL, not whether it sits at the CLAIMED
+    // vertex (member.m_tGraphID) - on a desync the registration can sit at a DIFFERENT vertex (exactly what a
+    // teleport mid-flight can leave behind: CALifeUpdateManager::teleport_object registers the member at the OTHER
+    // level's vertex through graph().change(), and nothing resets that until this function runs), and the old
+    // per-vertex precheck found nothing there and skipped remove() entirely, leaving that registration in place -
+    // the #2058 reports on sim_default_zombied_426712/426720 (run 8/9, quicksave5, next to a squad 26711
+    // "long jump" into that very vertex). remove() itself still resolves the real vertex through the same index, so
+    // it is passed member.m_tGraphID only as the "expected" vertex for its own desync log line.
+    if (alife.graph().is_registered(member.ID))
         alife.graph().remove(&member, member.m_tGraphID);
     if (alife.scheduled().object(member.ID, true))
         alife.scheduled().remove(&member);
@@ -157,6 +183,12 @@ u32 CSE_ALifeOnlineOfflineGroup::sanitize_members(const char* where)
 
 void CSE_ALifeOnlineOfflineGroup::update()
 {
+    // plans/lua_to_cpp/57-gw-eoc-next-steps.md, E0 (diagnostics only, -npc_cpp_profile): alife/squad_update/members -
+    // the member part of the update around the brain (sanitize_members and the copy of the position to the members);
+    // the brain itself is alife/squad_brain/update
+    const bool profile = npc_cpp_profile::enabled();
+    u64 members_qpc = profile ? CPU::QPC() : 0;
+
     sanitize_members("update");
 
     if (m_bOnline && !m_members.empty())
@@ -166,11 +198,18 @@ void CSE_ALifeOnlineOfflineGroup::update()
         m_tNodeID = commander->m_tNodeID;
         m_tGraphID = commander->m_tGraphID;
     }
+    if (profile)
+        members_qpc = CPU::QPC() - members_qpc;
     if (!bfActive())
+    {
+        if (profile)
+            npc_cpp_profile::add(ENpcCppProfileStage::AlifeSquadUpdateMembers, members_qpc);
         return;
+    }
 
     brain().update();
 
+    const u64 sync_start = profile ? CPU::QPC() : 0;
     MEMBERS::iterator I = m_members.begin();
     MEMBERS::iterator E = m_members.end();
     for (; I != E; ++I)
@@ -181,6 +220,8 @@ void CSE_ALifeOnlineOfflineGroup::update()
         m->m_tGraphID = m_tGraphID;
         m->m_fDistance = m_fDistance;
     }
+    if (profile)
+        npc_cpp_profile::add(ENpcCppProfileStage::AlifeSquadUpdateMembers, members_qpc + CPU::QPC() - sync_start);
     return;
 }
 
@@ -330,6 +371,7 @@ CSE_ALifeOnlineOfflineGroup::MEMBER* CSE_ALifeOnlineOfflineGroup::member(ALife::
 bool CSE_ALifeOnlineOfflineGroup::synchronize_location()
 {
     sanitize_members("synchronize_location");
+    g_squad_members_checked = this; // section 9: for try_switch_* right after
 
     if (m_bOnline && !m_members.empty())
     {
@@ -346,14 +388,17 @@ bool CSE_ALifeOnlineOfflineGroup::synchronize_location()
 void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 {
     log_squad_trace_basic("try_switch_online", this);
-    sanitize_members("try_switch_online");
+    if (!squad_members_just_checked(this))
+        sanitize_members("try_switch_online");
     if (m_members.empty())
         return;
 
-    if (!can_switch_online())
+    // alife_switch_profiled_*: the virtual can_switch_* (Lua: sim_squad_scripted), timed with -npc_cpp_profile
+    // (33-gw-eoc-alife-switch.md)
+    if (!alife_switch_profiled_can_online(this))
         return;
 
-    if (!can_switch_offline())
+    if (!alife_switch_profiled_can_offline(this))
     {
         inherited1::try_switch_online();
         return;
@@ -397,41 +442,48 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 void CSE_ALifeOnlineOfflineGroup::try_switch_offline()
 {
     log_squad_trace_basic("try_switch_offline", this);
-    sanitize_members("try_switch_offline");
+    if (!squad_members_just_checked(this))
+        sanitize_members("try_switch_offline");
     if (m_members.empty())
         return;
 
-    if (!can_switch_offline())
-        return;
-
-    if (!can_switch_online())
+    // 33-gw-eoc-alife-switch.md, N2 (always on since 2026-10-25, its switch gw_alife_switch_skip_lua removed), the
+    // result of the old full sequence (can_switch_offline, can_switch_online, then a member within offline_distance
+    // keeps the squad), "near" = a member within offline_distance: near - offline iff can_switch_offline &&
+    // !can_switch_online, can_switch_online first (true settles it); far - offline iff can_switch_offline. Without the
+    // actor - as near (the old sequence read the position of the actor there). (try_switch_online of a squad keeps its
+    // sequence: !can_switch_online returns there without on_failed_switch_online.) The old member VERIFYs (debug-only)
+    // were not a part of the decision
+    const CSE_ALifeCreatureActor* switch_actor = alife().graph().actor();
+    bool near_member = !switch_actor;
+    if (switch_actor)
     {
-        alife().switch_offline(this);
-        return;
+        for (const auto& member : m_members)
+        {
+            if (switch_actor->o_Position.distance_to(member.second->o_Position) <= alife().offline_distance())
+            {
+                near_member = true;
+                break;
+            }
+        }
     }
-
-    MEMBERS::iterator I = m_members.begin();
-    MEMBERS::iterator E = m_members.end();
-    for (; I != E; ++I)
+    if (near_member)
     {
-        VERIFY3((*I).second->g_Alive(), "Incorrect situation : some of the OnlineOffline group members is dead",
-            (*I).second->name_replace());
-        VERIFY3((*I).second->can_switch_offline(),
-            "Incorrect situation : some of the OnlineOffline group members cannot be switched online due to their "
-            "personal "
-            "properties",
-            (*I).second->name_replace());
-        VERIFY3((*I).second->can_switch_online(),
-            "Incorrect situation : some of the OnlineOffline group members cannot be switched online due to their "
-            "personal "
-            "properties",
-            (*I).second->name_replace());
-
-        if (alife().graph().actor()->o_Position.distance_to((*I).second->o_Position) <= alife().offline_distance())
+        if (alife_switch_profiled_can_online(this))
+        {
+            alife_switch_count_skipped(); // can_switch_offline
             return;
+        }
+        if (alife_switch_profiled_can_offline(this))
+            alife().switch_offline(this);
+        return;
     }
-
-    alife().switch_offline(this);
+    // Counted after the answer: the full sequence asks can_switch_online only after can_switch_offline == true
+    if (alife_switch_profiled_can_offline(this))
+    {
+        alife_switch_count_skipped(); // can_switch_online
+        alife().switch_offline(this);
+    }
 }
 
 void CSE_ALifeOnlineOfflineGroup::switch_online()
@@ -489,6 +541,9 @@ void CSE_ALifeOnlineOfflineGroup::switch_offline()
 
     alife().scheduled().add(this);
     alife().graph().add(this, m_tGraphID, false);
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md, E2: the scheduled update of the squad comes in the next part of
+    // the ALife update (its target, then it walks on), not at its turn 22-410 s later
+    alife_time_skip::NoteFreshOffline(ID);
     log_squad_trace_basic("switch_offline:end", this);
 }
 

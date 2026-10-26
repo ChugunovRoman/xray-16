@@ -16,6 +16,7 @@
 #include "luabind/error.hpp"
 #ifdef XRGAME_EXPORTS
 #include "alife_smart_terrain_task.h"
+#include "xrServer_script_default_call.h"
 #endif //#ifdef XRGAME_EXPORTS
 
 //#define USE_WRITER_READER
@@ -55,23 +56,60 @@ class CALifeSmartTerrainTask;
     DEFINE_LUA_WRAPPER_METHOD_0(init, CSE_Abstract*)
 #endif // #ifndef MASTER_GOLD
 
-#define INHERIT_ALIFE                                           \
-    INHERIT_ABSTRACT                                            \
-    DEFINE_LUA_WRAPPER_CONST_METHOD_0(used_ai_locations, bool)  \
-    DEFINE_LUA_WRAPPER_CONST_METHOD_0(can_save, bool)           \
-    DEFINE_LUA_WRAPPER_CONST_METHOD_0(can_switch_online, bool)  \
-    DEFINE_LUA_WRAPPER_CONST_METHOD_0(can_switch_offline, bool) \
+// plans/lua_to_cpp/33-gw-eoc-alife-switch.md section 10 (N3): the four const methods the switch pass of ALife asks of
+// every object (used_ai_locations, can_switch_online, can_switch_offline, keep_saved_data_anyway). For an object of a
+// Lua class that does not override the method (the instance lookup finds the member function of the C++ class) the C++
+// default is called directly instead of luabind::call_member (the default table, lua_pcall, the overload resolution:
+// ~75 ns a call on the stand); a Lua override is called as before (xrServer_script_default_call.h). Nothing is cached.
+// Always on since 2026-10-25 (its emergency switch gw_alife_switch_skip_lua removed after the runs 3-4).
+// alife_switch_count_default_call: the counters alife/switch_pass/n3_* (only in the switch pass with -npc_cpp_profile)
+#ifdef XRGAME_EXPORTS
+enum EAlifeDefaultCallMethod : u32
+{
+    alife_default_call_can_online = 0,
+    alife_default_call_can_offline,
+    alife_default_call_keep_saved,
+    alife_default_call_used_ai,
+};
+void alife_switch_count_default_call(u32 method, xr_luabind::EDefaultCall how);
+
+#define DEFINE_LUA_WRAPPER_CONST_METHOD_0_DEFAULT(v_func_name, ret_type, method_id)                            \
+    virtual ret_type v_func_name() const noexcept                                                              \
+    {                                                                                                          \
+        try                                                                                                    \
+        {                                                                                                      \
+            xr_luabind::EDefaultCall how;                                                                      \
+            const ret_type result = xr_luabind::call_member_or_default<ret_type, inherited>(                   \
+                this, this, #v_func_name, &self_type::v_func_name##_static, how);                              \
+            alife_switch_count_default_call(method_id, how);                                                   \
+            return result;                                                                                     \
+        }                                                                                                      \
+        CAST_FAILED(v_func_name, ret_type)                                                                     \
+        catch (...) { return ((ret_type)(0)); }                                                                \
+    }                                                                                                          \
+    static ret_type v_func_name##_static(const inherited* ptr) { return ptr->self_type::inherited::v_func_name(); }
+#else
+#define DEFINE_LUA_WRAPPER_CONST_METHOD_0_DEFAULT(v_func_name, ret_type, method_id) \
+    DEFINE_LUA_WRAPPER_CONST_METHOD_0(v_func_name, ret_type)
+#endif //#ifdef XRGAME_EXPORTS
+
+#define INHERIT_ALIFE                                                                                \
+    INHERIT_ABSTRACT                                                                                 \
+    DEFINE_LUA_WRAPPER_CONST_METHOD_0_DEFAULT(used_ai_locations, bool, alife_default_call_used_ai)   \
+    DEFINE_LUA_WRAPPER_CONST_METHOD_0(can_save, bool)                                                \
+    DEFINE_LUA_WRAPPER_CONST_METHOD_0_DEFAULT(can_switch_online, bool, alife_default_call_can_online) \
+    DEFINE_LUA_WRAPPER_CONST_METHOD_0_DEFAULT(can_switch_offline, bool, alife_default_call_can_offline) \
     DEFINE_LUA_WRAPPER_CONST_METHOD_0(interactive, bool)
 
 #ifdef XRGAME_EXPORTS
-#define INHERIT_DYNAMIC_ALIFE                                       \
-    INHERIT_ALIFE                                                   \
-    DEFINE_LUA_WRAPPER_METHOD_V0(on_spawn)                          \
-    DEFINE_LUA_WRAPPER_METHOD_V0(on_before_register)                \
-    DEFINE_LUA_WRAPPER_METHOD_V0(on_register)                       \
-    DEFINE_LUA_WRAPPER_METHOD_V0(on_unregister)                     \
-    DEFINE_LUA_WRAPPER_CONST_METHOD_0(keep_saved_data_anyway, bool) \
-    DEFINE_LUA_WRAPPER_METHOD_V0(switch_online)                     \
+#define INHERIT_DYNAMIC_ALIFE                                                                                \
+    INHERIT_ALIFE                                                                                            \
+    DEFINE_LUA_WRAPPER_METHOD_V0(on_spawn)                                                                   \
+    DEFINE_LUA_WRAPPER_METHOD_V0(on_before_register)                                                         \
+    DEFINE_LUA_WRAPPER_METHOD_V0(on_register)                                                                \
+    DEFINE_LUA_WRAPPER_METHOD_V0(on_unregister)                                                              \
+    DEFINE_LUA_WRAPPER_CONST_METHOD_0_DEFAULT(keep_saved_data_anyway, bool, alife_default_call_keep_saved) \
+    DEFINE_LUA_WRAPPER_METHOD_V0(switch_online)                                                              \
     DEFINE_LUA_WRAPPER_METHOD_V0(switch_offline)
 #else
 #define INHERIT_DYNAMIC_ALIFE INHERIT_ALIFE

@@ -83,4 +83,52 @@ bool model_prefetch_spawn_pending(u16 id);
 // main, loading screen (CLevel::net_start_client5): the creatures of the level and all monster visuals into the pool
 void model_preload_level();
 
+// plans/lua_to_cpp/33-gw-eoc-alife-switch.md (diagnostics only): can_switch_online / can_switch_offline of the switch
+// decisions (CSE_ALifeDynamicObject / CSE_ALifeOnlineOfflineGroup::try_switch_*) - a Lua call for an object of a script
+// class. A plain call; with -npc_cpp_profile inside switch_object also timed by the kind of the object
+// (alife/switch_pass/can_online/*, can_offline/*)
+bool alife_switch_profiled_can_online(const CSE_ALifeObject* object);
+bool alife_switch_profiled_can_offline(const CSE_ALifeObject* object);
+// The same for keep_saved_data_anyway (clear_client_data, CALifeSwitchManager::try_switch_online):
+// alife/switch_pass/keep_saved, and the counter keep_saved_empty of the calls on an object with no client data
+bool alife_switch_profiled_keep_saved(const CSE_ALifeDynamicObject* object);
+
+// 33-gw-eoc-alife-switch.md, N1/N2 (always on since 2026-10-25, their switch gw_alife_switch_skip_lua removed after
+// the runs 3-4): the switch pass asks the virtual can_switch_* / keep_saved_data_anyway (a Lua call for a script class)
+// only when the answer can change the result.
+// section 9: CALifeSwitchManager::synchronize_location without the Lua used_ai_locations and the graph search when the
+// object stays where it is, and a squad checks its members against the registry once per switch_object instead of
+// twice.
+// section 10 (N3): used_ai_locations / can_switch_* / keep_saved_data_anyway of a Lua class that does not override
+// them - the C++ default without luabind::call_member (xrServer_script_macroses.h); in synchronize_location the checks
+// that read only fields go before used_ai_locations.
+// N1: whether clear_client_data keeps the client data - keep_saved_data_anyway, not asked when the data is empty
+// (clear() of an empty vector changes nothing): alife/switch_pass/keep_saved_empty counts such calls in the pass
+bool alife_switch_keep_client_data(const CSE_ALifeDynamicObject* object);
+// N2: a can_switch_* the full sequence would have asked and N2 did not (alife/switch_pass/can_skipped, in the pass with
+// the profiler): counted after the answer that settles it. Not netted: far from the actor, out of the prefetch band,
+// try_switch_online asks can_switch_offline first and with both answers false asks one more question than before
+void alife_switch_count_skipped();
+
+// 33-gw-eoc-alife-switch.md section 9 (-npc_cpp_profile): one part of the switch pass - a frame's part of update_spread or a
+// whole update_switch, declared before their NPC_CPP_PROFILE_SCOPE (alife/update/switch) so that it brackets the same
+// work. The switch_pass/* stages of the part are gathered on this thread without atomics and flushed when it ends;
+// the timers inside switch_object run in every 8th part only (alife/switch_pass/part_sampled), the counters in every
+// part, the other parts are timed whole (alife/switch_pass/part_clean). Without the profiler: one check
+class CAlifeSwitchPassProfile
+{
+public:
+    CAlifeSwitchPassProfile();
+    ~CAlifeSwitchPassProfile();
+
+    CAlifeSwitchPassProfile(const CAlifeSwitchPassProfile&) = delete;
+    CAlifeSwitchPassProfile& operator=(const CAlifeSwitchPassProfile&) = delete;
+
+private:
+    u64 m_start{0};
+    u8 m_saved_mode{0};
+    bool m_active{false};
+    bool m_sampled{false};
+};
+
 #include "alife_switch_manager_inline.h"

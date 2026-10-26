@@ -186,13 +186,57 @@ void CSE_ALifeDynamicObject::try_switch_online()
             alife().scheduled().add(this);
     }
 
-    if (!can_switch_online())
+    // 33-gw-eoc-alife-switch.md, N2 (always on since 2026-10-25, its switch gw_alife_switch_skip_lua removed): only the
+    // can_switch_* the distance needs - the answers only read the world, so the result is that of the full sequence
+    // below (truth table in plan 33 §5):
+    // near (<= online_distance): online iff can_switch_online (can_switch_offline only picks one of two ways online);
+    // far and out of the model prefetch band: on_failed unless can_switch_online && !can_switch_offline, so
+    // can_switch_offline first - true settles it. In the band: the full sequence (the prefetch needs both answers)
+    const CSE_ALifeCreatureActor* switch_actor = alife().graph().actor();
+    if (switch_actor)
+    {
+        const float switch_distance = switch_actor->o_Position.distance_to(o_Position);
+        const float online_distance = alife().online_distance();
+        if (switch_distance <= online_distance)
+        {
+            if (!alife_switch_profiled_can_online(this))
+            {
+                on_failed_switch_online();
+                return;
+            }
+            // Counted after the answer: the full sequence asks can_switch_offline only after can_switch_online == true
+            alife_switch_count_skipped(); // can_switch_offline
+            alife().switch_online(this);
+            return;
+        }
+        if (!model_prefetch_in_margin(switch_distance, online_distance))
+        {
+            if (alife_switch_profiled_can_offline(this))
+            {
+                alife_switch_count_skipped(); // can_switch_online
+                on_failed_switch_online();
+                return;
+            }
+            if (!alife_switch_profiled_can_online(this))
+            {
+                on_failed_switch_online();
+                return;
+            }
+            alife().switch_online(this);
+            return;
+        }
+    }
+
+    // In the model prefetch band (or without the actor, as before N2): the full sequence.
+    // alife_switch_profiled_*: the virtual can_switch_* (Lua for a script class), timed with -npc_cpp_profile
+    // (33-gw-eoc-alife-switch.md)
+    if (!alife_switch_profiled_can_online(this))
     {
         on_failed_switch_online();
         return;
     }
 
-    if (!can_switch_offline())
+    if (!alife_switch_profiled_can_offline(this))
     {
         alife().switch_online(this);
         return;
@@ -213,19 +257,30 @@ void CSE_ALifeDynamicObject::try_switch_online()
 
 void CSE_ALifeDynamicObject::try_switch_offline()
 {
-    if (!can_switch_offline())
-        return;
-
-    if (!can_switch_online())
+    // 33-gw-eoc-alife-switch.md, N2 (always on since 2026-10-25, its switch gw_alife_switch_skip_lua removed), the
+    // result of the old full sequence (can_switch_offline, can_switch_online, then the distance):
+    // near (<= offline_distance): offline iff can_switch_offline && !can_switch_online, so can_switch_online first -
+    // true settles it (stay); far: offline iff can_switch_offline (can_switch_online only picks one of two ways offline).
+    // Without the actor - as near (the old sequence went offline only on can_switch_offline && !can_switch_online and
+    // read the position of the actor otherwise)
+    const CSE_ALifeCreatureActor* switch_actor = alife().graph().actor();
+    if (!switch_actor || switch_actor->o_Position.distance_to(o_Position) <= alife().offline_distance())
     {
-        alife().switch_offline(this);
+        if (alife_switch_profiled_can_online(this))
+        {
+            alife_switch_count_skipped(); // can_switch_offline
+            return;
+        }
+        if (alife_switch_profiled_can_offline(this))
+            alife().switch_offline(this);
         return;
     }
-
-    if (alife().graph().actor()->o_Position.distance_to(o_Position) <= alife().offline_distance())
-        return;
-
-    alife().switch_offline(this);
+    // Counted after the answer: the full sequence asks can_switch_online only after can_switch_offline == true
+    if (alife_switch_profiled_can_offline(this))
+    {
+        alife_switch_count_skipped(); // can_switch_online
+        alife().switch_offline(this);
+    }
 }
 
 bool CSE_ALifeDynamicObject::redundant() const { return (false); }
@@ -319,7 +374,9 @@ void CSE_ALifeDynamicObject::clear_client_data()
     if (!client_data.empty())
         Msg("CSE_ALifeDynamicObject::switch_offline: client_data is cleared for [%d][%s]", ID, name_replace());
 #endif // DEBUG
-    if (!keep_saved_data_anyway())
+    // keep_saved_data_anyway only when there is something to clear (33-gw-eoc-alife-switch.md, N1); timed with
+    // -npc_cpp_profile inside the switch pass
+    if (!alife_switch_keep_client_data(this))
         client_data.clear();
 }
 

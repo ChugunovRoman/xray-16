@@ -3382,6 +3382,13 @@ void CCC_RegisterCommands()
     // inventories) offline a frame, at least one object/squad; 0 = no limit (alife_update_manager.cpp)
     extern int alife_switch_offline_per_frame_max;
     CMD4(CCC_IntegerNotSaved, "alife_switch_offline_per_frame_max", &alife_switch_offline_per_frame_max, 0, 100000);
+    // plans/lua_to_cpp/33-gw-eoc-alife-switch.md N1/N2/N3 and 53-create-squad-engine.md (the index of specific
+    // characters): always on since 2026-10-25, their switches gw_alife_switch_skip_lua and gw_spec_char_index removed.
+    // plans/lua_to_cpp/53-create-squad-engine.md section 9: registry(specific_characters) no longer leaks - always on,
+    // its switch gw_spec_char_release removed after the check of run 5 of plan 57 (xrServer_Objects_ALife_Monsters.cpp)
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md (alife_time_skip.h): the settings of the catch-up after a jump of
+    // the clock are in configs/alife.ltx, [alife] time_skip_* since 2026-10-25 (the console commands alife_time_skip_*
+    // and alife_time_skip_step_clock removed)
     // S1: the Lua tunable of the smarts (see npc_perf_smart_spawn_gap_ms above)
     CMD4(CCC_IntegerNotSaved, "npc_perf_smart_spawn_gap_ms", &npc_perf_smart_spawn_gap_ms, 0, 60000);
     // 33-level-path.md (plans/optimization_mt): the level paths of the NPCs (the fast level A*, the vertex lookup on the
