@@ -31,6 +31,9 @@
       <PreprocessorDefinitions>LUA_BUILD_AS_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Platform)'=='x64'">LUAJIT_ENABLE_GC64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <!-- LuaJIT relies on IEEE NaN semantics (tvisnan, lj_obj_equal, lj_num2int checks):
+           /fp:fast from xray_build.props breaks NaN comparisons. See plans/lua_to_cpp/48-luajit-nan-fpfast.md -->
+      <FloatingPointModel>Precise</FloatingPointModel>
       <TreatWarningAsError>false</TreatWarningAsError>
     </ClCompile>
   </ItemDefinitionGroup>
