@@ -30,6 +30,7 @@
 #include "entity_alive.h"
 #include "ai_space.h"
 #include "alife_simulator.h"
+#include "alife_time_skip.h"
 #include "ai_debug.h"
 #include "ShootingObject.h"
 #include "GametaskManager.h"
@@ -2507,6 +2508,16 @@ void CLevel::OnGameLogicFrame()
         ZoneScopedN("hear_callbacks");
         PERF_SCOPE(game_hear_callbacks);
         CScriptEntity::ProcessQueuedSoundCallbacks();
+    }
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md: the catch-up of the offline movement after a jump of the clock
+    // (sleep, fast travel...) - all its steps here, before level_on_frame (alife_time_skip.h); a no-op without one
+    if (alife_time_skip::Pending())
+    {
+        if (CALifeSimulator* alife = const_cast<CALifeSimulator*>(ai().get_alife()))
+        {
+            ZoneScopedN("alife_time_skip");
+            alife_time_skip::Frame(*alife);
+        }
     }
     if (m_level_on_frame_pending)
     {

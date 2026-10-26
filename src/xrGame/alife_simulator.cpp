@@ -23,6 +23,7 @@
 #include "xrEngine/XR_IOConsole.h"
 #include "addon_host.h"
 #include "addon_event_bus.h"
+#include "alife_time_skip.h"
 
 #ifdef DEBUG
 #include "moving_objects.h"
@@ -172,6 +173,9 @@ CALifeSimulator::~CALifeSimulator()
 
 void CALifeSimulator::destroy()
 {
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md: a time skip still catching up is dropped (nothing of it can be seen
+    // or saved any more; a save and a level change finished it before)
+    alife_time_skip::Drop(*this);
     // Addons: the game session ends while ALife and its objects still exist.
     gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnEnd);
 

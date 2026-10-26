@@ -10,6 +10,8 @@
 #include "alife_storage_manager.h"
 #include "alife_simulator_header.h"
 #include "alife_time_manager.h"
+#include "alife_time_skip.h"
+#include "alife_update_manager.h"
 #include "alife_spawn_registry.h"
 #include "alife_object_registry.h"
 #include "alife_graph_registry.h"
@@ -29,6 +31,8 @@
 using namespace ALife;
 
 extern string_path g_last_saved_game;
+// 53-create-squad-engine.md section 9 (xrServer_Objects_ALife_Monsters.cpp)
+void gw_rebuild_specific_character_registry(CALifeObjectRegistry& objects, CSpecificCharacterRegistry& registry);
 
 CALifeStorageManager::~CALifeStorageManager() {}
 void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
@@ -62,6 +66,10 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
             return;
         }
     }
+
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md: a time skip still catching up finishes first (the Lua save states
+    // and the plugin blocks take its results)
+    alife_time_skip::Finish(static_cast<CALifeUpdateManager&>(*this), "save");
 
 	//Alundaio: To get the savegame fname to make our own custom save states
     luabind::functor<void> funct1;
@@ -179,6 +187,9 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
     }
 
     registry().load(source);
+    // 53-create-squad-engine.md section 9: the saved registry of the specific characters holds the leaked ids of the
+    // old engine; it is made again from the objects, before on_register below can select a character
+    gw_rebuild_specific_character_registry(objects(), registry(specific_characters));
 
     // Addons: plugin data was read at the start of load(). Objects are registered, on_register is not called yet.
     {

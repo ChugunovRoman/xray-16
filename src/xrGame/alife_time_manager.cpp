@@ -22,6 +22,7 @@ void CALifeTimeManager::init(LPCSTR section)
     m_normal_time_factor = pSettings->r_float(section, "normal_time_factor");
     m_game_time = m_start_game_time;
     m_start_time = Device.dwTimeGlobal;
+    m_skip_cursor = 0;
 }
 
 void CALifeTimeManager::save(IWriter& memory_stream)
@@ -42,4 +43,5 @@ void CALifeTimeManager::load(IReader& file_stream)
     m_time_factor = file_stream.r_float();
     m_normal_time_factor = file_stream.r_float();
     m_start_time = Device.dwTimeGlobal;
+    m_skip_cursor = 0; // plan 55: a loaded game has no time skip running
 };

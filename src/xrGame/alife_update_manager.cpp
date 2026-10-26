@@ -13,6 +13,7 @@
 #include "addon_api_alife_ext.h"
 #include "alife_simulator_header.h"
 #include "alife_time_manager.h"
+#include "alife_time_skip.h"
 #include "alife_graph_registry.h"
 #include "alife_schedule_registry.h"
 #include "alife_spawn_registry.h"
@@ -221,6 +222,8 @@ void CALifeUpdateManager::update_switch()
     // until the pass is over, the code that asked for the release is still standing on them.
     const destruction_lock lock(*this);
 
+    // 33-gw-eoc-alife-switch.md section 9: the switch_pass/* stages of this part, flushed after alife/update/switch
+    const CAlifeSwitchPassProfile switch_pass_profile;
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::AlifeUpdateSwitch);
     START_PROFILE("ALife/switch");
     // Spawn stage 0 (plans/spawn_optimization/SPEC.md): how many M_SPAWN one pass sends (a group of a squad and all the
@@ -266,11 +269,14 @@ void CALifeUpdateManager::update()
     // the report itself.
     const bool profile = npc_cpp_profile::enabled();
     const u64 profile_start = profile ? CPU::QPC() : 0;
+    if (profile)
+        npc_cpp_profile::peak_begin(); // 57-gw-eoc-next-steps.md, E2: the "alife peak" line of a long update
     update_switch();
     update_scheduled(false);
     if (profile)
     {
         const u64 delta = CPU::QPC() - profile_start;
+        npc_cpp_profile::peak_end("update", delta);
         npc_cpp_profile::add(ENpcCppProfileStage::AlifeUpdate, delta);
         if (delta * 1000 > 2 * CPU::qpc_freq)
             npc_cpp_profile::count(ENpcCppProfileStage::AlifeUpdateOver2ms);
@@ -284,8 +290,15 @@ void CALifeUpdateManager::update_positions_only() const
     if (!initialized())
         return;
     const u32 now = Device.dwTimeGlobal;
-    if (m_position_update_interval_ms > 0 && m_last_position_update_time != 0 &&
-        (now - m_last_position_update_time) < m_position_update_interval_ms)
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md, E1: with a time factor above the normal one (al_time_factor,
+    // level.set_time_factor) the pass comes proportionally more often, so a step of the positions stays as long as at
+    // the normal factor (~15 m) and the contact scanner of gw_eoc sees no "teleports"
+    u32 interval = m_position_update_interval_ms;
+    const float factor = time_manager().time_factor();
+    const float normal = time_manager().normal_time_factor();
+    if (interval > 0 && factor > normal && normal > 0.f)
+        interval = std::max(1u, static_cast<u32>(static_cast<float>(interval) * normal / factor));
+    if (interval > 0 && m_last_position_update_time != 0 && (now - m_last_position_update_time) < interval)
         return;
     m_last_position_update_time = now;
 
@@ -355,7 +368,7 @@ void CALifeUpdateManager::spread_frame()
 {
     if (!initialized() || m_first_time || Device.dwPrecacheFrame > 0)
         return;
-    if (!m_spread_tokens && !m_spread_switch_left)
+    if (!m_spread_tokens && !m_spread_switch_left && !alife_time_skip::FreshOfflinePending())
         return;
 
     // The same place as the update of a turn (shedule_Update): seqParallel of this frame, on this thread later on
@@ -381,11 +394,15 @@ void CALifeUpdateManager::update_spread()
         start + static_cast<u64>(std::max(alife_scheduled_budget_us, 0)) * CPU::qpc_freq / 1000000;
 
     init_ef_storage();
+    if (profile)
+        npc_cpp_profile::peak_begin(); // 57-gw-eoc-next-steps.md, E2: the "alife peak" line of a long update
 
     if (m_spread_switch_left)
     {
         // As update_switch: the objects a switch releases are deleted when this part ends
         const destruction_lock lock(*this);
+        // 33-gw-eoc-alife-switch.md section 9: the switch_pass/* stages of this part, flushed after alife/update/switch
+        const CAlifeSwitchPassProfile switch_pass_profile;
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::AlifeUpdateSwitch);
         ZoneScopedN("alife_update_spread/switch");
         PERF_SCOPE(alife_update_switch);
@@ -400,6 +417,10 @@ void CALifeUpdateManager::update_spread()
         m_spread_switch_left =
             predicate.m_wrapped ? 0 : m_spread_switch_left - std::min(predicate.m_done, m_spread_switch_left);
     }
+
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md, E2: the squads that have just gone offline (the switch part above
+    // or elsewhere) get their scheduled update now, not at their turn: their target, then the walk goes on at once
+    alife_time_skip::UpdateFreshOffline(*this);
 
     if (m_spread_tokens)
     {
@@ -418,6 +439,7 @@ void CALifeUpdateManager::update_spread()
     if (profile)
     {
         const u64 delta = CPU::QPC() - start;
+        npc_cpp_profile::peak_end("spread", delta);
         npc_cpp_profile::add(ENpcCppProfileStage::AlifeUpdate, delta);
         if (delta * 1000 > 2 * CPU::qpc_freq)
             npc_cpp_profile::count(ENpcCppProfileStage::AlifeUpdateOver2ms);
@@ -441,6 +463,10 @@ bool CALifeUpdateManager::change_level(NET_Packet& net_packet)
 {
     if (m_changing_level)
         return (false);
+
+    // plans/lua_to_cpp/55-timeskip-squad-movement.md: fast travel calls ChangeLevel right after change_game_time - the
+    // catch-up of the offline movement finishes before the save of the level change (one hitch on the loading)
+    alife_time_skip::Finish(*this, "level change");
 
     // 50n-frame-spike-report.md: this frame (the save of the level change) and the frames until the next level is in
     // play are not reported as spikes
@@ -600,6 +626,7 @@ void CALifeUpdateManager::reload(LPCSTR section)
 {
     CALifeSimulatorBase::reload(section);
     m_position_update_interval_ms = pSettings->read_if_exists<u32>(section, "position_update_interval_ms", 100);
+    alife_time_skip::LoadSettings(section); // plan 55/57: time_skip_* of alife.ltx (a new game and every load)
     set_process_time((int)m_max_process_time);
     objects_per_update(m_objects_per_update);
 }

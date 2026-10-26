@@ -25,6 +25,18 @@ IC float CALifeTimeManager::time_factor() const { return (m_time_factor); }
 IC float CALifeTimeManager::normal_time_factor() const { return (m_normal_time_factor); }
 IC void CALifeTimeManager::change_game_time(u32 value) { m_game_time += value; }
 
+IC ALife::_TIME_ID CALifeTimeManager::movement_time() const { return m_skip_cursor ? m_skip_cursor : game_time(); }
+
+IC ALife::_TIME_ID CALifeTimeManager::shift_clock_to(ALife::_TIME_ID time)
+{
+    const ALife::_TIME_ID now = game_time();
+    if (time >= now)
+        return 0;
+    const ALife::_TIME_ID shift = now - time;
+    m_game_time -= shift;
+    return shift;
+}
+
 IC void CALifeTimeManager::set_game_time_factor(ALife::_TIME_ID gameTime, const float timeFactor)
 {
     m_game_time = gameTime;
