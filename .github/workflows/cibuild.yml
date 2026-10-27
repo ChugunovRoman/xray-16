@@ -297,12 +297,21 @@ jobs:
           cpack -B artifacts -C ${{ matrix.configuration }} -DCPACK_THREADS=${{ matrix.platform.threads || 4 }}
           # CPack file names don't include build configuration and compiler, but GitHub
           # release assets must be unique across the whole matrix - insert both into the name.
+          # The CPack prefix is matched case-insensitively (a source package is named OpenXRay-<version>-Source.*,
+          # binary packages openxray-<version>-<arch>.*) and replaced as a whole: with nullglob an unmatched
+          # pattern expands to nothing, and `file` without arguments fails the step.
           shopt -s nullglob
-          for f in artifacts/openxray*.*; do
+          for f in artifacts/[oO]pen[xX][rR]ay*.*; do
             base=$(basename "$f")
-            mv "$f" "artifacts/${base/openxray/openxray-${{ matrix.configuration }}-${{ matrix.platform.cc }}}"
+            mv "$f" "artifacts/openxray-${{ matrix.configuration }}-${{ matrix.platform.cc }}-${base#*-}"
           done
-          file artifacts/openxray*.*
+          packages=(artifacts/*)
+          if [ ${#packages[@]} -eq 0 ]; then
+            echo "::error::cpack produced no files in build/artifacts"
+            exit 1
+          fi
+          ls -l artifacts
+          file "${packages[@]}"
 
     - name: Make AppImage
       if: ${{ steps.cmake-build.outcome == 'success' && matrix.platform.name == 'AppImage' }}
