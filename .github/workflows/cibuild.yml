@@ -178,8 +178,43 @@ jobs:
         configuration: [Debug, Mixed, Release, ReleaseMasterGold]
 
     steps:
+    # setup-alpine downloads apk.static from gitlab.alpinelinux.org, which now and then does not answer from a GitHub
+    # runner (curl: (28) Timeout was reached). Up to three attempts, a pause and a clean rootfs between them;
+    # only the last attempt fails the job.
     - name: Install latest stable Alpine Linux and packages
+      id: alpine1
       if: ${{ matrix.platform.name == 'Alpine' }}
+      continue-on-error: true
+      uses: jirutka/setup-alpine@master
+      with:
+        arch: ${{ matrix.platform.arch }}
+        branch: 'latest-stable'
+        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
+
+    - name: Retry Alpine setup (pause, clean rootfs)
+      if: ${{ matrix.platform.name == 'Alpine' && steps.alpine1.outcome == 'failure' }}
+      run: |
+          sleep 30
+          sudo rm -rf /home/runner/rootfs
+
+    - name: Install latest stable Alpine Linux and packages (attempt 2)
+      id: alpine2
+      if: ${{ matrix.platform.name == 'Alpine' && steps.alpine1.outcome == 'failure' }}
+      continue-on-error: true
+      uses: jirutka/setup-alpine@master
+      with:
+        arch: ${{ matrix.platform.arch }}
+        branch: 'latest-stable'
+        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
+
+    - name: Retry Alpine setup again (pause, clean rootfs)
+      if: ${{ matrix.platform.name == 'Alpine' && steps.alpine2.outcome == 'failure' }}
+      run: |
+          sleep 60
+          sudo rm -rf /home/runner/rootfs
+
+    - name: Install latest stable Alpine Linux and packages (attempt 3)
+      if: ${{ matrix.platform.name == 'Alpine' && steps.alpine2.outcome == 'failure' }}
       uses: jirutka/setup-alpine@master
       with:
         arch: ${{ matrix.platform.arch }}
