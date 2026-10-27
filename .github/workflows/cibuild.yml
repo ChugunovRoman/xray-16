@@ -86,6 +86,13 @@ jobs:
       shell: cmd
       run: misc/windows/xr_pack_build.cmd "${{ matrix.Configuration }}" "${{ matrix.Platform }}"
 
+    # Game-layout zips for the launcher: engine binaries + debug symbols in
+    # canonical naming (engine-windows-<arch>-<edition>.zip / symbols-windows-<arch>-<edition>.zip).
+    # These contain ONLY exe/dll/pdb — no fsgame.ltx, patches, License, utils.
+    - name: Pack engine game-layout zips
+      shell: cmd
+      run: misc/windows/xr_pack_engine.cmd "${{ matrix.Configuration }}" "${{ matrix.Platform }}"
+
     # Optional: set repo secrets SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT to auto-upload PDBs
     # for Windows Release x64 after each successful pack (same PDBs as in Symbols.*.7z artifact).
     - name: Upload PDBs to Sentry (Release x64, optional)
@@ -120,6 +127,19 @@ jobs:
       with:
         name: Utils.${{ matrix.Configuration }} ${{ matrix.Platform }} (github-${{ github.run_number }}).7z
         path: res/Utils.*.7z
+
+    # Game-layout zips (canonical names for the launcher engine distribution).
+    - name: Upload engine game-layout zip
+      uses: actions/upload-artifact@main
+      with:
+        name: engine-game-layout ${{ matrix.Configuration }} ${{ matrix.Platform }} (github-${{ github.run_number }})
+        path: res/engine-windows-*.zip
+
+    - name: Upload symbols game-layout zip
+      uses: actions/upload-artifact@main
+      with:
+        name: symbols-game-layout ${{ matrix.Configuration }} ${{ matrix.Platform }} (github-${{ github.run_number }})
+        path: res/symbols-windows-*.zip
 
     - name: Update latest-nightly tag
       uses: EndBug/latest-tag@latest
@@ -207,7 +227,7 @@ jobs:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
         apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
-        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
+        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
 
     - name: Retry Alpine setup (pause, clean rootfs)
       if: ${{ matrix.platform.name == 'Alpine' && steps.alpine1.outcome == 'failure' }}
@@ -225,7 +245,7 @@ jobs:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
         apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
-        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
+        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
 
     - name: Retry Alpine setup again (pause, clean rootfs)
       if: ${{ matrix.platform.name == 'Alpine' && steps.alpine2.outcome == 'failure' }}
@@ -241,7 +261,7 @@ jobs:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
         apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
-        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
+        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
 
     - name: Install Ubuntu packages
       if: ${{ matrix.platform.name == 'Ubuntu' || matrix.platform.name == 'AppImage' }}
@@ -269,7 +289,7 @@ jobs:
 
     - name: Install Fedora packages
       if: ${{ matrix.platform.name == 'Fedora' }}
-      run: dnf install -y git gcc gcc-c++ rpmdevtools cmake SDL2-devel lzo-devel libjpeg-turbo-devel openal-soft-devel libogg-devel libtheora-devel libvorbis-devel libcurl-devel zlib-devel
+      run: dnf install -y git gcc gcc-c++ rpmdevtools cmake SDL2-devel lzo-devel libjpeg-turbo-devel openal-soft-devel libogg-devel libtheora-devel libvorbis-devel libcurl-devel zlib-devel zip
 
     - name: Install AppImage linuxdeploy
       if: ${{ matrix.platform.name == 'AppImage' }}
@@ -380,12 +400,58 @@ jobs:
           mv *.AppImage build/artifacts/openxray-${{ matrix.configuration }}-${{ matrix.platform.arch }}.AppImage
           file build/artifacts/openxray*.*
 
+    # Game-layout zips for the launcher engine distribution (canonical names).
+    # Collects executable + shared libs from the flat CMake build output
+    # (bin/<processor>/<config>/) into a staging dir and zips them.
+    # Debug symbols are extracted from the unstripped build output BEFORE
+    # any stripping: Linux uses objcopy --only-keep-debug, macOS uses dsymutil.
+    # Skipped for Ubuntu clang to avoid duplicate artifact names (gcc is primary).
+    - name: Pack game-layout zips
+      if: >-
+        steps.cmake-build.outcome == 'success' &&
+        !(matrix.platform.name == 'Ubuntu' && matrix.platform.cc == 'clang')
+      run: |
+        # Determine os token
+        if [[ "${{ matrix.platform.name }}" == macOS* ]]; then
+          os="macos"
+        else
+          os="linux"
+        fi
+        # Determine distro token (linux only; macOS/Windows have no distro)
+        case "${{ matrix.platform.name }}" in
+          Ubuntu)   distro="ubuntu" ;;
+          Fedora)   distro="fedora" ;;
+          Alpine)   distro="alpine" ;;
+          AppImage) distro="generic" ;;
+          *)        distro="-" ;;
+        esac
+        # Find build output dir: bin/<CMAKE_SYSTEM_PROCESSOR>/<config>/
+        build_out=$(find bin -mindepth 2 -maxdepth 2 -type d -name "${{ matrix.configuration }}" 2>/dev/null | head -1)
+        if [ -z "$build_out" ]; then
+          echo "::error::Build output directory not found under bin/"
+          exit 1
+        fi
+        echo "Packing game layout from: $build_out"
+        bash misc/pack_game_layout.sh "$os" "$distro" "${{ matrix.platform.arch }}" "${{ matrix.configuration }}" "$build_out"
+
     - name: Upload OpenXRay artifact
       if: ${{ steps.make-package.outcome == 'success' || steps.make-appimage.outcome == 'success' }}
       uses: actions/upload-artifact@main
       with:
         name: ${{ matrix.platform.name }} ${{ matrix.configuration }} ${{ matrix.platform.arch }} (${{ matrix.platform.cc }} github-${{ github.run_number }})
         path: build/artifacts/openxray*.*
+
+    # Game-layout zips (canonical names for the launcher engine distribution).
+    - name: Upload game-layout zips
+      if: >-
+        steps.cmake-build.outcome == 'success' &&
+        !(matrix.platform.name == 'Ubuntu' && matrix.platform.cc == 'clang')
+      uses: actions/upload-artifact@main
+      with:
+        name: game-layout ${{ matrix.platform.name }} ${{ matrix.configuration }} ${{ matrix.platform.arch }} (${{ matrix.platform.cc }} github-${{ github.run_number }})
+        path: |
+          engine-*.zip
+          symbols-*.zip
 
   bsd:
     name: ${{ matrix.platform.name }} ${{ matrix.configuration }} ${{ matrix.platform.arch }}
