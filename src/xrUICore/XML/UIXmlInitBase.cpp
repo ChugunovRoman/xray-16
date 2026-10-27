@@ -33,6 +33,7 @@ constexpr pcstr LETTERICA18_FONT_NAME = "letterica18";
 constexpr pcstr LETTERICA25_FONT_NAME = "letterica25";
 
 constexpr pcstr DI_FONT_NAME          = "di";
+constexpr pcstr MENU_FONT_NAME        = "menu";
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -792,6 +793,10 @@ bool CUIXmlInitBase::InitFont(const CUIXml& xml_doc, pcstr path, int index, u32&
         else if (!xr_strcmp(font_name, DI_FONT_NAME))
         {
             pFnt = UI().Font().pFontDI;
+        }
+        else if (!xr_strcmp(font_name, MENU_FONT_NAME))
+        {
+            pFnt = UI().Font().pFontMenu;
         }
         else
         {

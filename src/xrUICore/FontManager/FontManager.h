@@ -13,6 +13,7 @@ struct XRUICORE_API CFontManager : public CUIResetNotifier
     // hud font
     CGameFont* pFontMedium;
     CGameFont* pFontDI;
+    CGameFont* pFontMenu; // main menu captions (section hud_font_menu)
 
     CGameFont* pFontArial14;
     CGameFont* pFontGraffiti19Russian;
