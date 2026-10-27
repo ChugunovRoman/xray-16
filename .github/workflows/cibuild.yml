@@ -178,9 +178,26 @@ jobs:
         configuration: [Debug, Mixed, Release, ReleaseMasterGold]
 
     steps:
-    # setup-alpine downloads apk.static from gitlab.alpinelinux.org, which now and then does not answer from a GitHub
-    # runner (curl: (28) Timeout was reached). Up to three attempts, a pause and a clean rootfs between them;
-    # only the last attempt fails the job.
+    # setup-alpine downloads apk.static from gitlab.alpinelinux.org, which from GitHub runners often does not answer at
+    # all (curl: (28) Timeout was reached). apk.static is taken from the Alpine CDN instead (the same host the packages
+    # come from) and put where setup-alpine looks for it ($RUNNER_TEMP/apk): when the file is there and its sha256
+    # matches, the script skips the download. The gitlab URL stays only as a formal input and is not used.
+    # Up to three attempts of the setup itself, a pause and a clean rootfs between them; only the last one fails the job.
+    - name: Fetch apk.static from the Alpine CDN
+      id: apk
+      if: ${{ matrix.platform.name == 'Alpine' }}
+      shell: bash
+      run: |
+          repo=http://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64
+          pkg=$(curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors "$repo/" | grep -o 'apk-tools-static-[0-9][^"]*\.apk' | head -n1)
+          [ -n "$pkg" ] || { echo "::error::apk-tools-static not found in $repo"; exit 1; }
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$RUNNER_TEMP/apk-tools-static.apk" "$repo/$pkg"
+          tar -xzf "$RUNNER_TEMP/apk-tools-static.apk" -C "$RUNNER_TEMP" sbin/apk.static
+          mv "$RUNNER_TEMP/sbin/apk.static" "$RUNNER_TEMP/apk"
+          chmod +x "$RUNNER_TEMP/apk"
+          "$RUNNER_TEMP/apk" --version
+          echo "sha=$(sha256sum "$RUNNER_TEMP/apk" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
     - name: Install latest stable Alpine Linux and packages
       id: alpine1
       if: ${{ matrix.platform.name == 'Alpine' }}
@@ -189,6 +206,7 @@ jobs:
       with:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
+        apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
         packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
 
     - name: Retry Alpine setup (pause, clean rootfs)
@@ -206,6 +224,7 @@ jobs:
       with:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
+        apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
         packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
 
     - name: Retry Alpine setup again (pause, clean rootfs)
@@ -221,6 +240,7 @@ jobs:
       with:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
+        apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
         packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
 
     - name: Install Ubuntu packages
