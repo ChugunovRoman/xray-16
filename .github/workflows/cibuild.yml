@@ -193,6 +193,7 @@ jobs:
 
     - name: Retry Alpine setup (pause, clean rootfs)
       if: ${{ matrix.platform.name == 'Alpine' && steps.alpine1.outcome == 'failure' }}
+      shell: bash
       run: |
           sleep 30
           sudo rm -rf /home/runner/rootfs
@@ -209,6 +210,7 @@ jobs:
 
     - name: Retry Alpine setup again (pause, clean rootfs)
       if: ${{ matrix.platform.name == 'Alpine' && steps.alpine2.outcome == 'failure' }}
+      shell: bash
       run: |
           sleep 60
           sudo rm -rf /home/runner/rootfs
