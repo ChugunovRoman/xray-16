@@ -552,15 +552,21 @@ void CUITalkWnd::Stop()
 
 void CUITalkWnd::OnInvOwnerDestroy(CInventoryOwner* owner)
 {
+    // Зовётся при уничтожении ЛЮБОГО владельца инвентаря: закрываем диалог только если уничтожается его
+    // участник, иначе окно закрывается само при каждом релизе/офлайне постороннего NPC.
+    bool involved = false;
     if (m_pOurInvOwner == owner)
     {
         m_pOurInvOwner = NULL;
         m_pOurDialogManager = NULL;
+        involved = true;
     }
     if (m_pOthersInvOwner == owner)
     {
         m_pOthersInvOwner = NULL;
         m_pOthersDialogManager = NULL;
+        involved = true;
     }
-    Stop();
+    if (involved)
+        Stop();
 }
