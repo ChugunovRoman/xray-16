@@ -470,18 +470,11 @@ bool gate_due(u32& interval_slot, u32& next_slot, u16 id, u32 interval, u32 now)
 }
 } // namespace
 
-// Returns false when the Lua binder update may be skipped for this pass (the gate is on, the Lua binder reads the
-// mask and no phase is due). The mask is kept for binder_phase_mask().
+// Returns false when the Lua binder update may be skipped for this pass (the Lua binder reads the mask and no phase
+// is due). The mask is kept for binder_phase_mask().
 bool CGameObject::binder_gate_update(u32 now)
 {
     m_binder_gate.mask = 0;
-    if (!npc_perf_motivator_native_gate)
-    {
-        // Forget the phase timers while the gate is off: switched on again, they restart (as the Lua timers do
-        // when it goes off) instead of catching up every missed interval with a due phase on each update.
-        std::fill(std::begin(m_binder_gate.interval), std::end(m_binder_gate.interval), 0u);
-        return true;
-    }
     CAI_Stalker* stalker = cast_stalker();
     if (!stalker || !stalker->g_Alive())
         return true; // dead NPCs keep their own Lua path (loot tips, the dead switch timer)

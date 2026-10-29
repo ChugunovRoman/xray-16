@@ -287,13 +287,12 @@ u32 npc_perf_motivator_callback_near_interval = 800;
 u32 npc_perf_motivator_callback_medium_interval = 1500;
 u32 npc_perf_motivator_callback_far_interval = 3500;
 u32 npc_perf_motivator_dead_interval = 3000;
-u32 npc_perf_motivator_native_gate = 0;
 u32 npc_perf_sim_brain_actor_update_interval = 10000;
 int npc_perf_agent_enemy_fill_squads_trace_members = 0;
 int npc_perf_visible_value_native = 1;        // visual_memory_manager.cpp: get_visible_value in C++
-// Stage D, W4-2: xr_logic.pick_section_from_condlist in the engine (gw_condlist_native.cpp);
-// 0 = Lua, 1 = native, 2 = shadow (dry native pass first, Lua decides, mismatches counted)
-int npc_perf_condlist_native = 0;
+// Stage D, W4-2: debug shadow of xr_logic.pick_section_from_condlist (gw_condlist_native.cpp): 1 = a dry native
+// pass first, Lua decides, mismatches counted
+int npc_perf_condlist_shadow = 0;
 int npc_perf_ik_enemy_near_dist = 20;        // CharacterPhysicsSupport.cpp: the fight IK interval only this near (K10)
 int npc_perf_ik_offscreen_interval_ms = 450; // CharacterPhysicsSupport.cpp: the IK interval of NPCs off screen (K10)
 // Stage 3 (ai_stalker.cpp, CAI_Stalker::TrySkipUpdateCLLod, always on): UpdateCL every 2nd / 3rd frame by the
@@ -325,11 +324,6 @@ int npc_perf_move_try_skip_frames_far = 0; // K of an NPC off screen or beyond n
 int npc_perf_move_try_skip_far_dist = 30;  // m from the camera; 0 = only the visibility picks the far K
 int npc_perf_move_try_skip_recover = 3;    // successes in a row after a failure before skipping again
 int npc_perf_move_try_skip_actor_dist = 5; // m from the current entity: no skipping this near
-// Stage D, W5-1: switches of the Lua scheme actions, read by the scripts (utils.perf_cvar_int); 0 = as before
-int npc_perf_camper_lean = 0;             // xr_camper: move_mgr:continue() once per stretch of walking
-int npc_perf_walker_camp_once = 0;        // xr_walker: register_npc once per stay in a camp
-int npc_perf_scheme_condlist_ttl_ms = 0;  // xr_animpoint reach_movement, xr_cover anm: condlist answer kept (ms)
-int npc_perf_move_mgr_fixes = 0;          // move_mgr: a look point without ret drops the ret of the previous one
 // P17b (plans/optimization_mt/12-relcase.md), read by death_manager.script: the items a dead NPC must not keep are
 // released together once per this many ms (one frame with a destroy instead of one per death); 0 = at once.
 int npc_perf_death_release_batch_ms = 1000;
@@ -3559,11 +3553,10 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_motivator_callback_medium_interval", (int*)&npc_perf_motivator_callback_medium_interval, 100, 120000);
     CMD4(CCC_Integer, "npc_perf_motivator_callback_far_interval", (int*)&npc_perf_motivator_callback_far_interval, 100, 120000);
     CMD4(CCC_Integer, "npc_perf_motivator_dead_interval", (int*)&npc_perf_motivator_dead_interval, 100, 120000);
-    CMD4(CCC_Integer, "npc_perf_motivator_native_gate", (int*)&npc_perf_motivator_native_gate, 0, 1);
     CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 1000, 120000);
     CMD4(CCC_Integer, "npc_perf_agent_enemy_fill_squads_trace_members", &npc_perf_agent_enemy_fill_squads_trace_members, 0, 1);
     CMD4(CCC_Integer, "npc_perf_visible_value_native", &npc_perf_visible_value_native, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_condlist_native", &npc_perf_condlist_native, 0, 2);
+    CMD4(CCC_Integer, "npc_perf_condlist_shadow", &npc_perf_condlist_shadow, 0, 1);
     CMD4(CCC_Integer, "npc_perf_ik_enemy_near_dist", &npc_perf_ik_enemy_near_dist, 0, 200);
     CMD4(CCC_Integer, "npc_perf_ik_offscreen_interval_ms", &npc_perf_ik_offscreen_interval_ms, 0, 30000);
     CMD4(CCC_Integer, "npc_perf_ucl_lod_dist", &npc_perf_ucl_lod_dist, 5, 500);
@@ -3589,10 +3582,6 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_move_try_skip_far_dist", &npc_perf_move_try_skip_far_dist, 0, 500);
     CMD4(CCC_Integer, "npc_perf_move_try_skip_recover", &npc_perf_move_try_skip_recover, 1, 16);
     CMD4(CCC_Integer, "npc_perf_move_try_skip_actor_dist", &npc_perf_move_try_skip_actor_dist, 0, 100);
-    CMD4(CCC_Integer, "npc_perf_camper_lean", &npc_perf_camper_lean, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_walker_camp_once", &npc_perf_walker_camp_once, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_scheme_condlist_ttl_ms", &npc_perf_scheme_condlist_ttl_ms, 0, 5000);
-    CMD4(CCC_Integer, "npc_perf_move_mgr_fixes", &npc_perf_move_mgr_fixes, 0, 1);
     CMD4(CCC_Integer, "npc_perf_death_release_batch_ms", &npc_perf_death_release_batch_ms, 0, 5000);
     CMD4(CCC_IntegerNotSaved, "npc_perf_death_release_batch_max", &npc_perf_death_release_batch_max, 0, 4096);
     // 30-game-events.md: B3 (Lua) and B2 (ai_stalker_events.cpp: a reject right before the destroy of the item skips

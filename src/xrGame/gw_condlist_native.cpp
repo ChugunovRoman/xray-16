@@ -45,7 +45,7 @@
 // of a condlist are registry refs (lua_rawgeti instead of lua_pushlstring), and EnsureRegistryTables is
 // a single registry flag check per call.
 //
-// Switch npc_perf_condlist_native: 0 = pure Lua (default), 1 = native decides, 2 = shadow (native runs
+// The native interpreter always decides. Debug cvar npc_perf_condlist_shadow 1 = shadow (native runs
 // a dry pass first - no infop_set, no effects - saving and restoring the LuaJIT math.random state, then
 // the Lua pass decides and _gw_internal.logic.shadow_result counts the mismatches).
 //
@@ -2237,12 +2237,6 @@ private:
 // result: the picked section (string or nil), or false when Lua must run the call.
 int LuaPickSection(lua_State* L)
 {
-    if (npc_perf_condlist_native == 0)
-    {
-        lua_pushboolean(L, 0);
-        lua_pushboolean(L, 0);
-        return 2;
-    }
     // Lazy init of the registry tables: called from Lua (a valid frame), never from the export node
     // (see CGwCondlistScript::script_register). After the first time this is one registry flag read (P3 d).
     CondlistPickProfile profile; // plan 60 P2: the stages of this call (the switch is on)
@@ -2472,7 +2466,7 @@ int LuaPickSection(lua_State* L)
         return FallbackResult(L, ENpcCppProfileStage::CondlistPickFbTypes, g_fbTypes, nullptr);
     } // CondlistPickPrepareRest (2nd half)
 
-    const bool shadow = npc_perf_condlist_native == 2;
+    const bool shadow = npc_perf_condlist_shadow != 0;
     PrngGuard prng;
     if (compiled->usesRandom)
     {
@@ -2574,12 +2568,12 @@ int LuaShadowResult(lua_State* L)
     return 0;
 }
 
-// _gw_internal.logic.stats(): counters of the native interpreter (npc_perf_condlist_native).
+// _gw_internal.logic.stats(): counters of the native interpreter.
 // Plan 60 P-fb: the fallback map - the split by reason plus the condition/effect names of the named
 // kinds (unknown conditions, Lua patterns, effects in infop_set, bad params), counted per call.
 int LuaStats(lua_State*)
 {
-    Msg("- [gw_condlist] npc_perf_condlist_native=%d calls=%llu covered=%llu compiled=%llu", npc_perf_condlist_native,
+    Msg("- [gw_condlist] npc_perf_condlist_shadow=%d calls=%llu covered=%llu compiled=%llu", npc_perf_condlist_shadow,
         static_cast<unsigned long long>(g_calls), static_cast<unsigned long long>(g_covered),
         static_cast<unsigned long long>(g_compiled));
     Msg("-   fallbacks: structure=%llu unknown_func=%llu pattern=%llu effect=%llu param=%llu identity=%llu actions=%llu types=%llu prng=%llu",

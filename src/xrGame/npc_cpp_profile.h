@@ -371,7 +371,7 @@ enum class ENpcCppProfileStage : u32
     ScriptBinderUpdateSmartZoneRestrictor,
     ScriptBinderUpdateSmartZoneOther,
     // plans/lua_to_cpp/60-npc-xr-logic-pick-section.md, P2 (measurement only): the native condlist interpreter
-    // (gw_condlist_native.cpp, LuaPickSection) with the switch npc_perf_condlist_native on. condlist/pick - the whole
+    // (gw_condlist_native.cpp, LuaPickSection). condlist/pick - the whole
     // native call; /prepare - the checks before the evaluation (registry tables, the compiled condlist, the argument
     // types, the identities of the functions and xr_actions, the zones), every call, its fallbacks included; /eval -
     // the evaluation and the result string of a call the native side decides; /fallback (a counter) - the calls that
@@ -381,7 +381,7 @@ enum class ENpcCppProfileStage : u32
     CondlistPickEval,
     CondlistPickFallback,
     // plans/lua_to_cpp/58-npc-motivator.md sec. 7 (counters, measurement only): the phase gate of the Lua binder of a
-    // stalker (CGameObject::binder_gate_update, npc_perf_motivator_native_gate 1, a binder that reads the mask).
+    // stalker (CGameObject::binder_gate_update, a binder that reads the mask).
     // skipped - no phase due, the Lua binder is not called; medium_only - only the medium phase is due (what plan 58
     // M6 would take off the Lua binder); slow / switch / callback - the passes with that phase due
     BinderGateSkipped,

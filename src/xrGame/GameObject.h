@@ -135,7 +135,7 @@ protected:
     // Anti-synchronization: script binder can cause large luabind_update spikes when many objects
     // run in the same frame. We throttle binder per-object using a next-call timestamp.
     u32 m_next_script_binder_update_time{0};
-    // Stage D, W3-1: engine gate of the Lua NPC binder (npc_perf_motivator_native_gate). Phase timers of the
+    // Stage D, W3-1: engine gate of the Lua NPC binder. Phase timers of the
     // motivator binder (medium, slow, switch, callback: the same as its is_bucket_due) and the mask of the
     // current update; consumer = the Lua binder reads the mask, so the engine may skip calls it does not need.
     struct BinderGate

@@ -145,6 +145,10 @@ void SpatialBase::spatial_move()
     PERF_SPIKE_NAMED(rebuild_spike, "spatial_move/rebuild", static_cast<const SpatialBase*>(this), describe_spike, false);
 #endif
     auto lock = SpatialLockUnique(spatial.space->query_rw_mutex());
+    // node_ptr was checked without the lock: spatial_unregister() on another thread may have taken the object out of
+    // the octree meanwhile; re-inserting it would leave a dangling item in the tree after the owner is destroyed
+    if (!spatial.node_ptr)
+        return;
     spatial.space->remove_assuming_locked(this);
     spatial.space->insert_assuming_locked(this);
 }
@@ -178,6 +182,13 @@ void ISpatial_NODE::_remove(ISpatial* S)
     S->GetSpatialData().node_ptr = NULL;
     xr_vector<ISpatial*>::iterator it = std::find(items.begin(), items.end(), S);
     VERIFY(it != items.end());
+    if (it == items.end())
+    {
+        // erase(end()) is undefined behaviour and leaves null/garbage items that the readers (q_sphere, q_box, ...) then
+        // dereference; a double remove must not corrupt the node
+        Msg("! ISpatial_NODE::_remove: item is not in its node (double remove?), skipped");
+        return;
+    }
     items.erase(it);
     S->GetSpatialData().space->Stats.ObjectCount--;
 }
@@ -407,6 +418,8 @@ void ISpatial_DB::remove_assuming_locked(ISpatial* S)
     Stats.Remove.Begin();
 #endif
     ISpatial_NODE* N = S->GetSpatialData().node_ptr;
+    if (!N)
+        return; // already removed
     N->_remove(S);
 
     // Recurse

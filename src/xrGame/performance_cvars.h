@@ -102,9 +102,6 @@ extern u32 npc_perf_motivator_callback_near_interval;
 extern u32 npc_perf_motivator_callback_medium_interval;
 extern u32 npc_perf_motivator_callback_far_interval;
 extern u32 npc_perf_motivator_dead_interval;
-// Stage D, W3-1: 0 = the Lua NPC binder computes its update lane and phases itself (old); 1 = the engine does,
-// with the same rules and the npc_perf_motivator_* intervals, and skips the Lua update when no phase is due.
-extern u32 npc_perf_motivator_native_gate;
 extern u32 npc_perf_sim_brain_actor_update_interval;
 
 /** 1 = Tracy zone per combat member in CAgentEnemyManager::fill_enemies (fill_from_squads/member). Default 0: thousands of zones hurt Tracy and add overhead. */
@@ -114,12 +111,11 @@ extern int npc_perf_agent_enemy_fill_squads_trace_members;
     (an addon that changes the script formula needs 0). */
 extern int npc_perf_visible_value_native;
 
-// Stage D, W4-2 (gw_condlist_native.cpp): xr_logic.pick_section_from_condlist in the engine.
-// 0 = pure Lua (default); 1 = the native interpreter decides (falls back per call when the condlist
-// has anything it cannot evaluate); 2 = shadow: a dry native pass runs first (no infop_set, no
-// effects, the LuaJIT math.random state is restored after it), then Lua decides and mismatches are
-// counted (_gw_internal.logic.stats prints them).
-extern int npc_perf_condlist_native;
+// Stage D, W4-2 (gw_condlist_native.cpp): xr_logic.pick_section_from_condlist is decided by the engine
+// interpreter (falls back per call when the condlist has anything it cannot evaluate).
+// Debug: 1 = shadow: a dry native pass runs first (no infop_set, no effects, the LuaJIT math.random state is
+// restored after it), then Lua decides and mismatches are counted (_gw_internal.logic.stats prints them).
+extern int npc_perf_condlist_shadow;
 
 /** IK of NPCs in a fight (CharacterPhysicsSupport.cpp, get_character_ik_update_interval). 0 = as before:
     a stalker with a selected enemy runs IK at npc_perf_ik_interval_enemy_selected_ms at any distance. N > 0 = that
