@@ -393,12 +393,25 @@ u16 CInventoryOwner::object_id() const { return smart_cast<const CGameObject*>(t
 //////////////////////////////////////////////////////////////////////////
 //установка группировки на клиентском и серверном объкте
 
+// The server object of an online NPC can be gone before its client one: a script released it (alife_release,
+// e.g. surge_manager -> sim_squad_scripted:remove_npc -> force_release_alife_object) while its GE_DESTROY is still
+// queued, and a GE_DIE with this NPC as the killer is processed first (RELATION_REGISTRY::Action, KILL ->
+// ChangeRank). object(id) without no_assert throws then, so look it up softly and leave the values as they are
+static CSE_Abstract* inventory_owner_server_entity(const CEntityAlive* EA, pcstr what)
+{
+    CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), true);
+    if (!e_entity)
+        Msg("! [GW] CInventoryOwner::%s: [%s] id=%u has no server object (already released), skipped", what,
+            EA->cName().c_str(), u32(EA->ID()));
+    return e_entity;
+}
+
 void CInventoryOwner::SetCommunity(CHARACTER_COMMUNITY_INDEX new_community)
 {
     CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
     VERIFY(EA);
 
-    CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
+    CSE_Abstract* e_entity = inventory_owner_server_entity(EA, "SetCommunity");
     if (!e_entity)
         return;
 
@@ -428,7 +441,7 @@ void CInventoryOwner::SetRank(CHARACTER_RANK_VALUE rank)
 {
     CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
     VERIFY(EA);
-    CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
+    CSE_Abstract* e_entity = inventory_owner_server_entity(EA, "SetRank");
     if (!e_entity)
         return;
     CSE_ALifeTraderAbstract* trader = smart_cast<CSE_ALifeTraderAbstract*>(e_entity);
@@ -444,7 +457,7 @@ void CInventoryOwner::SetReputation(CHARACTER_REPUTATION_VALUE reputation)
 {
     CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
     VERIFY(EA);
-    CSE_Abstract* e_entity = ai().alife().objects().object(EA->ID(), false);
+    CSE_Abstract* e_entity = inventory_owner_server_entity(EA, "SetReputation");
     if (!e_entity)
         return;
 
