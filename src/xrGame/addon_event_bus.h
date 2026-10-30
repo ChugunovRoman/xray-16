@@ -44,6 +44,8 @@ enum class EBuiltin : GwpEventId
     AlifeOnTimeSkipBegin, // (total_ms, steps) before the first step
     AlifeOnTimeSkipStep,  // (step_ms, index, steps, tick) the offline movement is at the cursor of the step
     AlifeOnTimeSkipEnd,   // (total_ms, steps) after the last step, the cursor is gone
+    // plans/friendly_fire/plan.md: RELATION_REGISTRY::Action is about to change goodwill
+    RelationOnBeforeAction, // (action, from, to, relation, delta, danger, hit type, health lost) -> delta / false
     Count_
 };
 

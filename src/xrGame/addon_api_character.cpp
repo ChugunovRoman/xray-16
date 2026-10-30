@@ -696,6 +696,42 @@ void RelationsReset()
     events::Emit(events::EBuiltin::RelationOnChanged, args, static_cast<u32>(std::size(args)));
 }
 
+bool BeforeRelationAction(pcstr action, u16 from, u16 to, int relation, int& delta, bool danger, int hit_type,
+    float health_lost)
+{
+    if (!events::HasSubscribers(events::EBuiltin::RelationOnBeforeAction))
+        return true;
+    const GwpValue args[] = {
+        events::String(action),
+        events::Object(from),
+        events::Object(to),
+        events::Int(relation),
+        events::Number(delta),
+        events::Bool(danger),
+        events::Int(hit_type),
+        events::Number(health_lost),
+    };
+    // The result: the delta of the goodwill; a subscriber writes another number, or false to skip the change. 0 skips
+    // it too (ChangeGoodwill by 0 does nothing)
+    GwpValue result = events::Number(delta);
+    events::Emit(events::EBuiltin::RelationOnBeforeAction, args, static_cast<u32>(std::size(args)), &result);
+    double value = delta;
+    switch (result.type)
+    {
+    case GWP_T_BOOL: return result.u.b != 0;
+    case GWP_T_NUMBER:
+        if (!std::isfinite(result.u.n))
+            return true; // the delta as it was
+        value = result.u.n;
+        break;
+    case GWP_T_INT: value = static_cast<double>(result.u.i); break;
+    default: return true; // nil or another type: the delta as it was
+    }
+    value = std::clamp(std::round(value), static_cast<double>(INT_MIN / 2), static_cast<double>(INT_MAX / 2));
+    delta = static_cast<int>(value);
+    return delta != 0;
+}
+
 void FillEngineApi(GwpEngineApi& api)
 {
     api.character_money = &ApiCharacterMoney;

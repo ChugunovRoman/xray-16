@@ -13,6 +13,8 @@
 #include "memory_manager.h"
 #include "enemy_manager.h"
 
+#include "addon_api_character.h"
+
 struct SAttackGoodwillStorage
 {
     CHARACTER_GOODWILL friend_attack_goodwill;
@@ -57,6 +59,26 @@ void load_attack_goodwill()
     gw_free.load("free_");
 }
 
+// Plugin API: relation_on_before_action (plans/friendly_fire/plan.md) - the subscribers may change the goodwill delta
+// of an action or skip it. The community part follows the same ratio. false = no goodwill change at all
+static bool before_relation_action(pcstr action, const CEntityAlive* from, const CEntityAlive* to,
+    ALife::ERelationType relation, CHARACTER_GOODWILL& delta_goodwill, CHARACTER_GOODWILL& community_goodwill,
+    bool danger, int hit_type, float health_lost)
+{
+    int delta = delta_goodwill;
+    if (!gw::addons::character::BeforeRelationAction(
+            action, from->ID(), to->ID(), int(relation), delta, danger, hit_type, health_lost))
+        return false;
+    if (delta != delta_goodwill)
+    {
+        community_goodwill = delta_goodwill ?
+            CHARACTER_GOODWILL(float(community_goodwill) * float(delta) / float(delta_goodwill)) :
+            0;
+        delta_goodwill = delta;
+    }
+    return true;
+}
+
 template <typename F>
 static void for_each_online_group_member_id(const CAI_Stalker* stalker, F&& cb)
 {
@@ -82,7 +104,8 @@ static void for_each_online_group_member_id(const CAI_Stalker* stalker, F&& cb)
     }
 }
 
-void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAction action)
+void RELATION_REGISTRY::Action(
+    CEntityAlive* from, CEntityAlive* to, ERelationAction action, int hit_type, float health_lost)
 {
     static CHARACTER_GOODWILL friend_kill_goodwill = pSettings->r_s32(ACTIONS_POINTS_SECT, "friend_kill_goodwill");
     static CHARACTER_GOODWILL neutral_kill_goodwill = pSettings->r_s32(ACTIONS_POINTS_SECT, "neutral_kill_goodwill");
@@ -211,7 +234,12 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
             //(считается, что такое нападение всегда случайно)
             // change relation only for pairs actor->stalker, do not use pairs stalker->stalker
             bool stalker_attack_team_mate = stalker && stalker_from;
-            if (delta_goodwill && !stalker_attack_team_mate)
+            //*(CHARACTER_GOODWILL)( stalker->Sympathy() * (float)(delta_goodwill));
+            CHARACTER_GOODWILL community_goodwill =
+                (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(st->community_member_attack_goodwill));
+            if (delta_goodwill && !stalker_attack_team_mate &&
+                before_relation_action("attack", from, stalker, relation, delta_goodwill, community_goodwill,
+                    bDangerScheme, hit_type, health_lost))
             {
                 //изменить отношение ко всем членам атакованой группы (если такая есть)
                 //как к тому кого атаковали
@@ -220,9 +248,6 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
                     ChangeGoodwill(member_id, from->ID(), delta_goodwill);
                 });
 
-                //*(CHARACTER_GOODWILL)( stalker->Sympathy() * (float)(delta_goodwill));
-                CHARACTER_GOODWILL community_goodwill =
-                    (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(st->community_member_attack_goodwill));
                 if (community_goodwill)
                 {
                     ChangeCommunityGoodwill(stalker->Community(), from->ID(), community_goodwill);
@@ -278,7 +303,12 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
             //(считается, что такое нападение всегда случайно)
             bool stalker_kills_team_mate = stalker_from && (stalker_from->Community() == stalker->Community());
 
-            if (delta_goodwill && !stalker_kills_team_mate)
+            //(CHARACTER_GOODWILL)( stalker->Sympathy() * (float)(delta_goodwill+community_member_kill_goodwill));
+            CHARACTER_GOODWILL community_goodwill =
+                (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(community_member_kill_goodwill));
+            if (delta_goodwill && !stalker_kills_team_mate &&
+                before_relation_action("kill", from, stalker, relation_before_attack, delta_goodwill,
+                    community_goodwill, false, hit_type, health_lost))
             {
                 //изменить отношение ко всем членам группы (если такая есть)
                 //убитого, кроме него самого
@@ -288,9 +318,6 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
                         ChangeGoodwill(member_id, from->ID(), delta_goodwill);
                 });
 
-                //(CHARACTER_GOODWILL)( stalker->Sympathy() * (float)(delta_goodwill+community_member_kill_goodwill));
-                CHARACTER_GOODWILL community_goodwill =
-                    (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(community_member_kill_goodwill));
                 if (community_goodwill)
                 {
                     ChangeCommunityGoodwill(stalker->Community(), from->ID(), community_goodwill);
@@ -339,7 +366,13 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
             }
             };
 
-            if (delta_goodwill)
+            //*					ChangeCommunityGoodwill(stalker->Community(), from->ID(), (CHARACTER_GOODWILL)(
+            // stalker->Sympathy() * (float)delta_goodwill ));
+            CHARACTER_GOODWILL community_goodwill =
+                (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(community_member_fight_help_goodwill));
+            if (delta_goodwill &&
+                before_relation_action(action == FIGHT_HELP_HUMAN ? "fight_help_human" : "fight_help_monster", from,
+                    stalker, relation, delta_goodwill, community_goodwill, false, -1, 0.f))
             {
                 //изменить отношение ко всем членам атакованой группы (если такая есть)
                 //как к тому кого атаковали
@@ -348,10 +381,6 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
                     ChangeGoodwill(member_id, from->ID(), delta_goodwill);
                 });
 
-                //*					ChangeCommunityGoodwill(stalker->Community(), from->ID(), (CHARACTER_GOODWILL)(
-                // stalker->Sympathy() * (float)delta_goodwill ));
-                CHARACTER_GOODWILL community_goodwill =
-                    (CHARACTER_GOODWILL)(stalker->Sympathy() * (float)(community_member_fight_help_goodwill));
                 if (community_goodwill)
                 {
                     ChangeCommunityGoodwill(stalker->Community(), from->ID(), community_goodwill);

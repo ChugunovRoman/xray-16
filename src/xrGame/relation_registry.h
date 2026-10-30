@@ -78,7 +78,9 @@ public:
         FIGHT_HELP_MONSTER = 0x04, //помощь в драке персонажу c монстром
         SOS_HELP = 0x08 //приход на помощь по сигналу SOS
     };
-    void Action(CEntityAlive* from, CEntityAlive* to, ERelationAction action);
+    // hit_type / health_lost: the hit behind an ATTACK (ALife::EHitType and the health it took), -1 / 0 otherwise;
+    // they go to the plugin event relation_on_before_action
+    void Action(CEntityAlive* from, CEntityAlive* to, ERelationAction action, int hit_type = -1, float health_lost = 0.f);
 
     struct FIGHT_DATA
     {

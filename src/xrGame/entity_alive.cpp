@@ -340,6 +340,7 @@ void CEntityAlive::HitImpulse(float /**amount**/, Fvector& /**vWorldDir**/, Fvec
 void CEntityAlive::Hit(SHit* pHDS)
 {
     SHit HDS = *pHDS;
+    const float health_before = GetfHealth(); // relation_on_before_action: the health the hit took
     //-------------------------------------------------------------------
     if (HDS.hit_type == ALife::eHitTypeWound_2)
         HDS.hit_type = ALife::eHitTypeWound;
@@ -376,7 +377,8 @@ void CEntityAlive::Hit(SHit* pHDS)
         if (EA && EA->g_Alive() && EA->ID() != ID())
         {
             RELATION_REGISTRY().FightRegister(EA->ID(), ID(), this->tfGetRelationType(EA), HDS.damage());
-            RELATION_REGISTRY().Action(EA, this, RELATION_REGISTRY::ATTACK);
+            RELATION_REGISTRY().Action(EA, this, RELATION_REGISTRY::ATTACK, int(HDS.hit_type),
+                std::max(health_before - GetfHealth(), 0.f));
         }
     }
 }

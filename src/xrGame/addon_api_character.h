@@ -26,4 +26,11 @@ void GoodwillChanged(u16 from, u16 to, int old_goodwill, int new_goodwill);
 void CommunityGoodwillChanged(int community, u16 to, int old_goodwill, int new_goodwill);
 void CommunityRelationChanged(int from, int to, int old_goodwill, int new_goodwill);
 void RelationsReset();
+
+// relation_on_before_action, from RELATION_REGISTRY::Action (relation_registry_actions.cpp) right before it changes
+// the goodwill of the group of `to` toward `from`. action: "attack", "kill", "fight_help_human", "fight_help_monster".
+// The subscribers may write another delta; false = no change of goodwill (the reputation and rank still change).
+// Without subscribers: true and delta as it was.
+bool BeforeRelationAction(pcstr action, u16 from, u16 to, int relation, int& delta, bool danger, int hit_type,
+    float health_lost);
 } // namespace gw::addons::character

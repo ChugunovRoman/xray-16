@@ -168,6 +168,7 @@ constexpr pcstr kBuiltinNames[] = {
     "alife_on_time_skip_begin",
     "alife_on_time_skip_step",
     "alife_on_time_skip_end",
+    "relation_on_before_action",
 };
 static_assert(std::size(kBuiltinNames) == static_cast<size_t>(EBuiltin::Count_) - 1, "kBuiltinNames != EBuiltin");
 
@@ -217,6 +218,7 @@ constexpr pcstr kBuiltinSchemas[] = {
     "NN",   // alife_on_time_skip_begin (total ms, steps)
     "NNNb", // alife_on_time_skip_step (step ms, index from 1, steps, tick)
     "NN",   // alife_on_time_skip_end (total ms, steps)
+    "sooINbIN", // relation_on_before_action (action, from, to, relation, delta, danger, hit type, health lost)
 };
 static_assert(std::size(kBuiltinSchemas) == std::size(kBuiltinNames), "kBuiltinSchemas != kBuiltinNames");
 
@@ -224,6 +226,7 @@ static_assert(std::size(kBuiltinSchemas) == std::size(kBuiltinNames), "kBuiltinS
 constexpr pcstr kBuiltinResultEvents[] = {
     "npc_on_before_hit",
     "monster_on_before_hit",
+    "relation_on_before_action",
 };
 
 GwpEventId InternIn(Bus& bus, pcstr name);
