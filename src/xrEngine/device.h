@@ -391,26 +391,24 @@ public:
     void AddSeqFrame(pureFrame* f, bool mt);
     void RemoveSeqFrame(pureFrame* f);
 
+    // All copies: a delegate can be queued twice in one frame (the path builders: clear_path() and update_path()
+    // register the builder again before the queue runs), and a copy left after net_Destroy of its owner runs on the
+    // freed object (AV in CLevelPathBuilder::process -> CDetailPathManager::compute_path)
     ICF void remove_from_seq_parallel(const fastdelegate::FastDelegate0<>& delegate)
     {
-        xr_vector<fastdelegate::FastDelegate0<>>::iterator I =
-            std::find(seqParallel.begin(), seqParallel.end(), delegate);
-        if (I != seqParallel.end())
-            seqParallel.erase(I);
+        seqParallel.erase(std::remove(seqParallel.begin(), seqParallel.end(), delegate), seqParallel.end());
     }
 
     ICF void remove_from_seq_parallel_beforerender(const fastdelegate::FastDelegate0<>& delegate)
     {
-        auto I = std::find(seqParallelBeforRender.begin(), seqParallelBeforRender.end(), delegate);
-        if (I != seqParallelBeforRender.end())
-            seqParallelBeforRender.erase(I);
+        seqParallelBeforRender.erase(
+            std::remove(seqParallelBeforRender.begin(), seqParallelBeforRender.end(), delegate), seqParallelBeforRender.end());
     }
 
     ICF void remove_from_seq_parallel_render(const fastdelegate::FastDelegate0<>& delegate)
     {
-        auto I = std::find(seqParallelRender.begin(), seqParallelRender.end(), delegate);
-        if (I != seqParallelRender.end())
-            seqParallelRender.erase(I);
+        seqParallelRender.erase(
+            std::remove(seqParallelRender.begin(), seqParallelRender.end(), delegate), seqParallelRender.end());
     }
 
 private:
