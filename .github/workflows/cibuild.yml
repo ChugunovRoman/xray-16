@@ -229,7 +229,7 @@ jobs:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
         apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
-        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
+        packages: bash build-base cmake curl-dev file git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
 
     - name: Retry Alpine setup (pause, clean rootfs)
       if: ${{ matrix.platform.name == 'Alpine' && steps.alpine1.outcome == 'failure' }}
@@ -247,7 +247,7 @@ jobs:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
         apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
-        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
+        packages: bash build-base cmake curl-dev file git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
 
     - name: Retry Alpine setup again (pause, clean rootfs)
       if: ${{ matrix.platform.name == 'Alpine' && steps.alpine2.outcome == 'failure' }}
@@ -263,7 +263,7 @@ jobs:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
         apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!${{ steps.apk.outputs.sha }}
-        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
+        packages: bash build-base cmake curl-dev file git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev zip
 
     - name: Install Ubuntu packages
       if: ${{ matrix.platform.name == 'Ubuntu' || matrix.platform.name == 'AppImage' }}
@@ -377,20 +377,21 @@ jobs:
           # CPack file names don't include build configuration and compiler, but GitHub
           # release assets must be unique across the whole matrix - insert both into the name.
           # The CPack prefix is matched case-insensitively (a source package is named OpenXRay-<version>-Source.*,
-          # binary packages openxray-<version>-<arch>.*) and replaced as a whole: with nullglob an unmatched
-          # pattern expands to nothing, and `file` without arguments fails the step.
-          shopt -s nullglob
+          # binary packages openxray-<version>-<arch>.*) and replaced as a whole.
+          # POSIX sh only: on Alpine the step runs in the busybox sh of the chroot (no shopt, no arrays), so an
+          # unmatched pattern stays literal and is skipped by the -e checks.
           for f in artifacts/[oO]pen[xX][rR]ay*.*; do
+            [ -e "$f" ] || continue
             base=$(basename "$f")
             mv "$f" "artifacts/openxray-${{ matrix.configuration }}-${{ matrix.platform.cc }}-${base#*-}"
           done
-          packages=(artifacts/*)
-          if [ ${#packages[@]} -eq 0 ]; then
+          set -- artifacts/*
+          if [ ! -e "$1" ]; then
             echo "::error::cpack produced no files in build/artifacts"
             exit 1
           fi
           ls -l artifacts
-          file "${packages[@]}"
+          file "$@"
 
     - name: Make AppImage
       if: ${{ steps.cmake-build.outcome == 'success' && matrix.platform.name == 'AppImage' }}
@@ -413,12 +414,11 @@ jobs:
         steps.cmake-build.outcome == 'success' &&
         !(matrix.platform.name == 'Ubuntu' && matrix.platform.cc == 'clang')
       run: |
-        # Determine os token
-        if [[ "${{ matrix.platform.name }}" == macOS* ]]; then
-          os="macos"
-        else
-          os="linux"
-        fi
+        # Determine os token (POSIX sh: on Alpine this runs in the busybox sh of the chroot)
+        case "${{ matrix.platform.name }}" in
+          macOS*) os="macos" ;;
+          *)      os="linux" ;;
+        esac
         # Determine distro token (linux only; macOS/Windows have no distro)
         case "${{ matrix.platform.name }}" in
           Ubuntu)   distro="ubuntu" ;;
