@@ -62,16 +62,5 @@ public:
     // destroyed while its vis test is pending, an smapvis test abandoned by invalidate()/begin().
     // Re-issuing Begin on a query with an unread result is legal in D3D11. ID becomes iInvalidHandle.
     void occq_free(u32& ID);
-
-    // Telemetry (r__gpu_diag): live = slots holding a query that was issued but not fetched yet,
-    // capacity = slots ever handed out, pooled = queries parked in the free pool. A capacity that
-    // grows monotonically while live stays small means queries leak (issued, never fetched).
-    void get_stats(size_t& live, size_t& capacity, size_t& pooled)
-    {
-        ScopeLock lock{ &render_lock };
-        live = used.size() - fids.size();
-        capacity = used.size();
-        pooled = pool.size();
-    }
 };
 } // namespace xray::render::RENDER_NAMESPACE

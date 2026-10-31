@@ -45,8 +45,6 @@ public:
     // ID3D11DeviceContext is NOT free-threaded: only the thread that runs the frame (stamped in
     // BeginScene) may touch the immediate context. CheckImmThread reports, rate-limited, any call
     // from another thread - undefined behaviour and a prime suspect for corrupted GPU state.
-    u32 ImmOwnerThread() const { return m_immOwnerThread; }
-    u32 ImmForeignCalls() const { return m_immForeignCalls.load(std::memory_order_relaxed); }
     void CheckImmThread(const char* where);
     // Human-readable name of a GetDeviceRemovedReason() code (HUNG/RESET/INTERNAL/INVALID_CALL).
     static pcstr DeviceRemovedReasonName(HRESULT reason);

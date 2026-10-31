@@ -74,6 +74,32 @@ bool cmp_pass(const T& left, const T& right)
     return left->second.ssa > right->second.ssa;
 }
 
+// main_par_textures_ok (and the parallel main-view submit it guards) is USE_DX11-only - GL never runs a second
+// writer thread against the scope's deferred context in the first place (BeginSecondVPCalculateParallel always
+// stays sequential there), so render_graph_static_passes/render_graph (SVP_DEVICE_REMOVED_ANALYSIS_2026-09-10.md
+// §4m) only need the real check on DX11; the GL stub below keeps their call sites backend-agnostic.
+#if defined(USE_DX11)
+// Defined below, next to render_graph_main_parallel(), in the same (anonymous-namespace) translation unit scope
+// - re-opening `namespace { }` here just forward-declares it, it does not give it external linkage. True if every
+// texture of this pass is already past its first bind (apply_load), i.e. safe to touch from a thread other than
+// the one that is loading it.
+namespace
+{
+bool main_par_textures_ok(SPass* pass);
+// True if this visual's Render() only records into the backend it is given, i.e. touches no shared mutable state
+// off its owning thread. False for particles/fluid volumes/LODs (RImplementation.Vertex - a single shared dynamic
+// vertex buffer, locked and filled right before the draw) and for software-skinned skeletons, which skin into that
+// very same shared buffer (FSkinned.cpp CSkeletonX_ext::_Load_hw, RM_SKINNING_SOFT: V.rm_geom.create(...,
+// RImplementation.Vertex.Buffer(), ...)) instead of their own per-object geometry.
+bool main_par_visual_ok(dxRender_Visual* V);
+}
+ICF bool svp_worker_pass_textures_ok(SPass* pass) { return main_par_textures_ok(pass); }
+ICF bool svp_worker_visual_ok(dxRender_Visual* V) { return main_par_visual_ok(V); }
+#else
+ICF bool svp_worker_pass_textures_ok(SPass*) { return true; }
+ICF bool svp_worker_visual_ok(dxRender_Visual*) { return true; }
+#endif
+
 // The group bodies of render_graph, shared with the parallel main-view submit (render_graph_main_parallel below): a run of
 // SSA-sorted items of one SPass group drawn on cmd_list. Static (mapNormal) items keep the world transform the caller
 // set (identity); dynamic (mapMatrix) items set their own.
@@ -149,6 +175,12 @@ void R_dsgraph_structure::render_graph_static_passes(u32 _priority, bool use_fas
     [[maybe_unused]] const u32 perf_draws0 = cmd_list.stat.render.calls;
     PERF_CB_SNAPSHOT(perf_cb_static);
     const glod_range_t glod = pass_glod(o);
+    // SVP_DEVICE_REMOVED_ANALYSIS_2026-09-10.md §4m: this build ran on the SVP worker thread, concurrently with
+    // the main thread's own rendering (record_second_vp_geometry_into overlaps the main render's lighting/combine
+    // tail). CTexture::Load() has no synchronization on flags.bLoaded/pSurface/m_pSRView, so a group still on its
+    // first bind (apply_load) must not be drawn here - the same race render_graph_main_parallel already dodges
+    // via main_par_textures_ok. Skipped groups just wait for the scope's next frame.
+    const bool svp_worker_race_guard = o.second_vp_pass;
 
     for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
     {
@@ -162,7 +194,15 @@ void R_dsgraph_structure::render_graph_static_passes(u32 _priority, bool use_fas
             items.ssa = 0;
 
             std::sort(items.begin(), items.end(), cmp_ssa<_NormalItem>);
-            render_normal_items(cmd_list, it->first, items.data(), items.size(), glod, use_fast_geo, perf_main);
+            bool draw_ok = true;
+            if (svp_worker_race_guard)
+            {
+                draw_ok = svp_worker_pass_textures_ok(it->first);
+                for (size_t gi = 0; gi < items.size() && draw_ok; ++gi)
+                    draw_ok = svp_worker_visual_ok(items[gi].pVisual);
+            }
+            if (draw_ok)
+                render_normal_items(cmd_list, it->first, items.data(), items.size(), glod, use_fast_geo, perf_main);
             items.clear();
         }
         nrmPasses.clear();
@@ -197,6 +237,9 @@ void R_dsgraph_structure::render_graph(u32 _priority)
     [[maybe_unused]] const bool perf_main = o.is_main_pass && !o.second_vp_pass;
     [[maybe_unused]] const bool perf_svp = o.svp_view && _priority == 0; // render/svp/geom_* (31-svp-scope.md)
     const bool use_fast_geo = o.phase == CRender::PHASE_SMAP;
+    // SVP_DEVICE_REMOVED_ANALYSIS_2026-09-10.md §4m: see the same guard in render_graph_static_passes - this
+    // build is the SVP worker's, so an unloaded-texture group must not be drawn here either.
+    const bool svp_worker_race_guard = o.second_vp_pass;
 #if defined(USE_DX11) && XR_PERF_METRICS
     // P19 step 2: backend redundancy counters of this graph (static + dynamic), see CBackend::_stats.
     const u32 perf_layout_skip0 = cmd_list.stat.layout_skip;
@@ -250,9 +293,19 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 
                     if (!presorted)
                         std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
-                    RImplementation.BasicStats.CorpseRegularSubmissions +=
-                        render_matrix_items(cmd_list, it->first, items.data(), items.size(), glod, use_fast_geo, perf_main);
-                    statsCounter += static_cast<u32>(items.size());
+                    bool draw_ok = true;
+                    if (svp_worker_race_guard)
+                    {
+                        draw_ok = svp_worker_pass_textures_ok(it->first);
+                        for (size_t gi = 0; gi < items.size() && draw_ok; ++gi)
+                            draw_ok = svp_worker_visual_ok(items[gi].pVisual);
+                    }
+                    if (draw_ok)
+                    {
+                        RImplementation.BasicStats.CorpseRegularSubmissions +=
+                            render_matrix_items(cmd_list, it->first, items.data(), items.size(), glod, use_fast_geo, perf_main);
+                        statsCounter += static_cast<u32>(items.size());
+                    }
                     items.clear();
                 }
                 matPasses.clear();
@@ -749,6 +802,7 @@ bool R_dsgraph_structure::render_graph_main_parallel()
                     slot.context_id, u32(hr));
             }
             slot.list = list;
+            slot.cmd->deferred_pending = false;
         }
         slot.done.store(1, std::memory_order_release);
     };

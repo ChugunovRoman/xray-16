@@ -167,8 +167,7 @@ void CShootingObject::Light_Start()
         light_time = light_lifetime;
 
         // Clamped at 0: many weapon sections have light_var_* larger than the base value (e.g. silencer_light_range
-        // 0.01 with silencer_light_var_range 0.5), and randFs(var, base) then gives a negative range or color
-        // (the "[light-nan] invalid range (negative)" log lines).
+        // 0.01 with silencer_light_var_range 0.5), and randFs(var, base) then gives a negative range or color.
         light_build_color.set(std::max(0.f, Random.randFs(light_var_color, light_base_color.r)),
             std::max(0.f, Random.randFs(light_var_color, light_base_color.g)),
             std::max(0.f, Random.randFs(light_var_color, light_base_color.b)), 1);

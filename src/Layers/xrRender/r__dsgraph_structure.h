@@ -207,6 +207,8 @@ struct R_dsgraph_structure
         npc_blobs.clear();
 
         reset_maps(frame_reset);
+        // Before Invalidate relabels the backend IMM: a pooled deferred context must not keep abandoned commands.
+        cmd_list.discard_if_pending("dsgraph reset");
         cmd_list.Invalidate();
     }
 

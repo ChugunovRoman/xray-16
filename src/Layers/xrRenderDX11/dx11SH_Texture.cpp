@@ -8,6 +8,8 @@
 #include "xrEngine/xrTheora_Surface.h"
 #include "StateManager/dx11ShaderResourceStateCache.h"
 
+#include <atomic>
+
 #define PRIORITY_HIGH 12
 #define PRIORITY_NORMAL 8
 #define PRIORITY_LOW 4
@@ -40,6 +42,19 @@ CTexture::~CTexture()
 
     // release external reference
     RImplementation.Resources->_DeleteTexture(this);
+}
+
+// A texture left without its shader resource view samples zeros everywhere it is bound, silently: CHK_DX discards the
+// HRESULT in Release. Reported here (rate-limited) - none of these is expected.
+static void report_texture_view_fault(const CTexture& t, pcstr what, HRESULT hr, int slice, size_t slices)
+{
+    static std::atomic<u32> s_reports{ 0 };
+    const u32 n = s_reports.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 64 || (n % 1000) == 0)
+    {
+        Msg("! [srv-fault] frame %u: %s on '%s' (hr=0x%08x, slice %d of %u) #%u", Device.dwFrame, what,
+            t.cName.c_str() ? t.cName.c_str() : "?", u32(hr), slice, u32(slices), n);
+    }
 }
 
 void CTexture::surface_set(ID3DBaseTexture* surf)
@@ -119,8 +134,16 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
             }
 
             _RELEASE(srv_all);
-            CHK_DX(HW.pDevice->CreateShaderResourceView(pSurface, &ViewDesc, &srv_all));
+            const HRESULT hr_all = HW.pDevice->CreateShaderResourceView(pSurface, &ViewDesc, &srv_all);
+            if (FAILED(hr_all) || !srv_all)
+                report_texture_view_fault(*this, "CreateShaderResourceView (all slices) failed", hr_all, -1, desc.ArraySize);
 
+            // Release the views of the slices the new surface no longer has: resize() only drops the pointers.
+            // svp_publish_smap_atlas swaps $user$smap_depth between the scope atlas (pages + sun cascades, 11 slices)
+            // and the main one (3) twice per parallel scope frame: every swap back leaked 8 views, and after ~1M of
+            // them CreateShaderResourceView started failing - the black world of the long sessions.
+            for (size_t id = desc.ArraySize; id < srv_per_slice.size(); ++id)
+                _RELEASE(srv_per_slice[id]);
             srv_per_slice.resize(desc.ArraySize);
             for (u32 id = 0; id < desc.ArraySize; ++id)
             {
@@ -136,14 +159,19 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
                     ViewDesc.Texture2DMSArray.ArraySize = 1;
                     ViewDesc.Texture2DMSArray.FirstArraySlice = id;
                 }
-                CHK_DX(HW.pDevice->CreateShaderResourceView(pSurface, &ViewDesc, &srv_per_slice[id]));
+                const HRESULT hr_slice = HW.pDevice->CreateShaderResourceView(pSurface, &ViewDesc, &srv_per_slice[id]);
+                if (FAILED(hr_slice) || !srv_per_slice[id])
+                    report_texture_view_fault(*this, "CreateShaderResourceView (slice) failed", hr_slice, int(id),
+                        desc.ArraySize);
             }
             set_slice(-1);
         }
         else
         {
             _RELEASE(m_pSRView);
-            CHK_DX(HW.pDevice->CreateShaderResourceView(pSurface, NULL, &m_pSRView));
+            const HRESULT hr = HW.pDevice->CreateShaderResourceView(pSurface, NULL, &m_pSRView);
+            if (FAILED(hr) || !m_pSRView)
+                report_texture_view_fault(*this, "CreateShaderResourceView failed", hr, -1, 0);
         }
     }
 }
@@ -324,8 +352,16 @@ void CTexture::apply_normal(CBackend& cmd_list, u32 dwStage) const
 
 void CTexture::set_slice(int slice)
 {
+    if (slice >= int(srv_per_slice.size()))
+    {
+        // Was an out-of-bounds read of the vector: a stale or garbage view. Falls back to the whole-array view.
+        report_texture_view_fault(*this, "set_slice out of range", S_OK, slice, srv_per_slice.size());
+        slice = -1;
+    }
     m_pSRView = (slice < 0) ? srv_all : srv_per_slice[slice];
     curr_slice = slice;
+    if (!m_pSRView && pSurface)
+        report_texture_view_fault(*this, "set_slice left a live surface without a view", S_OK, slice, srv_per_slice.size());
 }
 
 void CTexture::Preload()

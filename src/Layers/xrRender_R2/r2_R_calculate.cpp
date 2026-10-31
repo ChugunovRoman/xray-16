@@ -73,7 +73,11 @@ void render_main::prepare_into(R_dsgraph_structure& dsgraph_main, const SRVPCalc
     dsgraph_main.o.portal_traverse_flags =
         CPortalTraverser::VQ_HOM | CPortalTraverser::VQ_SSA | CPortalTraverser::VQ_FADE;
     dsgraph_main.o.spatial_traverse_flags = ISpatial_DB::O_ORDERED;
-    dsgraph_main.o.spatial_types = STYPE_RENDERABLE | STYPE_LIGHTSOURCE;
+    // The SVP worker build must not collect lights: add_light -> light::Export push_backs into the shared
+    // Lights.package while the main build (r__phase_mt) and Render() use it - a garbage light* in LP_normal
+    // (SVP_DEVICE_REMOVED_ANALYSIS_2026-09-10.md §6 A1). The scope pass is lit by the main pass package anyway
+    // (filter_light_package_for_svp); the sequential scope build (params == nullptr) keeps collecting as before.
+    dsgraph_main.o.spatial_types = params ? STYPE_RENDERABLE : STYPE_RENDERABLE | STYPE_LIGHTSOURCE;
     dsgraph_main.o.view_pos = params ? params->view_pos : Device.vCameraPosition;
     dsgraph_main.o.xform = params ? params->full_transform : Device.mFullTransform;
     // 31-svp-scope.md: the sequential scope build culls against the scope's own frustum (svp_seq_frustum, set by
@@ -877,6 +881,10 @@ void CRender::AbortSecondVPCalculate()
     svp_shadow_stage = 0;
     if (svp_context_id != R_dsgraph_structure::INVALID_CONTEXT_ID)
     {
+        // The worker may have recorded render_graph(0) already: empty the deferred context before it goes back to
+        // the pool (SVP_DEVICE_REMOVED_ANALYSIS_2026-09-10.md §6 A2).
+        if (svp_cmd_deferred)
+            get_context(svp_context_id).cmd_list.discard();
         release_context(svp_context_id);
         svp_context_id = R_dsgraph_structure::INVALID_CONTEXT_ID;
     }

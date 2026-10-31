@@ -250,11 +250,11 @@ public:
     } stat;
 
     u32 context_id{ CHW::IMM_CTX_ID };
-    // Diagnostics: set to 1 to have the next draw log what the DEVICE really has bound, after the
-    // deferred bindings were applied. Asking before the draw is useless - set_RT only marks the
-    // cache dirty and ApplyRTandZB does the actual OMSetRenderTargets. Declared for every backend
-    // so the call sites need no API guard; only the DX11 draw path acts on it.
-    u32 dbg_capture_next_draw{};
+    // A deferred context recorded a draw that was neither submitted nor discarded yet. Set by the DX11 draw path on
+    // pooled contexts, cleared by submit()/discard() and by the direct FinishCommandList sites (parallel main submit,
+    // light tasks). R_dsgraph_structure::reset (alloc/cleanup of a pooled context) discards a still-pending list, so
+    // the next owner's FinishCommandList never carries abandoned commands (SVP analysis §6 A2(b)).
+    bool deferred_pending{};
 
 public:
     CTexture* get_ActiveTexture(u32 stage)
@@ -598,6 +598,7 @@ public:
         }
         HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(pCommandList, false);
         _RELEASE(pCommandList);
+        deferred_pending = false;
         // ExecuteCommandList(.., FALSE) leaves the immediate context at D3D11 defaults: its samplers are re-emitted by
         // the next set_States (the callers also Invalidate() the immediate backend for the rest of its cache).
         SSManager.ResetBound(CHW::IMM_CTX_ID);
@@ -607,6 +608,34 @@ public:
         ResetDeferredCache();
 #endif
     }
+
+    // Drops whatever was recorded on this deferred context without executing it. A pooled context must go back to
+    // the pool empty: alloc_context assumes the previous owner finished its command list, otherwise the next owner's
+    // FinishCommandList also carries the abandoned commands (and their references to released targets).
+    ICF void discard()
+    {
+#ifdef USE_DX11
+        VERIFY(context_id != CHW::IMM_CTX_ID);
+        if (context_id == CHW::IMM_CTX_ID)
+            return;
+        ID3D11CommandList* pCommandList{ nullptr };
+        const HRESULT hr = HW.get_context(context_id)->FinishCommandList(false, &pCommandList);
+        if (FAILED(hr))
+            Msg("! CBackend::discard: FinishCommandList failed on context %u (hr=0x%08x)", context_id, u32(hr));
+        _RELEASE(pCommandList);
+        ResetDeferredCache();
+#endif
+        deferred_pending = false;
+    }
+
+    // A pooled context goes back to the pool / to a new owner: drop a recorded but never submitted list
+    // ([ctx-dirty] in the log, R_Backend.cpp).
+    void discard_if_pending(pcstr where)
+    {
+        if (deferred_pending)
+            discard_pending_report(where);
+    }
+    void discard_pending_report(pcstr where);
 
     void gpu_mark_begin(const wchar_t* name);
     void gpu_mark_end();
@@ -674,19 +703,6 @@ private:
     void ApplyPrimitieTopology(D3D_PRIMITIVE_TOPOLOGY Topology);
     bool CBuffersNeedUpdate(ref_cbuffer buf1[MaxCBuffers], ref_cbuffer buf2[MaxCBuffers], u32& uiMin, u32& uiMax);
 
-    // r__gpu_diag: once-per-frame draw-state audit on the IMMEDIATE context. Works without the
-    // D3D11 debug layer: compares what the CPU cache believes is bound against what the device
-    // actually has, and flags an empty viewport or a fully unbound output merger. That is the
-    // 'the world is black but the UI still draws' class of bug - the UI rebinds explicitly.
-    void dbg_CheckDrawState();
-    u32 m_dbgDrawReports{};
-    u32 m_dbgCheckFrame{ u32(-1) };
-    // Shadow copy of the last viewport pushed through SetViewport. The device query is too
-    // expensive per draw, and a viewport that collapses to zero mid-frame (rmNormal reading a
-    // zero CRenderTarget dimension) silently stops rasterizing everything after it.
-    mutable float m_dbgViewportW{};
-    mutable float m_dbgViewportH{};
-    mutable bool m_dbgViewportSet{};
 
 private:
     ID3DBlob* m_pInputSignature{ nullptr };

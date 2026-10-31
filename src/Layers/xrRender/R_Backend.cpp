@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #pragma hdrstop
 
+#include <atomic>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 void D3DXRenderBase::CreateQuadIB()
@@ -31,5 +33,20 @@ void D3DXRenderBase::CreateQuadIB()
         }
     }
     QuadIB.Unmap(true); // upload index data
+}
+
+void CBackend::discard_pending_report(pcstr where)
+{
+    static std::atomic<u32> s_reports{ 0 };
+    const u32 n = s_reports.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 32 || (n % 600) == 0)
+        Msg("! [ctx-dirty] frame %u: context %u had an unsubmitted command list at %s - discarded #%u", Device.dwFrame,
+            context_id, where, n);
+    if (context_id == CHW::IMM_CTX_ID)
+    {
+        deferred_pending = false; // relabeled already - nothing safe to finish here
+        return;
+    }
+    discard();
 }
 } // namespace xray::render::RENDER_NAMESPACE

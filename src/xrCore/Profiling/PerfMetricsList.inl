@@ -706,7 +706,7 @@ PERF_TIMER(rpass_selfillum, "render/pass/selfillum")
 PERF_TIMER(rpass_lights_noocc, "render/pass/lights_noocc")     // render_lights: shadowed lights' smaps + accumulate
 PERF_TIMER(rpass_lights_occ, "render/pass/lights_occ")
 PERF_TIMER(rpass_combine, "render/pass/combine")               // phase_combine: forward, sorted, distort, postprocess
-PERF_TIMER(rpass_tail, "render/pass/tail")                     // after combine (MainScaleEnd, gpu_diag census)
+PERF_TIMER(rpass_tail, "render/pass/tail")                     // after combine (MainScaleEnd)
 // render/pass/combine split into its steps (plans/optimization_mt/18-combine-pass.md), MAIN pass only (the thread-local
 // g_perf_combine_main of R_Backend.h is set around phase_combine), in phase_combine order. The steps add up to
 // render/pass/combine minus a few state calls between them.
