@@ -125,7 +125,23 @@ public:
     virtual void on_before_change_team();
     virtual void on_after_change_team();
 
+    // rs_online: alive online stalkers / monsters. Changed together with m_registered_member (net_Spawn of an alive
+    // entity, Die, net_Destroy), so reading them walks nothing; main thread only
+    static u32 online_stalkers_count() { return s_online_count[online_npc_stalker]; }
+    static u32 online_monsters_count() { return s_online_count[online_npc_monster]; }
+
 private:
+    enum : u8
+    {
+        online_npc_stalker,
+        online_npc_monster,
+        online_npc_none,
+    };
+    static u32 s_online_count[online_npc_none];
+    u8 m_online_npc_kind = online_npc_none; // the counter this entity was added to, the type never changes
+    void online_npc_register();
+    void online_npc_unregister();
+
     bool m_registered_member;
     // the group key of the last registration (hierarchy_group), kept after the unregistration (death) as g_Group() was
     bool m_hierarchy_group_set;

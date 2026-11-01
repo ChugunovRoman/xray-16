@@ -27,6 +27,10 @@ ENGINE_API CStatTimer gTestTimer3;
 //////////////////////////////////////////////////////////////////////
 ENGINE_API bool g_bDisableRedText = false;
 ENGINE_API u16 g_iFreeIds = 0;
+// rs_online: alive online stalkers / monsters, a snapshot xrGame takes once per rs_online_interval seconds (CLevel::OnFrame)
+ENGINE_API u32 g_iOnlineStalkers = 0;
+ENGINE_API u32 g_iOnlineMonsters = 0;
+ENGINE_API int ps_online_npc_interval = 5;
 int g_bShowRedText = 1;
 CStats::CStats()
 {
@@ -152,19 +156,51 @@ void CStats::Show()
 #endif
     font.OnRender();
 
-    if (psDeviceFlags.test(rsShowFPS))
+    // The glyph width follows the font height (SetHeightI, a share of the screen height), so the left edges of the
+    // right corner lines are in font heights, not pixels: a character takes about 0.32 of a height (measured on screen)
+    const float fpsHeight = fpsFont ? fpsFont->GetHeight() : 0.f;
+    const float fpsRight = static_cast<float>(Device.dwWidth);
+    const bool showFps = psDeviceFlags.test(rsShowFPS);
+    // The number changes once a second (the frames of that second over its real time): a per frame value flickers
+    static u32 s_fpsShown = 0;
+    static u32 s_fpsFrames = 0;
+    static u32 s_fpsSinceMs = 0;
+    static bool s_fpsWasShown = false;
+    if (!showFps)
+        s_fpsWasShown = false;
+    else
     {
-        const auto fps = u32(Device.GetStats().fFPS);
-        fpsFont->Out(static_cast<float>(Device.dwWidth - 40), 5, "%3d", fps);
+        const u32 now = Device.dwTimeContinual;
+        if (!s_fpsWasShown)
+        {
+            // right after the flag goes on: the current value until the first second is over
+            s_fpsShown = u32(Device.GetStats().fFPS);
+            s_fpsFrames = 0;
+            s_fpsSinceMs = now;
+            s_fpsWasShown = true;
+        }
+        ++s_fpsFrames;
+        const u32 elapsedMs = now - s_fpsSinceMs;
+        if (elapsedMs >= 1000)
+        {
+            s_fpsShown = s_fpsFrames * 1000 / elapsedMs;
+            s_fpsFrames = 0;
+            s_fpsSinceMs = now;
+        }
+        fpsFont->Out(fpsRight - 3.f * fpsHeight, 5, "FPS: %3u", s_fpsShown); // 8 characters
         fpsFont->OnRender();
     }
+    // Free IDs and Online share the left edge, left of the FPS when it is shown
+    const float leftEdge = fpsRight - (showFps ? 8.4f : 6.4f) * fpsHeight;
     if (psDeviceFlags.test(rsShowIds))
     {
-        u16 w = 160;
-        if (psDeviceFlags.test(rsShowFPS))
-            w = 200;
-
-        fpsFont->Out(static_cast<float>(Device.dwWidth - w), 5, "Free IDs: %5d", g_iFreeIds);
+        fpsFont->Out(leftEdge, 5, "Free IDs: %5d", g_iFreeIds); // 15 characters
+        fpsFont->OnRender();
+    }
+    if (psDeviceFlags.test(rsShowOnline) && g_pGameLevel)
+    {
+        // the second line, under Free IDs; up to 19 characters ("Online: 9999 / 9999")
+        fpsFont->Out(leftEdge, 5 + fpsHeight, "Online: %u / %u", g_iOnlineStalkers, g_iOnlineMonsters);
         fpsFont->OnRender();
     }
     if (psDeviceFlags.test(rsShowFPSGraph))

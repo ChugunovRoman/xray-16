@@ -112,6 +112,35 @@ void CEntity::register_in_hierarchy(ALife::_OBJECT_ID self_id)
     Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(m_hierarchy_group).register_member(this);
 }
 
+u32 CEntity::s_online_count[online_npc_none] = {};
+
+// rs_online: called where m_registered_member becomes true / false, so the counters follow the registry of the alive
+// online entities. Only stalkers and monsters are counted (not the actor, crows, traders, helicopters)
+void CEntity::online_npc_register()
+{
+    if (m_online_npc_kind != online_npc_none)
+        return;
+
+    if (cast_stalker())
+        m_online_npc_kind = online_npc_stalker;
+    else if (cast_base_monster())
+        m_online_npc_kind = online_npc_monster;
+    else
+        return;
+
+    ++s_online_count[m_online_npc_kind];
+}
+
+void CEntity::online_npc_unregister()
+{
+    if (m_online_npc_kind == online_npc_none)
+        return;
+
+    VERIFY(s_online_count[m_online_npc_kind]);
+    --s_online_count[m_online_npc_kind];
+    m_online_npc_kind = online_npc_none;
+}
+
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -176,6 +205,7 @@ void CEntity::Die(IGameObject* who)
     if (m_registered_member)
     {
         m_registered_member = false;
+        online_npc_unregister();
         if (IsGameTypeSingle())
             Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group()).unregister_member(this);
     }
@@ -312,6 +342,7 @@ bool CEntity::net_Spawn(CSE_Abstract* DC)
     if (g_Alive() && IsGameTypeSingle())
     {
         m_registered_member = true;
+        online_npc_register();
         register_in_hierarchy(e->ID);
         ++Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group()).m_dwAliveCount;
     }
@@ -347,6 +378,7 @@ void CEntity::net_Destroy()
     if (m_registered_member)
     {
         m_registered_member = false;
+        online_npc_unregister();
         if (IsGameTypeSingle())
             Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group()).unregister_member(this);
     }

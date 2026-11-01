@@ -86,6 +86,10 @@
 
 extern CUISequencer* g_tutorial;
 extern CUISequencer* g_tutorial2;
+// rs_online (xrEngine/Stats.cpp)
+ENGINE_API extern u32 g_iOnlineStalkers;
+ENGINE_API extern u32 g_iOnlineMonsters;
+ENGINE_API extern int ps_online_npc_interval;
 
 // P19 (plans/optimization_mt/14-spike-instrumentation.md): one phase of CLevel::OnFrame - Tracy zone, frame/level/*
 // timer of perf_metrics and the spike logger (perf_spike_us, with the CPU time of the thread). One per block.
@@ -2225,6 +2229,44 @@ void CLevel::OnFrame()
                 inc_bucket(O->Radius(), is_stalker ? vis_stlk : vis_mon);
                 inc_bucket(O->GetSpatialData().sphere.R, is_stalker ? spt_stlk : spt_mon);
             }
+        }
+    }
+
+    // rs_online: the screen shows a snapshot of the CEntity counters (changed on spawn, death and switch offline), taken
+    // right after the flag goes on (or a new level starts) and then once per rs_online_interval seconds
+    static u32 s_online_npc_ms = 0;
+    static const CLevel* s_online_npc_level = nullptr; // nullptr: the flag was off, no snapshot of this level yet
+    if (!psDeviceFlags.test(rsShowOnline))
+        s_online_npc_level = nullptr;
+    else
+    {
+        const u32 now = Device.dwTimeContinual;
+        const u32 interval_ms = u32(std::clamp(ps_online_npc_interval, 1, 30)) * 1000;
+        if (s_online_npc_level != this || now - s_online_npc_ms >= interval_ms)
+        {
+            s_online_npc_ms = now;
+            s_online_npc_level = this;
+            g_iOnlineStalkers = CEntity::online_stalkers_count();
+            g_iOnlineMonsters = CEntity::online_monsters_count();
+#ifdef DEBUG
+            // the counters must match a walk of all objects; a mismatch means a path that skips m_registered_member
+            u32 walk_stalkers = 0, walk_monsters = 0;
+            const u32 n = Objects.o_count();
+            for (u32 i = 0; i < n; ++i)
+            {
+                IGameObject* O = Objects.o_get_by_iterator(i);
+                CEntityAlive* ea = O ? O->cast_entity_alive() : nullptr;
+                if (!ea || !ea->g_Alive())
+                    continue;
+                if (O->cast_stalker())
+                    ++walk_stalkers;
+                else if (O->cast_base_monster())
+                    ++walk_monsters;
+            }
+            if (walk_stalkers != g_iOnlineStalkers || walk_monsters != g_iOnlineMonsters)
+                Msg("! rs_online: counters %u / %u, walk %u / %u", g_iOnlineStalkers, g_iOnlineMonsters,
+                    walk_stalkers, walk_monsters);
+#endif
         }
     }
 

@@ -793,6 +793,7 @@ ENGINE_API shared_str current_player_hud_sect{};
 
 extern int ps_fps_limit;
 extern int ps_fps_limit_in_menu;
+extern ENGINE_API int ps_online_npc_interval;
 
 void CCC_Register()
 {
@@ -894,6 +895,9 @@ void CCC_Register()
     CMD3(CCC_Mask, "rs_fps_graph", &psDeviceFlags, rsShowFPSGraph);
     CMD4(CCC_Float, "rs_vis_distance", &psVisDistance, 0.05f, 1.5f);
     CMD3(CCC_Mask, "rs_ids", &psDeviceFlags, rsShowIds);
+    // alive online stalkers / monsters on the screen, recounted once per rs_online_interval seconds
+    CMD3(CCC_Mask, "rs_online", &psDeviceFlags, rsShowOnline);
+    CMD4(CCC_Integer, "rs_online_interval", &ps_online_npc_interval, 1, 30);
 
     CMD3(CCC_Mask, "rs_cam_pos", &psDeviceFlags, rsCameraPos);
 #ifdef DEBUG

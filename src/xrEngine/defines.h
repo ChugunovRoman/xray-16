@@ -42,8 +42,9 @@ enum
     mtParticles             = (1ul << 18ul),
 
     rsShowIds               = (1ul << 19ul),
+    rsShowOnline            = (1ul << 20ul),
 
-    // 20-32 bit - reserved to Editor
+    // 21-32 bit - reserved to Editor
 };
 
 enum
