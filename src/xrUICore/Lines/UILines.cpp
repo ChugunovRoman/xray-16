@@ -163,11 +163,10 @@ void CUILines::ParseText(bool force)
         for (size_t i = 0; i < vsz; i++)
         {
             const u32 tcolor = line.m_subLines[i].m_color;
-            char szTempLine[MAX_MB_CHARS], *pszSearch = nullptr;
-            [[maybe_unused]] const auto llen = line.m_subLines[i].m_text.size();
-            VERIFY(llen < MAX_MB_CHARS);
-            xr_strcpy(szTempLine, line.m_subLines[i].m_text.c_str());
-            pszSearch = szTempLine;
+            // a copy of any length: a fixed buffer of MAX_MB_CHARS failed in strcpy_s (invalid parameter) on a long
+            // text, e.g. a PDA news about an attack order of many selected smarts
+            xr_string szTempLine = line.m_subLines[i].m_text;
+            char* pszSearch = szTempLine.data();
             size_t br_off = 0, br_skip = 0;
             while (next_line_break_in_scan(pszSearch, br_off, br_skip))
             {
