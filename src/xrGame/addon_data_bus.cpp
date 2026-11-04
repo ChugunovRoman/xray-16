@@ -390,10 +390,15 @@ void WriteSave(IWriter& stream)
     stream.close_chunk();
 }
 
-void ReadSave(IReader& stream)
+namespace
 {
-    // Values of the loaded game replace the persistent ones; no data_on_changed here: read them in alife_on_load.
-    ResetPersistent();
+// The chunk of the data bus in the ALife save stream (format kSaveFormat): on_value(key, value) for every value but
+// NIL, in the order of the save. A save without the chunk (a build without the data bus) or of another format gives
+// none; truncated or corrupted data stops the reading with a message. Shared by ReadSave and ReadSaveValues, so the
+// format is read in one place. open_chunk moves the position of `stream`.
+template <typename OnValue>
+void ReadSaveChunk(IReader& stream, OnValue&& on_value)
+{
     IReader* reader = stream.open_chunk(kSaveChunkId);
     if (!reader)
         return; // save made by a build without the data bus
@@ -405,27 +410,44 @@ void ReadSave(IReader& stream)
         return;
     }
     const u32 count = reader->elapsed() >= static_cast<intptr_t>(sizeof(u32)) ? reader->r_u32() : 0;
-    Store& store = GetStore();
-    u32 loaded = 0;
     for (u32 i = 0; i < count; ++i)
     {
         xr_string key;
-        Entry entry;
-        entry.persistent = true;
+        events::OwnedValue value;
         // events::ReadValue reads format 1 as it is (the old types) plus GWP_T_BYTES and GWP_T_ARRAY
-        if (!ReadStringZChecked(*reader, key) || !IsValidKey(key.c_str()) || !entry.value.Read(*reader))
+        if (!ReadStringZChecked(*reader, key) || !IsValidKey(key.c_str()) || !value.Read(*reader))
         {
             Msg("! [data] save data is truncated or corrupted, the rest is ignored");
             break;
         }
-        if (entry.value.type() == GWP_T_NIL)
+        if (value.type() == GWP_T_NIL)
             continue; // nothing to keep (a value the writer could not write is written as NIL)
-        store[key] = std::move(entry);
-        ++loaded;
+        on_value(std::move(key), std::move(value));
     }
     reader->close();
+}
+} // namespace
+
+void ReadSave(IReader& stream)
+{
+    // Values of the loaded game replace the persistent ones; no data_on_changed here: read them in alife_on_load.
+    ResetPersistent();
+    Store& store = GetStore();
+    u32 loaded = 0;
+    ReadSaveChunk(stream, [&](xr_string&& key, events::OwnedValue&& value) {
+        Entry& entry = store[key];
+        entry.value = std::move(value);
+        entry.persistent = true;
+        ++loaded;
+    });
     if (IsDebugLog())
         Msg("  [data] save data: %u value(s) loaded", loaded);
+}
+
+void ReadSaveValues(IReader& stream, SaveValues& out)
+{
+    out.clear();
+    ReadSaveChunk(stream, [&](xr_string&& key, events::OwnedValue&& value) { out[key] = std::move(value); });
 }
 
 void Shutdown() { xr_delete(g_store); }

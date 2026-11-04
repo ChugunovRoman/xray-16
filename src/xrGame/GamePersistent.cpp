@@ -2,6 +2,7 @@
 #include "addon_event_bus.h"
 #include "addon_host.h"
 #include "addon_api_console.h"
+#include "level_pack.h"
 #include "GamePersistent.h"
 #include "xrCore/FMesh.hpp"
 #include "xrEngine/XR_IOConsole.h"
@@ -156,8 +157,12 @@ void CGamePersistent::OnAppStart()
         m_pLoadingScreen = xr_new<UILoadingScreen>();
 
     inherited::OnAppStart();
+    // 10-location-packs.md: the game starts on the built-in location pack; the chosen one is applied at the first frame
+    // of the menu, the way a switch in the menu goes
+    gw::RequestStartupLevelPack();
     // 50z3-startup-slow-disk-io.md: on a slow disk once the main menu has settled (or a map wants it), not here
-    CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle("all");
+    if (!gw::LevelPackSwitchPending()) // the switch loads the map of its own pack
+        CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle("all");
     xray::StartupMark("app_smart_terrain_map_started"); // 50z1
 
 #ifdef XR_PLATFORM_WINDOWS
@@ -647,6 +652,8 @@ void CGamePersistent::OnFrame()
         PERF_STAGE("persistent/addons_console", persist_addons);
         gw::addons::console::OnFrame();
     }
+    // 10-location-packs.md: a switch of the location pack asked for (Lua level_pack.switch, the start of the game)
+    gw::OnFrameLevelPacks();
 
     if (Device.dwPrecacheFrame == 5 && m_intro_event.empty())
     {

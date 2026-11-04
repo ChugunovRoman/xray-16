@@ -16,6 +16,8 @@
 #include "alife_simulator_header.h"
 #include "alife_simulator.h"
 #include "alife_spawn_registry.h"
+#include "addon_data_bus.h"
+#include "level_pack.h"
 
 extern LPCSTR alife_section;
 
@@ -62,6 +64,47 @@ bool CSavedGameWrapper::valid_saved_game(LPCSTR saved_game_name)
     return (result);
 }
 
+void CSavedGameWrapper::read_data(IReader& reader, gw::addons::data::SaveValues& out)
+{
+    gw::addons::data::ReadSaveValues(reader, out);
+    for (auto it = out.begin(); it != out.end();)
+    {
+        const u32 type = it->second.type();
+        const bool simple = type == GWP_T_BOOL || type == GWP_T_INT || type == GWP_T_NUMBER || type == GWP_T_STRING;
+        it = simple ? std::next(it) : out.erase(it);
+    }
+}
+
+bool CSavedGameWrapper::saved_game_data(pcstr saved_game_name, gw::addons::data::SaveValues& out)
+{
+    out.clear();
+    string_path file_name;
+    if (!FS.exist(saved_game_full_name(saved_game_name, file_name, SAVE_EXTENSION)))
+        if (!FS.exist(saved_game_full_name(saved_game_name, file_name, SAVE_EXTENSION_LEGACY)))
+            return false;
+
+    IReader* stream = FS.r_open(file_name);
+    if (!stream)
+        return false;
+    if (!valid_saved_game(*stream))
+    {
+        FS.r_close(stream);
+        return false;
+    }
+
+    // The same as the constructor, but only the data bus chunk is read from the stream
+    u32 source_count = stream->r_u32();
+    void* source_data = xr_malloc(source_count);
+    rtc_decompress(source_data, source_count, stream->pointer(), stream->length() - 3 * sizeof(u32));
+    FS.r_close(stream);
+    {
+        IReader reader(source_data, source_count);
+        read_data(reader, out);
+    }
+    xr_free(source_data);
+    return true;
+}
+
 CSavedGameWrapper::CSavedGameWrapper(LPCSTR saved_game_name)
 {
     string_path file_name;
@@ -89,6 +132,12 @@ CSavedGameWrapper::CSavedGameWrapper(LPCSTR saved_game_name)
     FS.r_close(stream);
 
     IReader reader(source_data, source_count);
+
+    // Persistent values of the data bus (gw/game/... of gw_game_state): first, so the early returns below keep them.
+    // They are copies (events::OwnedValue): source_data is freed below.
+    // seek(0): open_chunk moves the position, the reads below search their chunks from the start.
+    read_data(reader, m_data);
+    reader.seek(0);
 
     {
         CALifeTimeManager time_manager(alife_section);
@@ -126,6 +175,20 @@ CSavedGameWrapper::CSavedGameWrapper(LPCSTR saved_game_name)
         }
 
         chunk->close();
+
+        // 10-location-packs.md: a save of another location pack - $game_spawn$ holds all.spawn of the active one
+        // (the same name), its graph would give a wrong level. The level is the one the save wrote; its id is unknown
+        // (no quick load of the same level).
+        xr_string save_pack;
+        if (gw::SaveValueString(data(gw::kSaveLevelPackKey), save_pack) && save_pack != gw::ActiveLevelPack().id)
+        {
+            F_entity_Destroy(object);
+            m_level_id = _LEVEL_ID(-1);
+            xr_string level_name;
+            m_level_name = gw::SaveValueString(data(gw::kSaveLevelNameKey), level_name) ? level_name.c_str() : "";
+            xr_free(source_data);
+            return;
+        }
 
         if (!FS.exist(file_name, "$game_spawn$", spawn_file_name, ".spawn"))
         {
@@ -187,4 +250,12 @@ CSavedGameWrapper::CSavedGameWrapper(LPCSTR saved_game_name)
     }
 
     xr_free(source_data);
+}
+
+const GwpValue* CSavedGameWrapper::data(pcstr key) const
+{
+    if (!key)
+        return nullptr;
+    const auto it = m_data.find(key);
+    return it != m_data.end() ? &it->second.view() : nullptr;
 }

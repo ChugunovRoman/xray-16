@@ -4611,6 +4611,9 @@
     <ClInclude Include="addon_data_bus.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
+    <ClInclude Include="level_pack.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_event_bus.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
@@ -7826,6 +7829,9 @@
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_data_bus.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="level_pack.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_event_bus.cpp">

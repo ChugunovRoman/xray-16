@@ -644,6 +644,12 @@ public:
     virtual void ClearTarget() = 0;
     virtual void SetCacheXform(Fmatrix& mView, Fmatrix& mProject) = 0;
     virtual void OnAssetsChanged() = 0;
+    // plans/addons_api_support/10-location-packs.md: a location pack switch in the main menu changes the files behind
+    // the names. AssetsSwitchBegin: the background loads of models and textures stop (they read the index of the file
+    // system, which changes). AssetsSwitchEnd: the pools that keep files by name drop what nothing uses (models,
+    // motions), the texture descriptions are read again, the background loads go on.
+    virtual void AssetsSwitchBegin() {}
+    virtual void AssetsSwitchEnd() {}
 
     virtual void PreviewScene_Initialize() {}
     virtual void PreviewScene_Shutdown() {}

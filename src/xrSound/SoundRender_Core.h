@@ -151,6 +151,7 @@ public:
     virtual void update_listener(const Fvector& P, const Fvector& D, const Fvector& N, const Fvector& R, float dt);
 
     void refresh_sources() override;
+    void prefetch_stop() override;
     void prefetch_sources(pcstr folder) override;
     void memory_stats(size_t& sources, size_t& pcm_cached_bytes) override; // 50c-commit-growth-analysis.md
     SoundSourceState source_state(const CSound& S, bool urgent) override; // 50j-slow-disk-async-sound.md

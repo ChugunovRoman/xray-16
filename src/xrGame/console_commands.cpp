@@ -53,6 +53,7 @@
 #include "GameTask.h"
 #include "MainMenu.h"
 #include "saved_game_wrapper.h"
+#include "level_pack.h"
 #include "xrAICore/Components/ai_planner_search_limits.h"
 #include "xrAICore/Navigation/ai_graph_engine_cvars.h"
 #include "xrAICore/Navigation/level_graph.h"
@@ -1227,6 +1228,10 @@ public:
             return;
         }
 
+        // The location pack of the save is not installed: no load, Lua shows the reason (plans/level_pack_id)
+        if (!gw::CanLoadSaveLevelPack(saved_game))
+            return;
+
         /*     moved to level_network_messages.cpp
                 CSavedGameWrapper			wrapper(args);
                 if (wrapper.level_id() == ai().level_graph().level_id()) {
@@ -1312,10 +1317,14 @@ public:
         pstr command;
         if (ai().get_alife())
         {
-            STRCONCAT(command, "load ", g_last_saved_game);
+            STRCONCAT(command, "load ", g_last_saved_game); // the command load checks the location pack itself
             Console->Execute(command);
             return;
         }
+
+        // "start server" (xrEngine) does not go through the command load: the location pack is checked here
+        if (!gw::CanLoadSaveLevelPack(g_last_saved_game))
+            return;
 
         STRCONCAT(command, "start server(", g_last_saved_game, "/single/alife/load)");
         Console->Execute(command);
@@ -2166,6 +2175,32 @@ class CCC_AddonList : public IConsole_Command
 public:
     CCC_AddonList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
     virtual void Execute(LPCSTR /*args*/) { gw::addons::PrintList(); }
+};
+
+// Location packs (plans/addons_api_support/10-location-packs.md): level_pack_list - the installed ones and the active
+// one; level_pack_switch <id> - a switch in the main menu (as Lua level_pack.switch)
+class CCC_LevelPackList : public IConsole_Command
+{
+public:
+    CCC_LevelPackList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::PrintLevelPacks(); }
+};
+
+class CCC_LevelPackSwitch : public IConsole_Command
+{
+public:
+    CCC_LevelPackSwitch(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        if (!args || !args[0])
+        {
+            Msg("- level_pack_switch <pack id>: the installed packs are");
+            gw::PrintLevelPacks();
+            return;
+        }
+        if (gw::RequestLevelPackSwitch(args, ""))
+            Msg("- [level_pack] switch to '%s' at the next frame of the main menu", args);
+    }
 };
 
 // plugin_reload <addon id>: the plugin of the addon is unloaded and loaded again from its library (a rebuilt one
@@ -3711,6 +3746,9 @@ void CCC_RegisterCommands()
 
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD1(CCC_AddonList, "addon_list");
+    CMD1(CCC_LevelPackList, "level_pack_list");
+    CMD1(CCC_LevelPackSwitch, "level_pack_switch");
+    CMD3(CCC_String, "g_level_pack", gw::g_level_pack, std::size(gw::g_level_pack)); // user.ltx: the chosen pack
     CMD1(CCC_PluginReload, "plugin_reload");
     CMD1(CCC_EventList, "event_list");
     CMD1(CCC_EventEngineSources, "gw_event_engine_sources");

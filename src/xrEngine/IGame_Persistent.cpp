@@ -618,6 +618,7 @@ void IGame_Persistent::Level_Scan()
         xr_free(level.name);
     }
     Levels.clear();
+    Level_Current = u32(-1); // an index into the old list (10-location-packs.md: a scan after a location pack switch)
 
     xr_vector<char*>* folder = FS.file_list_open("$game_levels$", FS_ListFolders | FS_RootOnly);
     if (!folder)

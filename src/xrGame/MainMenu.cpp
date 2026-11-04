@@ -78,7 +78,9 @@ CMainMenu::CMainMenu()
         CResetEventCb(CID cid, CMainMenu* mm) : CEventNotifierCallbackWithCid(cid), m_mainmenu(mm) {}
         void ProcessEvent() override
         {
-            if (m_mainmenu->IsActive())
+            if (m_mainmenu->IsActive() && m_mainmenu->m_restarting_scripts)
+                m_mainmenu->DropStartDialog(); // RestartScripts builds it again in the new Lua state
+            else if (m_mainmenu->IsActive())
                 m_mainmenu->ReloadUI();
             else
                 m_mainmenu->DestroyInternal(true);
@@ -314,6 +316,31 @@ bool CMainMenu::ReloadUI()
     m_startDialog->m_bWorkInPause = true;
     m_startDialog->ShowDialog(true);
     return true;
+}
+
+// plans/addons_api_support/10-location-packs.md: the reset event comes before the old Lua state closes and before the
+// object factory knows the script classes again, so the dialog of the old state only leaves here
+void CMainMenu::DropStartDialog()
+{
+    if (!m_startDialog)
+        return;
+    if (m_startDialog->IsShown())
+        m_startDialog->HideDialog();
+    CleanInternals();
+    xr_delete(m_startDialog);
+}
+
+void CMainMenu::RestartScripts(const std::function<void()>& before_rebuild)
+{
+    R_ASSERT2(!m_restarting_scripts, "CMainMenu::RestartScripts inside itself");
+    m_restarting_scripts = true;
+    ai().RestartScriptEngine(); // EVENT_SCRIPT_ENGINE_RESET: DropStartDialog
+    m_restarting_scripts = false;
+    if (before_rebuild)
+        before_rebuild();
+    // No MAIN_MENU_RELOADED: the menu scripts open the options with it (the way back after a video restart)
+    if (IsActive())
+        ReloadUI();
 }
 
 bool CMainMenu::IsActive() const { return m_Flags.test(flActive); }

@@ -103,6 +103,9 @@ public:
         u32 size_real; //
         u32 size_compressed; // if (size_real==size_compressed) - uncompressed
         u32 modif; // for editor
+        // plans/addons_api_support/10-location-packs.md: 0 - the base (fsgame.ltx, archives), N - the layer N
+        // (mount_layer): a loose file lying in the folder of that layer under another name (physical_name)
+        u16 layer = 0;
     };
 
     struct archive
@@ -171,6 +174,27 @@ private:
     files_set m_files;
     bool bNoRecurse{ true };
 
+    // plans/addons_api_support/10-location-packs.md: a folder whose files take the names of another folder of the
+    // index (the game data). Its entries cover the same names of the base and of the layers below; unmount_layer puts
+    // the covered entries back. The name strings in both containers are the ones of the live entries of m_files.
+    struct fs_layer
+    {
+        xr_string id;
+        string_path physical_root; // the folder on the disk: '\' separators, the trailing delimiter
+        string_path virtual_root; // the names it takes in the index: as the index spells them
+        size_t virtual_root_length{};
+        xr_map<pcstr, file, pred_str> covered; // name -> the entry under the one of the layer
+        xr_set<pcstr, pred_str> added; // names nothing had before the layer (files and folders)
+        u32 files{};
+        bool writable{}; // w_open of a name a layer serves writes into this one (writable_layer_name)
+    };
+    xr_vector<fs_layer*> m_layers; // a stack: m_layers[i] is the layer i + 1
+
+    bool layer_walk(u16 index, pcstr physical_dir, pcstr virtual_dir);
+    void register_under_layers(const file& top, const file& desc);
+    bool writable_layer_name(pcstr virtual_name, string_path& physical) const;
+    u16 writable_layer_of(pcstr physical_name, string_path& virtual_name) const;
+
     Lock* m_auth_lock;
     u64 m_auth_code{};
     // 40-parallel-prefetch.md (plans/optimization_mt): m_files is searched from several threads (the model prefetch
@@ -180,7 +204,8 @@ private:
     Lock* m_files_lock;
 
     const file* RegisterExternal(pcstr name);
-    const file* Register(pcstr name, size_t vfs, u32 crc, u32 ptr, u32 size_real, u32 size_compressed, u32 modif);
+    const file* Register(
+        pcstr name, size_t vfs, u32 crc, u32 ptr, u32 size_real, u32 size_compressed, u32 modif, u16 layer = 0);
     void ProcessArchive(pcstr path);
     void ProcessOne(pcstr path, const xr_finddata_t& entry);
     bool Recurse(pcstr path);
@@ -296,6 +321,21 @@ public:
     size_t file_list(FS_FileSet& dest, pcstr path, u32 flags = FS_ListFiles, pcstr mask = nullptr);
 
     void unload_archive(archive& A);
+
+    // Layers (plans/addons_api_support/10-location-packs.md). The files of physical_root take the names of
+    // virtual_root (nullptr - $game_data$) and cover the same names of the base and of the layers mounted before.
+    // Returns the layer index (1..), 0 on a failure. Mounting and unmounting must not race with reads of the
+    // index on other threads (a reader keeps a pointer to an entry): only while no background loading runs.
+    // writable: w_open / w_open_ex of a name some layer serves write into the top writable layer (its folder is
+    // created by the mount); a name only the base has is written where it lies, as without layers.
+    u16 mount_layer(pcstr id, pcstr physical_root, pcstr virtual_root = nullptr, bool writable = false);
+    // Only the top layer (the last mounted): the covered entries come back, the names it added leave
+    bool unmount_layer(pcstr id);
+    u16 find_layer(pcstr id) const; // 0 - not mounted
+    u16 layers_count() const { return u16(m_layers.size()); }
+    pcstr layer_id(u16 index) const;
+    // The file on the disk of an entry of a layer; false for the base entries (their name is the file)
+    bool physical_name(const file& desc, string_path& dest) const;
 
     void auth_generate(xr_vector<shared_str>& ignore, xr_vector<shared_str>& important);
     u64 auth_get();

@@ -62,6 +62,19 @@ u32 PluginApiBuilt(pcstr addon_id);
 // Ids of every addon found at the start - loaded, failed, skipped or disabled - known before the first plugin loads.
 // Empty before Initialize and after Shutdown.
 const xr_vector<xr_string>& KnownAddonIds();
+// A discovered addon as the other parts of the engine see it (level_pack.cpp): a copy
+struct AddonInfo
+{
+    xr_string id;
+    xr_string version; // as written in the manifest
+    xr_string type;    // [addon] type as written
+    xr_string dir;     // the addon folder: UTF-8, the trailing separator
+    bool active = false; // works: enabled, its dependencies hold, its required plugin loaded
+    xr_vector<std::pair<xr_string, xr_string>> location; // [location] of addon.ltx, as written
+};
+// Every discovered addon - working or not - in the order of discovery (appdata/addons.ltx when it lists them).
+// Empty before Initialize and after Shutdown.
+xr_vector<AddonInfo> ListAddons();
 // The addon that owns a name "<addon id>_...": the longest known id followed by '_' at the start of `name`, nullptr
 // when none. With addons "gw" and "gw_npc" known, "gw_npc_x" belongs to gw_npc even before (or without) its plugin.
 pcstr NameOwnerAddonId(pcstr name);

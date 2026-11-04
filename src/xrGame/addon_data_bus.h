@@ -12,6 +12,7 @@
 // Main thread only. Docs: wiki/doc/plugins/api/data.md; plan: plans/lua_to_cpp/04-plugin-api-events-and-data.md
 
 #include "xrAddonHost/include/gwp/gwp_api.h"
+#include "addon_event_bus.h"
 
 class IReader;
 class IWriter;
@@ -23,6 +24,13 @@ void FillEngineApi(GwpEngineApi& api);
 void ResetPersistent();          // new game: drop the persistent values of the previous one
 void WriteSave(IWriter& stream); // own chunk of the ALife save stream
 void ReadSave(IReader& stream);  // replaces the persistent values; a save without the chunk gives none
+
+// Persistent values of a save without loading it (CSavedGameWrapper: the load dialog, the load command): the chunk
+// of ReadSave in the uncompressed ALife save stream `stream`, read the same way, into `out` (cleared first); the
+// store is not touched. A save without the chunk gives none. open_chunk moves the position of `stream`: seek(0)
+// before reading it further.
+using SaveValues = xr_map<xr_string, events::OwnedValue>;
+void ReadSaveValues(IReader& stream, SaveValues& out);
 
 void Shutdown();
 void PrintList(pcstr prefix); // console command "data_list [prefix]"

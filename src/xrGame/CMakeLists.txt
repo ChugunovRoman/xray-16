@@ -807,6 +807,8 @@ target_sources(xrGame PRIVATE
     Level_network_messages.cpp
     Level_network_spawn.cpp
     Level_network_start_client.cpp
+    level_pack.cpp
+    level_pack.h
     level_path_builder.h
     level_path_manager.h
     level_path_manager_inline.h

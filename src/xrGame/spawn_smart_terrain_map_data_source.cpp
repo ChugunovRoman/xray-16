@@ -815,6 +815,19 @@ public:
         m_loading.store(false, std::memory_order_release);
     }
 
+    // plans/addons_api_support/10-location-packs.md: another location pack is active - the same spawn name, another
+    // all.spawn. Main, not inside a deferred event of the engine (the worker ends with Engine.Event.Defer)
+    void Forget()
+    {
+        Shutdown();
+        if (m_published)
+        {
+            m_published.reset();
+            ++m_revision; // the maps showing it ask again
+        }
+        m_urgent.store(false, std::memory_order_relaxed);
+    }
+
     void Enumerate(pcstr spawn_name, xr_vector<SMapPointDesc>& out) const
     {
         out.clear();
@@ -995,6 +1008,11 @@ void CSpawnSmartTerrainMapDataSource::PublishSharedDataIfReady()
 void CSpawnSmartTerrainMapDataSource::ShutdownSharedLoading()
 {
     CSharedSmartTerrainMapCache::Instance().Shutdown();
+}
+
+void CSpawnSmartTerrainMapDataSource::ForgetSharedLoading()
+{
+    CSharedSmartTerrainMapCache::Instance().Forget();
 }
 
 pcstr CSpawnSmartTerrainMapDataSource::GetSharedSmartLevelName(pcstr smart_name, pcstr spawn_name)

@@ -873,6 +873,7 @@
     <ClInclude Include="level_location_selector_inline.h" />
     <ClInclude Include="Level_network_Demo.h" />
     <ClInclude Include="Level_network_map_sync.h" />
+    <ClInclude Include="level_pack.h" />
     <ClInclude Include="level_path_builder.h" />
     <ClInclude Include="level_path_manager.h" />
     <ClInclude Include="level_path_manager_inline.h" />
@@ -2479,6 +2480,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
     <ClCompile Include="Level_network_start_client.cpp" />
+    <ClCompile Include="level_pack.cpp" />
     <ClCompile Include="level_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

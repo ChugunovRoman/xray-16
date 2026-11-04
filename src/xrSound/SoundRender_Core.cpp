@@ -287,3 +287,9 @@ void CSoundRender_Core::refresh_sources()
         s->load(s->file_name());
     }
 }
+
+void CSoundRender_Core::prefetch_stop()
+{
+    ScopeLock sources_lock(&s_sources_lock); // as refresh_sources: the thread is stopped under it
+    prefetch_shutdown();
+}

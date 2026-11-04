@@ -254,6 +254,9 @@ public:
     virtual const Fvector& listener_position() = 0;
 
     virtual void refresh_sources() = 0;
+    // plans/addons_api_support/10-location-packs.md: the background reading of sources stops (a location pack switch
+    // changes the index of the file system); a later folder or source starts it again. refresh_sources after the switch.
+    virtual void prefetch_stop() {}
 
     // 34-sound-cold-load.md: read ahead in the background the .ogg files of a folder relative to $game_sounds$
     // (e.g. "taunts\\actor_stalker\\"; one path component may be "*" = every subfolder). Returns at once. Each folder

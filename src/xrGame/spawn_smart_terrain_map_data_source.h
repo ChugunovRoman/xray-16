@@ -15,6 +15,9 @@ public:
     static void UpdateSharedLoading(); // main, every frame: the deferred loading starts once the menu has settled
     static void PublishSharedDataIfReady();
     static void ShutdownSharedLoading();
+    // plans/addons_api_support/10-location-packs.md: the loading stops and the loaded data goes (another location
+    // pack); StartSharedLoadingWhenIdle loads it again
+    static void ForgetSharedLoading();
     static pcstr GetSharedSmartLevelName(pcstr smart_name, pcstr spawn_name = "all");
 
     void SetSpawnName(pcstr spawn_name);

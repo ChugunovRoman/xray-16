@@ -179,6 +179,8 @@ struct AddonRecord
     xr_string type_name;
     EAddonType type = EAddonType::Unknown;
     xr_vector<AddonDependency> depends; // [addon] depends
+    // [location] of a location pack (plans/addons_api_support/10-location-packs.md): read by level_pack.cpp
+    xr_vector<std::pair<xr_string, xr_string>> location;
     xr_string trust = "local";  // appdata/addons.ltx: first_party | index | local; only shown for now
     xr_string plugin_sha256;    // appdata/addons.ltx: hash of the plugin library, not checked yet
     fs::path dir_path;      // addon folder; use for every file system operation
@@ -1116,6 +1118,14 @@ bool ParseManifest(AddonRecord& addon, bool warn = true)
                 VersionString(addon.plugin_api_min).c_str());
         }
         addon.plugin_required = ini.get_bool("plugin", "required", false);
+    }
+
+    // The engine does not check the keys here: level_pack.cpp reads them for type = location
+    addon.location.clear();
+    if (const IniSection* location = ini.find("location"))
+    {
+        for (const IniLine& line : location->lines)
+            addon.location.emplace_back(line.key, line.value);
     }
     return true;
 }
@@ -2232,6 +2242,24 @@ bool IsMainThread() { return detail::ApiIsMainThread() != 0; }
 bool IsDebugLog() { return detail::g_debug_log; }
 
 const xr_vector<xr_string>& KnownAddonIds() { return detail::g_known_ids; }
+
+xr_vector<AddonInfo> ListAddons()
+{
+    xr_vector<AddonInfo> result;
+    if (!detail::g_addons)
+        return result;
+    for (const auto& addon : *detail::g_addons)
+    {
+        AddonInfo& info = result.emplace_back();
+        info.id = addon->id;
+        info.version = addon->version;
+        info.type = addon->type_name;
+        info.dir = addon->dir;
+        info.active = addon->state == detail::EAddonState::Active;
+        info.location = addon->location;
+    }
+    return result;
+}
 
 pcstr NameOwnerAddonId(pcstr name)
 {

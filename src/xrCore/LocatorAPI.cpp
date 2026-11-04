@@ -252,7 +252,7 @@ const CLocatorAPI::file* CLocatorAPI::RegisterExternal(pcstr name)
 }
 
 const CLocatorAPI::file* CLocatorAPI::Register(
-    pcstr name, size_t vfs, u32 crc, u32 ptr, u32 size_real, u32 size_compressed, u32 modif)
+    pcstr name, size_t vfs, u32 crc, u32 ptr, u32 size_real, u32 size_compressed, u32 modif, u16 layer)
 {
     ZoneScoped;
     ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
@@ -274,6 +274,7 @@ const CLocatorAPI::file* CLocatorAPI::Register(
     desc.size_real = size_real;
     desc.size_compressed = size_compressed;
     desc.modif = modif & ~u32(0x3);
+    desc.layer = layer;
     // Msg("registering file %s - %d", name, size_real);
     // if file already exist - update info
     files_it I = m_files.find(desc);
@@ -287,6 +288,16 @@ const CLocatorAPI::file* CLocatorAPI::Register(
 
         desc.name = I->name;
 
+        // 10-location-packs.md: a layer covers the name (a rescan of the base, an archive mounted after the layer,
+        // a written file): the new entry goes under it, the layer keeps serving the name
+        if (I->layer > layer)
+        {
+            register_under_layers(*I, desc);
+            return &*I;
+        }
+        if (layer > I->layer) // the layer remembers what it covers: unmount_layer puts it back
+            m_layers[layer - 1]->covered.emplace(I->name, *I);
+
         // sad but true, performance option
         // correct way is to erase and then insert new record:
         const_cast<file&>(*I) = desc;
@@ -299,6 +310,8 @@ const CLocatorAPI::file* CLocatorAPI::Register(
 
     // otherwise insert file
     auto result = m_files.insert(desc).first;
+    if (layer)
+        m_layers[layer - 1]->added.insert(result->name);
 
     // Try to register folder(s)
     string_path temp;
@@ -323,6 +336,8 @@ const CLocatorAPI::file* CLocatorAPI::Register(
                 "First argument is the file we tried to insert, "
                 "second is the file that prevented the insertion.";
             R_ASSERT4(I2.second, failureDescription, path, I2.first->name);
+            if (layer)
+                m_layers[layer - 1]->added.insert(I2.first->name);
         }
         xr_strcpy(temp, sizeof temp, path);
         auto last_char = &temp[xr_strlen(temp) - 1];
@@ -649,6 +664,334 @@ void CLocatorAPI::unload_archive(CLocatorAPI::archive& A)
         }
     }
     A.close();
+}
+
+bool ignore_name(const char* _name);
+
+// plans/addons_api_support/10-location-packs.md: desc (a lower layer than top) takes its place in the chain of the
+// entries this name has under the layers: right under the lowest layer above it
+void CLocatorAPI::register_under_layers(const file& top, const file& desc)
+{
+    VERIFY(desc.layer < top.layer && top.layer <= m_layers.size());
+    fs_layer* L = m_layers[top.layer - 1];
+    for (;;)
+    {
+        const auto covered = L->covered.find(top.name);
+        if (covered == L->covered.end())
+        {
+            // The layer brought the name: from now on it covers the new entry
+            L->added.erase(top.name);
+            L->covered.emplace(top.name, desc);
+            return;
+        }
+        if (covered->second.layer == desc.layer)
+        {
+            covered->second = desc;
+            return;
+        }
+        if (covered->second.layer < desc.layer)
+        {
+            // desc's own layer lies between: it covers what was under L, L covers desc
+            fs_layer& own = *m_layers[desc.layer - 1];
+            own.added.erase(top.name);
+            own.covered[top.name] = covered->second;
+            covered->second = desc;
+            return;
+        }
+        L = m_layers[covered->second.layer - 1];
+    }
+}
+
+// The folder physical_dir under the names virtual_dir (both with the trailing delimiter). False when the folder
+// cannot be enumerated.
+bool CLocatorAPI::layer_walk(u16 index, pcstr physical_dir, pcstr virtual_dir)
+{
+    struct entry
+    {
+        xr_string name; // as the disk spells it
+        bool folder;
+        u32 size;
+        u32 time_write;
+    };
+    xr_vector<entry> entries;
+
+    string_path mask;
+    strconcat(sizeof mask, mask, physical_dir, "*");
+    convert_path_separators(mask);
+#if defined(XR_PLATFORM_WINDOWS)
+    _wfinddata64i32_t data{};
+    const intptr_t handle = _wfindfirst(XRay::Utf8::ToWide(mask).c_str(), &data);
+    if (handle == -1)
+        return false;
+    do
+    {
+        if (data.attrib & _A_HIDDEN)
+            continue;
+        entries.push_back({ XRay::Utf8::FromWide(data.name), (data.attrib & _A_SUBDIR) != 0,
+            static_cast<u32>(data.size), static_cast<u32>(data.time_write) });
+    } while (_wfindnext(handle, &data) == 0);
+    _findclose(handle);
+#elif defined(XR_PLATFORM_POSIX)
+    glob_t globbuf{};
+    const int found = glob(mask, GLOB_NOSORT, nullptr, &globbuf);
+    if (found == GLOB_NOMATCH)
+        return true; // an empty folder (mount_layer has checked the root is there)
+    if (found != 0)
+        return false;
+    for (size_t i = 0; i < globbuf.gl_pathc; ++i)
+    {
+        struct stat fi;
+        if (0 != stat(globbuf.gl_pathv[i], &fi))
+            continue;
+        const bool folder = (fi.st_mode & S_IFMT) == S_IFDIR;
+        if (!folder && (fi.st_mode & S_IFMT) != S_IFREG)
+            continue; // "hidden" for the walk, as in Recurse
+        pcstr name = strrchr(globbuf.gl_pathv[i], '/');
+        name = name ? name + 1 : globbuf.gl_pathv[i];
+#   ifdef XR_PLATFORM_APPLE
+        const u32 time_write = (u32)fi.st_mtimespec.tv_sec;
+#   else
+        const u32 time_write = (u32)fi.st_mtim.tv_sec;
+#   endif
+        entries.push_back({ name, folder, static_cast<u32>(fi.st_size), time_write });
+    }
+    globfree(&globbuf);
+#else
+#   error Select or add implementation for your platform
+#endif
+
+    for (const entry& it : entries)
+    {
+        pcstr name = it.name.c_str();
+        if (0 == xr_strcmp(name, ".") || 0 == xr_strcmp(name, "..") || ignore_name(name))
+            continue;
+
+        string_path physical, virtual_name;
+        strconcat(sizeof physical, physical, physical_dir, name);
+        strconcat(sizeof virtual_name, virtual_name, virtual_dir, name);
+        xr_fs_strlwr(virtual_name);
+        if (it.folder)
+        {
+            xr_strcat(physical, DELIMITER);
+            xr_strcat(virtual_name, DELIMITER);
+            Register(virtual_name, VFS_STANDARD_FILE, 0, 0, 0, 0, 0, index); // "insert self" of Recurse
+            layer_walk(index, physical, virtual_name);
+            continue;
+        }
+        if (strext(virtual_name) && (0 == strncmp(strext(virtual_name), ".db", 3) ||
+                                        0 == strncmp(strext(virtual_name), ".xdb", 4)))
+        {
+            Msg("! FS: layer '%s': archives are not mounted from a layer, skipped [%s]",
+                m_layers[index - 1]->id.c_str(), physical);
+            continue;
+        }
+        Register(virtual_name, VFS_STANDARD_FILE, 0, 0, it.size, it.size, it.time_write, index);
+        ++m_layers[index - 1]->files;
+    }
+    return true;
+}
+
+u16 CLocatorAPI::mount_layer(pcstr id, pcstr physical_root, pcstr virtual_root, bool writable)
+{
+    R_ASSERT(id && id[0] && physical_root && physical_root[0]);
+    if (find_layer(id))
+    {
+        Msg("! FS: layer '%s' is mounted already", id);
+        return 0;
+    }
+    if (m_layers.size() >= size_t(u16(-1)))
+    {
+        Msg("! FS: layer '%s': too many layers", id);
+        return 0;
+    }
+    FS_Path* game_data = nullptr;
+    if (!virtual_root && !get_path("$game_data$", &game_data))
+    {
+        Msg("! FS: layer '%s': no $game_data$ in fsgame.ltx to mount it over", id);
+        return 0;
+    }
+
+    auto* L = xr_new<fs_layer>();
+    L->id = id;
+    L->writable = writable;
+    xr_strcpy(L->physical_root, physical_root);
+    restore_path_separators(L->physical_root);
+    if (L->physical_root[xr_strlen(L->physical_root) - 1] != _DELIMITER)
+        xr_strcat(L->physical_root, DELIMITER);
+    if (writable)
+        VerifyPath(L->physical_root); // the writes need the folder; an empty one is a valid layer
+    {
+        string_path folder;
+        xr_strcpy(folder, L->physical_root);
+        folder[xr_strlen(folder) - 1] = '\0';
+        convert_path_separators(folder);
+#if defined(XR_PLATFORM_WINDOWS)
+        const DWORD attributes = GetFileAttributesW(XRay::Utf8::ToWide(folder).c_str());
+        const bool is_folder = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
+#elif defined(XR_PLATFORM_POSIX)
+        struct stat fi;
+        const bool is_folder = 0 == stat(folder, &fi) && (fi.st_mode & S_IFMT) == S_IFDIR;
+#else
+#   error Select or add implementation for your platform
+#endif
+        if (!is_folder)
+        {
+            Msg("! FS: layer '%s': no folder [%s]", id, L->physical_root);
+            xr_delete(L);
+            return 0;
+        }
+    }
+    NormalizeIndexName(L->virtual_root, virtual_root ? virtual_root : game_data->m_Path);
+    if (L->virtual_root[xr_strlen(L->virtual_root) - 1] != _DELIMITER)
+        xr_strcat(L->virtual_root, DELIMITER);
+    L->virtual_root_length = xr_strlen(L->virtual_root);
+
+    CTimer timer;
+    timer.Start();
+    ScopeLock files_scope(m_files_lock); // Register locks it again: recursive
+    m_layers.push_back(L);
+    const u16 index = u16(m_layers.size());
+    const bool walked = layer_walk(index, L->physical_root, L->virtual_root);
+    if (!walked)
+    {
+        Msg("! FS: layer '%s': cannot enumerate [%s]", id, L->physical_root);
+        unmount_layer(id);
+        return 0;
+    }
+
+    u32 covered_files = 0;
+    for (const auto& [name, entry] : L->covered)
+        if (name[xr_strlen(name) - 1] != _DELIMITER)
+            ++covered_files;
+    Msg("FS: layer %u '%s'%s mounted over [%s]: %u files from [%s], %u of them cover other files, %f sec", index, id,
+        writable ? " (writable)" : "", L->virtual_root, L->files, L->physical_root, covered_files,
+        timer.GetElapsed_sec());
+    return index;
+}
+
+// A write of virtual_name goes into the top writable layer when a layer serves the name now (the write must stay
+// with the layers that changed the file); false - the name is written where it lies
+bool CLocatorAPI::writable_layer_name(pcstr virtual_name, string_path& physical) const
+{
+    ScopeLock files_scope(m_files_lock); // m_layers too: a write may come from a worker thread
+    if (m_layers.empty())
+        return false;
+    const fs_layer* target = nullptr;
+    for (auto it = m_layers.rbegin(); it != m_layers.rend() && !target; ++it)
+        if ((*it)->writable)
+            target = *it;
+    if (!target || 0 != strncmp(virtual_name, target->virtual_root, target->virtual_root_length))
+        return false;
+
+    file key;
+    key.name = virtual_name;
+    const auto I = m_files.find(key);
+    if (I == m_files.end() || !I->layer)
+        return false;
+    strconcat(sizeof physical, physical, target->physical_root, virtual_name + target->virtual_root_length);
+    return true;
+}
+
+// The layer a file written into its folder belongs to (w_close), with the name it takes; 0 - not a layer file
+u16 CLocatorAPI::writable_layer_of(pcstr physical_name, string_path& virtual_name) const
+{
+    string_path name;
+    NormalizeIndexName(name, physical_name);
+    ScopeLock files_scope(m_files_lock); // m_layers: see writable_layer_name
+    for (size_t i = 0; i < m_layers.size(); ++i)
+    {
+        const fs_layer& L = *m_layers[i];
+        if (!L.writable)
+            continue;
+        string_path root;
+        NormalizeIndexName(root, L.physical_root);
+        const size_t length = xr_strlen(root);
+        if (0 != strncmp(name, root, length))
+            continue;
+        strconcat(sizeof virtual_name, virtual_name, L.virtual_root, name + length);
+        return u16(i + 1);
+    }
+    return 0;
+}
+
+bool CLocatorAPI::unmount_layer(pcstr id)
+{
+    const u16 index = find_layer(id);
+    if (!index)
+    {
+        Msg("! FS: layer '%s' is not mounted", id);
+        return false;
+    }
+    if (index != m_layers.size())
+    {
+        Msg("! FS: layer '%s' is not the top one: the layers mounted after it go first", id);
+        return false;
+    }
+
+    ScopeLock files_scope(m_files_lock);
+    fs_layer* L = m_layers.back();
+
+    // The covered entries come back (the name string stays the one of the live entry)
+    for (const auto& [name, entry] : L->covered)
+    {
+        file key;
+        key.name = name;
+        const files_it I = m_files.find(key);
+        if (I != m_files.end() && I->layer == index)
+            const_cast<file&>(*I) = entry;
+    }
+
+    // The names the layer brought leave: the deepest first (a folder sorts before what it holds). A folder that
+    // still holds something (a file written into it after the mount) stays, as an entry of the base.
+    for (auto it = L->added.rbegin(); it != L->added.rend(); ++it)
+    {
+        file key;
+        key.name = *it;
+        const files_it I = m_files.find(key);
+        if (I == m_files.end() || I->layer != index)
+            continue;
+        const size_t length = xr_strlen(I->name);
+        if (I->name[length - 1] == _DELIMITER)
+        {
+            const files_it next = std::next(I);
+            if (next != m_files.end() && 0 == strncmp(next->name, I->name, length))
+            {
+                const_cast<file&>(*I).layer = 0;
+                continue;
+            }
+        }
+        auto str = pstr(I->name);
+        m_files.erase(I);
+        xr_free(str);
+    }
+
+    Msg("FS: layer %u '%s' unmounted", index, id);
+    m_layers.pop_back();
+    xr_delete(L);
+    return true;
+}
+
+u16 CLocatorAPI::find_layer(pcstr id) const
+{
+    for (size_t i = 0; i < m_layers.size(); ++i)
+        if (0 == xr_strcmp(m_layers[i]->id.c_str(), id))
+            return u16(i + 1);
+    return 0;
+}
+
+pcstr CLocatorAPI::layer_id(u16 index) const
+{
+    return index && index <= m_layers.size() ? m_layers[index - 1]->id.c_str() : nullptr;
+}
+
+bool CLocatorAPI::physical_name(const file& desc, string_path& dest) const
+{
+    if (!desc.layer || desc.layer > m_layers.size())
+        return false;
+    const fs_layer& L = *m_layers[desc.layer - 1];
+    VERIFY(0 == strncmp(desc.name, L.virtual_root, L.virtual_root_length));
+    strconcat(sizeof dest, dest, L.physical_root, desc.name + L.virtual_root_length);
+    return true;
 }
 
 bool ignore_name(const char* _name)
@@ -1386,6 +1729,9 @@ void CLocatorAPI::_destroy()
         xr_free(str);
     }
     m_files.clear();
+    for (fs_layer* L : m_layers) // the names they keep were the ones of m_files
+        xr_delete(L);
+    m_layers.clear();
 
     for (auto& it : m_paths)
     {
@@ -1943,6 +2289,7 @@ T* CLocatorAPI::r_open_impl(pcstr path, pcstr _fname)
 
     if (!check_for_file(path, _fname, fname, desc))
         return nullptr;
+    physical_name(*desc, fname); // 10-location-packs.md: a file of a layer lies in the folder of the layer
 
     // OK, analyse
     const u64 io_t0 = xray::perf::Ticks(); // 50z5-extra-diagnostics.md: the read latency of the [io] lines
@@ -1994,6 +2341,9 @@ IWriter* CLocatorAPI::w_open(pcstr path, pcstr _fname)
 
     if (path && path[0])
         update_path(fname, path, fname);
+    string_path physical;
+    if (writable_layer_name(fname, physical)) // 10-location-packs.md: a file the layers serve
+        xr_strcpy(fname, physical);
     CFileWriter* W = xr_new<CFileWriter>(fname, false);
 #ifdef _EDITOR
     if (!W->valid())
@@ -2010,6 +2360,9 @@ IWriter* CLocatorAPI::w_open_ex(pcstr path, pcstr _fname)
 
     if (path && path[0])
         update_path(fname, path, fname);
+    string_path physical;
+    if (writable_layer_name(fname, physical)) // 10-location-packs.md: a file the layers serve
+        xr_strcpy(fname, physical);
     CFileWriter* W = xr_new<CFileWriter>(fname, true);
 #ifdef _EDITOR
     if (!W->valid())
@@ -2030,14 +2383,18 @@ void CLocatorAPI::w_close(IWriter*& S)
 
         if (bReg)
         {
+            // 10-location-packs.md: a file written into a writable layer takes its name in the game data
+            string_path virtual_name;
+            const u16 layer = writable_layer_of(fname, virtual_name);
+            pcstr name = layer ? virtual_name : fname;
 #if defined(XR_PLATFORM_WINDOWS)
             struct _stat st{};
             if (_wstat(XRay::Utf8::ToWide(fname).c_str(), &st) == 0)
-                Register(fname, VFS_STANDARD_FILE, 0, 0, st.st_size, st.st_size, (u32)st.st_mtime);
+                Register(name, VFS_STANDARD_FILE, 0, 0, st.st_size, st.st_size, (u32)st.st_mtime, layer);
 #elif defined(XR_PLATFORM_POSIX)
             struct stat st{};
             if (::stat(fname, &st) == 0)
-                Register(fname, VFS_STANDARD_FILE, 0, 0, st.st_size, st.st_size, (u32)st.st_mtime);
+                Register(name, VFS_STANDARD_FILE, 0, 0, st.st_size, st.st_size, (u32)st.st_mtime, layer);
 #else
 #   error Select or add implementation for your platform
 #endif
@@ -2085,6 +2442,8 @@ bool CLocatorAPI::dir_delete(pcstr initial, pcstr nm, bool remove_files)
             ++I;
             if (0 != strncmp(entry.name, fpath, base_len))
                 break; // end of list
+            if (entry.layer)
+                continue; // 10-location-packs.md: the files of a layer are not deleted through the index
             const char* end_symbol = entry.name + xr_strlen(entry.name) - 1;
             if (*end_symbol != _DELIMITER)
             {
@@ -2128,6 +2487,11 @@ void CLocatorAPI::file_delete(pcstr path, pcstr nm)
 
     ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
     const files_it I = file_find_it_lazy(fname); // 50z1
+    if (I != m_files.end() && I->layer)
+    {
+        Msg("! FS: [%s] is a file of the layer '%s', not deleted", I->name, layer_id(I->layer));
+        return;
+    }
     if (I != m_files.end())
     {
         // remove file
@@ -2169,6 +2533,11 @@ void CLocatorAPI::file_rename(pcstr src, pcstr dest, bool overwrite)
     if (S != m_files.end())
     {
         files_it D = file_find_it_lazy(dest);
+        if (S->layer || (D != m_files.end() && D->layer))
+        {
+            Msg("! FS: [%s] -> [%s]: a file of a layer, not renamed", src, dest); // 10-location-packs.md
+            return;
+        }
         if (D != m_files.end())
         {
             if (!overwrite)
@@ -2328,7 +2697,8 @@ void CLocatorAPI::rescan_path(pcstr full_path, bool bRecurse)
         ++I;
         if (0 != strncmp(entry.name, full_path, base_len))
             break; // end of list
-        if (entry.vfs != VFS_STANDARD_FILE)
+        // 10-location-packs.md: a layer keeps its entries, the walk below puts the base ones under them (Register)
+        if (entry.vfs != VFS_STANDARD_FILE || entry.layer)
             continue;
         pcstr entry_begin = entry.name + base_len;
         if (!bRecurse && strchr(entry_begin, _DELIMITER))

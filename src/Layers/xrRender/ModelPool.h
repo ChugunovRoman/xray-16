@@ -112,6 +112,8 @@ public:
     // waits for the model being loaded)
     bool InPool(LPCSTR key);
     void BackgroundLoadPause(bool on);
+    // 10-location-packs.md: the motions nothing uses leave the container (after ClearPool, the background load paused)
+    void ClearMotions();
 
     void dump();
 

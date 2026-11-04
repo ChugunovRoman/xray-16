@@ -808,6 +808,8 @@ public:
     void model_Logging(bool bEnable) override { Models->Logging(bEnable); }
     void models_Prefetch() override;
     void models_Clear(bool b_complete) override;
+    void AssetsSwitchBegin() override; // 10-location-packs.md
+    void AssetsSwitchEnd() override;
     bool model_Preload(LPCSTR name) override; // 36-spawn-model-load.md
     void model_PrefetchFiles(LPCSTR name, u32 source) override;
     bool model_PrefetchPending(LPCSTR name) override; // 50i-stage3-slow-disk-io.md

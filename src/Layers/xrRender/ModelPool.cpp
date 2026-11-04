@@ -2842,6 +2842,12 @@ bool CModelPool::InPool(LPCSTR key)
 // 50l: the main thread, a device reset (CRender::reset_begin / reset_end) - no background model load across it
 void CModelPool::BackgroundLoadPause(bool on) { bgload_pause(on); }
 
+void CModelPool::ClearMotions()
+{
+    ModelMotionsScope motions; // the loads dock their omf into the container under it
+    g_pMotionsContainer->clean(false);
+}
+
 void CModelPool::ClearPool(BOOL b_complete)
 {
     // 50l-weak-cpu-spawn-models.md: the background loading stops for the unload (the load in progress ends first,

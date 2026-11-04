@@ -17,6 +17,8 @@ class demo_info_loader;
 #include "DemoInfo.h"
 #include "ai_space.h"
 
+#include <functional>
+
 namespace gamespy_gp
 {
 class account_manager;
@@ -117,6 +119,8 @@ protected:
 
     xr_vector<CUIMessageBoxEx*> m_pMB_ErrDlgs;
     bool ReloadUI();
+    bool m_restarting_scripts = false; // RestartScripts
+    void DropStartDialog();
 
 public:
     u32 m_deactivated_frame;
@@ -188,6 +192,10 @@ public:
     void SetNeedVidRestart();
     void OnDeviceReset() override;
     void OnUIReset() override;
+    // plans/addons_api_support/10-location-packs.md: the Lua state restarts while the menu is shown (a location pack
+    // switch); the menu is built again by the scripts of the new state. Main thread, no Lua code on the stack.
+    // before_rebuild: between the old menu gone and the new one built
+    void RestartScripts(const std::function<void()>& before_rebuild = {});
 
     LPCSTR GetGSVer();
 

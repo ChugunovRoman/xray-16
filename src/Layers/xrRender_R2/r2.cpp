@@ -1316,6 +1316,29 @@ bool CRender::model_ParticlesExist(LPCSTR name)
 }
 void CRender::models_Prefetch() { Models->Prefetch(); }
 void CRender::models_Clear(bool b_complete) { Models->ClearPool(b_complete); }
+
+// 10-location-packs.md (plans/addons_api_support): see IRender
+void CRender::AssetsSwitchBegin()
+{
+    if (Models)
+        Models->BackgroundLoadPause(true); // waits for the model being loaded
+    Resources->_AsyncTexturesShutdown("location pack switch");
+    Resources->_AsyncTexturesBlock(true);
+}
+
+void CRender::AssetsSwitchEnd()
+{
+    if (Models)
+    {
+        Models->ClearPool(TRUE); // the bases nothing uses go: a model of the same name loads from the new files
+        Models->ClearMotions();
+    }
+    OnAssetsChanged(); // the texture descriptions (.thm) of the new files
+    PreviewScene_ResetDiskCache(); // its cache keys on the size and time of the ogf
+    Resources->_AsyncTexturesBlock(false);
+    if (Models)
+        Models->BackgroundLoadPause(false);
+}
 bool CRender::model_Preload(LPCSTR name) { return Models->Preload(name); }
 void CRender::model_PrefetchFiles(LPCSTR name, u32 source) { Models->PrefetchFiles(name, source); }
 bool CRender::model_PrefetchPending(LPCSTR name) { return Models->PrefetchPending(name); } // 50i

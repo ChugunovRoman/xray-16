@@ -24,6 +24,7 @@
 #include "addon_host.h"
 #include "addon_event_bus.h"
 #include "addon_goap.h"
+#include "level_pack.h"
 
 CAI_Space* g_ai_space;
 
@@ -54,6 +55,7 @@ void CAI_Space::init()
 
         // Addons: discover addons and load their plugins before any Lua code runs (wiki/doc/plugins).
         gw::addons::Initialize();
+        gw::InitLevelPacks(); // the location packs among the addons (10-location-packs.md), before any is mounted
 
         VERIFY(!GEnv.ScriptEngine);
         GEnv.ScriptEngine = xr_new<CScriptEngine>(false, true);
