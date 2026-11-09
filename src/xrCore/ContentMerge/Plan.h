@@ -21,12 +21,12 @@ namespace xray::content_merge
 {
 // ---- the rules of the file system (xrCore LocatorAPI.cpp calls these) -------------------------------------------------
 
-// The bytes of a path of the index of the file system: xrCore string_path (xr_types.h: 2 * MAX_PATH; MAX_PATH is
-// PATH_MAX + 1 on POSIX, Common/Platform*.inl). LocatorAPI.cpp checks that they are the same
+// The bytes of a path of the index of the file system: xrCore string_path (xr_types.h: 2 * max_path, where max_path is
+// MAX_PATH on Windows and PATH_MAX on POSIX). LocatorAPI.cpp checks that they are the same
 #if defined(_WIN32)
 constexpr std::size_t kIndexPathBytes = 2 * 260;
 #else
-constexpr std::size_t kIndexPathBytes = 2 * (PATH_MAX + 1);
+constexpr std::size_t kIndexPathBytes = 2 * PATH_MAX;
 #endif
 // CLocatorAPI::layer_walk: an entry whose name does not fit a path of the index ("! FS: layer '<id>': name too long
 // (<kIndexPathBytes> bytes and more), skipped") - the entry alone (a folder with its subtree) is not mounted. The

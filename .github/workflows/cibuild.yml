@@ -102,12 +102,19 @@ jobs:
         & "$bin/gw_merge.exe" version
         if ($LASTEXITCODE -ne 0) { exit 1 }
 
-    # The smoke test of the Linux job on the Windows build, with LuaJIT.dll of the engine (--check-lua)
+    # The smoke test of the Linux job on the Windows build, with LuaJIT.dll of the engine (--check-lua). Release Master
+    # Gold links every library statically (src/xray_project_configuration.props): there is no LuaJIT.dll, the test
+    # runs without --check-lua (the launcher runs gw_merge without it when the library is missing)
     - name: Smoke test gw_merge
       shell: bash
       run: |
         bin="bin/${{ matrix.Platform }}/${{ matrix.Configuration }}"
-        bash misc/ci/gw_merge_smoke.sh "$bin/gw_merge.exe" "$bin/LuaJIT.dll"
+        if [ -f "$bin/LuaJIT.dll" ]; then
+          bash misc/ci/gw_merge_smoke.sh "$bin/gw_merge.exe" "$bin/LuaJIT.dll"
+        else
+          echo "::notice::gw_merge smoke test: no LuaJIT.dll in $bin (static build), --check-lua is not tested"
+          bash misc/ci/gw_merge_smoke.sh "$bin/gw_merge.exe"
+        fi
 
     - name: Prepare artifacts
       shell: cmd
