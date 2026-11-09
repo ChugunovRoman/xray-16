@@ -15,6 +15,16 @@ public:
 
     void InitPdaMsgListItem(const Fvector2& size);
     void SetFont(CGameFont* pFont) override;
+    bool ApplyBodycamLayout(bool active,float width,float k);
+private:
+    bool m_bodycamLayout=false;
+    bool m_bodycamPreviewReady=false;
+    float m_bodycamWidth=0;
+    Frect m_savedRects[5]{};
+    CGameFont* m_savedFonts[3]{};
+    u32 m_savedColors[3]{};
+    xr_string m_savedMessage;
+public:
 
     pcstr GetDebugType() override { return "CUIPdaMsgListItem"; }
 

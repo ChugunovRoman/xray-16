@@ -238,6 +238,9 @@ HRESULT CRender::shader_compile(pcstr name, IReader* fs, pcstr pFunctionName,
     xr_sprintf(c_name, "// %s.%s", name, pTarget);
     options.add(c_name);
 
+    // Separate cache key (as in r4_shaders.cpp): binaries cached without the optional bodycam shader path are not reused.
+    appendShaderOption(1, "USE_GW_BODYCAM", "1");
+
     // Shadow map size
     {
         xr_itoa(m_SMAPSize, c_smapsize, 10);

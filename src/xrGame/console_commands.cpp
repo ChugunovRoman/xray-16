@@ -1,4 +1,6 @@
 #include "pch_script.h"
+
+int g_bodycamSession=0; // Kept through level teardown; updated by the session save option.
 #include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/xr_ioc_cmd.h"
 #include "xrEngine/CustomHUD.h"
@@ -20,6 +22,7 @@
 #include "Hit.h"
 #include "PHDestroyable.h"
 #include "Actor.h"
+#include "bodycam_motion.h"
 #include "Actor_Flags.h"
 #include "CustomZone.h"
 #include "xrScriptEngine/script_engine.hpp"
@@ -3468,6 +3471,22 @@ public:
     }
 };
 
+std::atomic<u32> gw_bodycam_motion::god_vitals_activation{};
+
+class CCC_GodMode final : public CCC_Mask
+{
+public:
+    using CCC_Mask::CCC_Mask;
+
+    void Execute(pcstr args) override
+    {
+        const bool wasEnabled = GetValue();
+        CCC_Mask::Execute(args);
+        if (!wasEnabled && GetValue())
+            gw_bodycam_motion::god_vitals_activation.fetch_add(1, std::memory_order_relaxed);
+    }
+};
+
 // Experimental render switches of xrGame: like CCC_Integer, but not kept in user.ltx (always start at the default)
 class CCC_IntegerNotSaved : public CCC_Integer
 {
@@ -4071,7 +4090,10 @@ void CCC_RegisterCommands()
     CMD4(CCC_FloatBlock, "ph_tri_query_ex_aabb_rate", &ph_console::ph_tri_query_ex_aabb_rate, 1.01f, 3.f);
 #endif // DEBUG
 
-    CMD3(CCC_Mask, "g_god", &psActorFlags, AF_GODMODE);
+    CMD4(CCC_IntegerNotSaved, "g_bodycam_session", &g_bodycamSession, 0, 1);
+    CMD4(CCC_IntegerNotSaved, "g_bodycam_sms", &gw_bodycam_motion::sms_visible(), 0, 1);
+    CMD4(CCC_IntegerNotSaved, "g_bodycam_hud_only", &gw_bodycam_motion::hud_only(), 0, 1);
+    CMD3(CCC_GodMode, "g_god", &psActorFlags, AF_GODMODE);
     CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
     CMD1(CCC_TuneAttachableItem, "dbg_adjust_attachable_item");
     CMD4(CCC_Integer, "g_3d_scopes", &g_3d_scope_type, 0, 2);

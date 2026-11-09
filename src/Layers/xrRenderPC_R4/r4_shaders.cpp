@@ -238,6 +238,9 @@ HRESULT CRender::shader_compile(pcstr name, IReader* fs, pcstr pFunctionName,
         sh_name.append(option);
     };
 
+    // Separate cache key: stock DLLs never enable the optional bodycam shader path.
+    appendShaderOption(1, "USE_GW_BODYCAM", "1");
+
     // External defines
     options.add(m_ShaderOptions);
 

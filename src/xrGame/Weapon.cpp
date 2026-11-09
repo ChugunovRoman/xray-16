@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "Weapon.h"
+#include "bodycam_motion.h"
 #include "ParticlesObject.h"
 #include "entity_alive.h"
 #include "inventory_item_impl.h"
@@ -3747,6 +3748,12 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
     }
     if (!IsZoomed() && !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor == 0.f)
         m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::noZoom;
+
+    if (gw_bodycam_motion::active())
+    {
+        gw_bodycam_motion::hud(pActor,this,trans);
+        return;
+    }
 
     //============= Подготавливаем общие переменные =============//
 

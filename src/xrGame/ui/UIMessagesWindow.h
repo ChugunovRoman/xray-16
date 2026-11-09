@@ -9,6 +9,7 @@
 #pragma once
 
 #include "xrUICore/Windows/UIWindow.h"
+#include "xrUICore/Static/UIStatic.h"
 
 class CUIGameLog;
 class CUIChatWnd;
@@ -28,6 +29,10 @@ public:
     void PendingMode(bool const is_in_pending_mode);
     CUIChatWnd* GetChatWnd() const { return m_pChatWnd; }
     void Show(bool show) override;
+    void Draw() override;
+    void Update() override;
+    void ApplyBodycamLayout();
+    void RestoreBodycamNews();
 
     pcstr GetDebugType() override { return "CUIMessagesWindow"; }
 
@@ -38,6 +43,12 @@ protected:
     CUIChatWnd* m_pChatWnd{};
     CUIGameLog* m_pGameLog{};
     bool m_in_pending_mode{};
+    bool m_bodycamStyle=false,m_bodycamReady=false;
+    bool m_bodycamHistoryRestored=false;
+    bool m_bodycamRestoreLatest=false;
+    Frect m_originalLogRect{};
+    CUIStatic m_bodycamFrame{"BODYCAM SMS frame"};
+    CUIStatic m_bodycamDark{"BODYCAM SMS background"};
 
     Frect m_pending_chat_log_rect;
     Frect m_inprogress_chat_log_rect;

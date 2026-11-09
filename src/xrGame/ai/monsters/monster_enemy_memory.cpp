@@ -11,6 +11,16 @@
 #include "ai_monster_squad_manager.h"
 #include "Actor.h"
 #include "actor_memory.h"
+#include "monster_community.h"
+
+namespace
+{
+bool ignore_wave_target(const CBaseMonster& monster, const CEntityAlive* target)
+{
+    static const shared_str wave_species("meatgrinder_wave");
+    return target != g_actor && monster.monster_community->id() == wave_species;
+}
+}
 
 CMonsterEnemyMemory::CMonsterEnemyMemory()
 {
@@ -127,6 +137,8 @@ void CMonsterEnemyMemory::update()
 
 void CMonsterEnemyMemory::add_enemy(const CEntityAlive* enemy)
 {
+    if (ignore_wave_target(*monster, enemy))
+        return;
     SMonsterEnemy enemy_info;
     enemy_info.position = enemy->Position();
     enemy_info.vertex = enemy->ai_location().level_vertex_id();
@@ -149,6 +161,8 @@ void CMonsterEnemyMemory::add_enemy(const CEntityAlive* enemy)
 
 void CMonsterEnemyMemory::add_enemy(const CEntityAlive* enemy, const Fvector& pos, u32 vertex, u32 time)
 {
+    if (ignore_wave_target(*monster, enemy))
+        return;
     SMonsterEnemy enemy_info;
     enemy_info.position = pos;
     enemy_info.vertex = vertex;

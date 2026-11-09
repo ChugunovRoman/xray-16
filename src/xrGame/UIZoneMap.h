@@ -22,6 +22,21 @@ private:
     CUIStatic* m_clock_wnd{};
     CUIStatic* m_pointerDistanceText{};
 
+    CUIStatic m_bodycamLamp{"BODYCAM GPS lamp"};
+    CUIStatic m_bodycamContacts{"BODYCAM contact lamp"};
+    CGameFont* m_clockFont{};
+    CGameFont* m_counterFont{};
+    int m_bodycamLayout=-1;
+    float m_bodycamK=0;
+    bool m_bodycamStyle=false,m_motionAttached=false;
+    Frect m_originalRects[6]{};
+    EWindowAlignment m_originalAlignments[6]{};
+    shared_str m_originalTexture;
+    EVTextAlignment m_clockVAlign=valTop,m_counterVAlign=valTop;
+    ETextAlignment m_clockAlign=CGameFont::alLeft,m_counterAlign=CGameFont::alLeft;
+    u32 m_clockColor=0,m_counterColor=0,m_lastContacts=~0u;
+    float m_blinkUntil=0;
+    void ApplyBodycamStyle();
     u8 m_current_map_idx{ u8(-1) };
 
 public:

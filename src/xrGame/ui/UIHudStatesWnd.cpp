@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "../bodycam_motion.h"
 #include "UIHudStatesWnd.h"
 #include "Actor.h"
 #include "ActorCondition.h"
@@ -6,6 +7,10 @@
 #include "CustomOutfit.h"
 #include "ActorHelmet.h"
 #include "Inventory.h"
+#include "Weapon.h"
+#include "WeaponKnife.h"
+#include "Artefact.h"
+#include "UIHelper.h"
 #include "RadioactiveZone.h"
 #include "xrUICore/Static/UIStatic.h"
 #include "xrUICore/ProgressBar/UIProgressBar.h"
@@ -19,6 +24,10 @@
 #include "PDA.h"
 #include "WeaponMagazinedWGrenade.h"
 #include "xrUICore/XML/UITextureMaster.h"
+#include "Include/xrRender/FactoryPtr.h"
+#include "Include/xrRender/UIRender.h"
+#include "Include/xrRender/UISequenceVideoItem.h"
+#include "Include/xrRender/UIShader.h"
 
 CUIHudStatesWnd::CUIHudStatesWnd()
     : CUIWindow(CUIHudStatesWnd::GetDebugType()), m_b_force_update(true)
@@ -961,3 +970,109 @@ void CUIHudStatesWnd::FakeUpdateIndicatorType(u8 t, float power)
 }
 
 void CUIHudStatesWnd::EnableFakeIndicators(bool enable) { m_fake_indicators_update = enable; }
+
+void CUIHudStatesWnd::Draw()
+{
+    if (!gw_bodycam_motion::hud_active())
+    {
+        inherited::Draw();
+        return;
+    }
+    CActor* actor = smart_cast<CActor*>(Level().CurrentViewEntity());
+    if (!actor || !actor->g_Alive()) return;
+    if (gw_bodycam_motion::god_vitals()) DrawGodEyes();
+    DrawBodycam(actor);
+}
+
+void CUIHudStatesWnd::DrawGodEyes()
+{
+    const float k = UI().get_current_kx();
+    const u32 activation = gw_bodycam_motion::god_vitals_activation.load(std::memory_order_relaxed);
+    const bool restart = !m_godEyes || m_godVideoActivation != activation;
+    if (!m_godEyes)
+    {
+        CUIXml xml;
+        xml.Load(CONFIG_PATH, UI_PATH, UI_PATH_DEFAULT, "gw_bodycam_hud.xml");
+        m_godEyes = UIHelper::CreateStatic(xml, "god_eyes", &m_godVideo);
+        auto pos = m_godEyes->GetWndPos();
+        pos.x *= k;
+        m_godEyes->SetWndPos(pos);
+        m_godEyes->SetWidth(m_godEyes->GetWidth() * k);
+    }
+    if (restart)
+    {
+        // Rewind the decoder even when the video texture is still cached.
+        GEnv.UIRender->SetShader(*m_godEyes->GetShader());
+        FactoryPtr<IUISequenceVideoItem> video;
+        video->CaptureTexture();
+        video->video_Stop();
+        video->video_Play(TRUE);
+        m_godVideoActivation = activation;
+    }
+    m_godVideo.SetWndRect(Frect().set(1024.f - 342.f*k, 646.f, 1024.f - 12.f*k, 758.f));
+    m_godVideo.Draw();
+}
+
+void CUIHudStatesWnd::DrawBodycam(CActor* actor)
+{
+    const float k=UI().get_current_kx();
+    if(!m_bodycamAmmoIcon)
+    {
+        CUIXml xml;xml.Load(CONFIG_PATH,UI_PATH,UI_PATH_DEFAULT,"gw_bodycam_hud.xml");
+        m_bodycamAmmoIcon=UIHelper::CreateStatic(xml,"ammo_icon",&m_bodycamAmmo);
+        m_bodycamAmmoClip=UIHelper::CreateStatic(xml,"ammo_clip",&m_bodycamAmmo);
+        m_bodycamAmmoReserve=UIHelper::CreateStatic(xml,"ammo_reserve",&m_bodycamAmmo);
+        for(CUIStatic* w:{m_bodycamAmmoIcon,m_bodycamAmmoClip,m_bodycamAmmoReserve})
+        {
+            auto p=w->GetWndPos();p.x*=k;w->SetWndPos(p);w->SetWidth(w->GetWidth()*k);
+        }
+    }
+    m_bodycamAmmo.SetWndRect(Frect().set(1024.f-342.f*k,646.f,1024.f-12.f*k,758.f));
+    CWeapon* weapon=smart_cast<CWeapon*>(actor->inventory().ActiveItem());
+    // Knife hits use synthetic cartridges with a null ammo section. They are not ammunition.
+    const bool valid=weapon && !smart_cast<CWeaponKnife*>(weapon) && weapon->GetAmmoMagSize()>0 && weapon->m_ammoType<weapon->m_ammoTypes.size()
+        && (weapon->m_magazine.empty() || (weapon->m_magazine.back().m_ammoSect.c_str() && weapon->m_magazine.back().m_ammoSect.size()));
+    m_bodycamAmmoIcon->Show(false);
+    if(valid)
+    {
+        shared_str section=weapon->m_ammoTypes[weapon->m_ammoType];
+        if(!weapon->m_magazine.empty() && weapon->m_magazine.back().m_ammoSect.c_str() && weapon->m_magazine.back().m_ammoSect.size())section=weapon->m_magazine.back().m_ammoSect;
+        const bool hasSection=section.c_str() && section.size() && pSettings->section_exist(section.c_str());
+        u32 reserve=0;
+        for(auto* item:actor->inventory().m_all)
+            if(auto* ammo=smart_cast<CWeaponAmmo*>(item);ammo && ammo->cNameSect()==section)reserve+=ammo->m_boxCurr;
+        const bool hasGrid=hasSection && pSettings->line_exist(section.c_str(),"inv_grid_width") && pSettings->line_exist(section.c_str(),"inv_grid_height");
+        const float iw=hasGrid?pSettings->r_float(section,"inv_grid_width"):0.f,ih=hasGrid?pSettings->r_float(section,"inv_grid_height"):0.f;
+        const pcstr icon=hasSection?pSettings->read_if_exists<pcstr>(section.c_str(),"inv_icon",""):"";
+        string_path iconFile;
+        const bool hasIcon=icon && icon[0] && FS.exist(iconFile,"$game_textures$",make_string("ui\\%s",icon).c_str(),".dds");
+        if(hasGrid && hasIcon && _valid(iw) && _valid(ih) && iw>0 && ih>0)
+        {
+        m_bodycamAmmoIcon->SetShader(InventoryUtilities::GetEquipmentIconShaderForItemSection(section.c_str()));
+        m_bodycamAmmoIcon->Show(true);
+        const float ix=pSettings->read_if_exists<float>(section.c_str(),"inv_grid_x",0.f);
+        const float iy=pSettings->read_if_exists<float>(section.c_str(),"inv_grid_y",0.f);
+        m_bodycamAmmoIcon->SetTextureRect(Frect().set(ix*ICON_GRID_WIDTH,iy*ICON_GRID_HEIGHT,(ix+iw)*ICON_GRID_WIDTH,(iy+ih)*ICON_GRID_HEIGHT));
+        const float scale=_min(44.f/_max(iw,1.f),22.f/_max(ih,1.f));
+        const float w=iw*scale,h=ih*scale;
+        m_bodycamAmmoIcon->SetWndRect(Frect().set((275.f-w*.5f)*k,29.f-h*.5f,(275.f+w*.5f)*k,29.f+h*.5f));
+        m_bodycamAmmoIcon->SetStretchTexture(true);
+        }
+        string32 text;
+        xr_sprintf(text,"%d",weapon->GetAmmoElapsed());m_bodycamAmmoClip->SetText(text);
+        xr_sprintf(text,"%u",hasSection?reserve:0);m_bodycamAmmoReserve->SetText(text);
+    }
+    else {m_bodycamAmmoClip->SetText("--");m_bodycamAmmoReserve->SetText("--");}
+    m_bodycamAmmo.Draw();
+    unsigned index=0;
+    for(const CArtefact* artefact:actor->GetBeltArtefacts())
+    {
+        const auto section=artefact->cNameSect();
+        CUIStaticItem icon;
+        icon.SetShader(InventoryUtilities::GetEquipmentIconShaderForItemSection(section.c_str()));
+        icon.SetTextureRect(Frect().set(0,0,pSettings->r_float(section,"inv_grid_width")*ICON_GRID_WIDTH,pSettings->r_float(section,"inv_grid_height")*ICON_GRID_HEIGHT));
+        icon.SetSize(Fvector2().set(22.f*k,22.f));
+        icon.SetPos(1024.f-(342.f-(index%13)*24.f)*k,574.f-(index/13)*24.f);
+        icon.Render();++index;
+    }
+}

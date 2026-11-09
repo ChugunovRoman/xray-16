@@ -2604,7 +2604,8 @@ void CAI_Stalker::aim_target(Fvector& result, const CGameObject* object)
 bool CAI_Stalker::AlwaysTheCrow()
 {
     VERIFY(character_physics_support());
-    return (character_physics_support()->is_interactive_motion());
+    // inherited: CGameObject::m_force_client_update (game_object:set_update_always), false unless a script sets it
+    return inherited::AlwaysTheCrow() || character_physics_support()->is_interactive_motion();
 }
 
 smart_cover::cover const* CAI_Stalker::get_current_smart_cover()

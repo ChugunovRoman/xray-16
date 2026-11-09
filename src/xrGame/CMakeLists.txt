@@ -338,6 +338,7 @@ target_sources(xrGame PRIVATE
     BlackGraviArtifact.cpp
     BlackGraviArtifact.h
     BlockAllocator.h
+    bodycam_motion.h
     Bolt.cpp
     Bolt.h
     BoneProtections.cpp
@@ -2190,6 +2191,7 @@ target_sources(xrGame PRIVATE
     ik/mathTrig.h
     ui/ArtefactDetectorUI.cpp
     ui/ArtefactDetectorUI.h
+    ui/bodycam_sms_scroll.h
     #ui/CExtraContentFilter.cpp
     #ui/CExtraContentFilter.h
     ui/ChangeWeatherDialog.cpp

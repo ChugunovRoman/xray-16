@@ -8,6 +8,7 @@
 
 #include "pch_script.h"
 #include "script_game_object.h"
+#include "script_game_object_impl.h" // CScriptGameObject::object() (IC) for set_update_always
 #include "alife_space.h"
 #include "script_entity_space.h"
 #include "movement_manager_space.h"
@@ -121,6 +122,10 @@ luabind::class_<CScriptGameObject>& script_register_game_object1(luabind::class_
         .def("get_script", &CScriptGameObject::GetScriptControl)
         .def("get_script_name", &CScriptGameObject::GetScriptControlName)
         .def("reset_action_queue", &CScriptGameObject::ResetActionQueue)
+        .def("set_update_always", +[](CScriptGameObject* self, bool enabled)
+        {
+            self->object().force_client_update(enabled);
+        })
         .def("see", &CScriptGameObject::CheckObjectVisibility)
         .def("see", &CScriptGameObject::CheckTypeVisibility)
 

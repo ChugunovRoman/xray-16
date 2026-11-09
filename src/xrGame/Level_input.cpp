@@ -17,6 +17,7 @@
 #include "xrScriptEngine/script_callback_ex.h"
 
 #include "Actor.h"
+#include "bodycam_motion.h"
 #include "HudItem.h"
 #include "UIGameCustom.h"
 #include "ui/UIDialogWnd.h"
@@ -48,6 +49,7 @@ void CLevel::IR_OnMouseWheel(float x, float y)
 {
     if (g_bDisableAllInput)
         return;
+
 
     /* avo: script callback */
     if (g_actor)
@@ -245,6 +247,15 @@ void CLevel::IR_OnKeyboardPress(int key)
             if (funct(key, _curr))
                 return;
         }
+    }
+
+    // API and Lua input subscribers above may consume even an unbound key.
+    if(key==SDL_SCANCODE_F11 && _curr==kNOTBINDED && IsGameTypeSingle() &&
+        gw_bodycam_motion::hud_active() && g_actor && g_actor->g_Alive() &&
+        b_ui_exist && !CurrentGameUI()->TopInputReceiver() && !Device.Paused())
+    {
+        gw_bodycam_motion::sms_visible()^=1;
+        return;
     }
 
     if (_curr == kQUICK_SAVE && IsGameTypeSingle())

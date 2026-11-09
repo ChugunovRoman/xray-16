@@ -63,6 +63,7 @@ constexpr cpcstr ErrMsgBoxTemplate[] =
 };
 
 extern bool b_shniaganeed_pp;
+extern int g_bodycamSession;
 
 CMainMenu* MainMenu() { return (CMainMenu*)g_pGamePersistent->m_pMainMenu; };
 
@@ -80,6 +81,12 @@ CMainMenu::CMainMenu()
         {
             if (m_mainmenu->IsActive() && m_mainmenu->m_restarting_scripts)
                 m_mainmenu->DropStartDialog(); // RestartScripts builds it again in the new Lua state
+            else if (g_bodycamSession)
+            {
+                // Never create a Lua window in the interpreter that is about to be destroyed.
+                Msg("* [bodycam] releasing menu before Lua reset (active=%d)", m_mainmenu->IsActive());
+                m_mainmenu->DestroyInternal(true);
+            }
             else if (m_mainmenu->IsActive())
                 m_mainmenu->ReloadUI();
             else
@@ -87,7 +94,26 @@ CMainMenu::CMainMenu()
         }
     };
 
+    class CStartedEventCb : public CEventNotifierCallbackWithCid
+    {
+        CMainMenu* m_mainmenu;
+
+    public:
+        CStartedEventCb(CID cid, CMainMenu* mm) : CEventNotifierCallbackWithCid(cid), m_mainmenu(mm) {}
+        void ProcessEvent() override
+        {
+            // RestartScripts rebuilds the menu itself, after the Lua entries of the addons ran
+            if (g_bodycamSession && m_mainmenu->IsActive() && !m_mainmenu->m_restarting_scripts)
+            {
+                m_mainmenu->ReloadUI();
+                Msg("* [bodycam] menu recreated after Lua restart");
+            }
+        }
+    };
+
     m_script_reset_event_cid = ai().template Subscribe<CResetEventCb>(CAI_Space::EVENT_SCRIPT_ENGINE_RESET, this);
+    m_script_started_event_cid =
+        ai().template Subscribe<CStartedEventCb>(CAI_Space::EVENT_SCRIPT_ENGINE_STARTED, this);
 
     m_Flags.zero();
     m_startDialog = NULL;
@@ -167,6 +193,7 @@ CMainMenu::~CMainMenu()
     delete_data(m_pMB_ErrDlgs);
 
     ai().Unsubscribe(m_script_reset_event_cid, CAI_Space::EVENT_SCRIPT_ENGINE_RESET);
+    ai().Unsubscribe(m_script_started_event_cid, CAI_Space::EVENT_SCRIPT_ENGINE_STARTED);
 }
 
 void CMainMenu::Activate(bool bActivate)

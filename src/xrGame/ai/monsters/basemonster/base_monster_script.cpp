@@ -242,6 +242,14 @@ bool CBaseMonster::bfAssignMovement(CScriptEntityAction* tpEntityAction)
         break;
     }
 
+    case CScriptMovementAction::eGoalTypeLevelNodePosition:
+        if (!ai().level_graph().valid_vertex_id(l_tMovementAction.m_tNodeID))
+        {
+            l_tMovementAction.m_bCompleted = true;
+            return false;
+        }
+        path().set_target_point(l_tMovementAction.m_tDestinationPosition, l_tMovementAction.m_tNodeID);
+        break;
     case CScriptMovementAction::eGoalTypePathNodePosition:
 
         if (AssignGamePathIfNeeded(l_tMovementAction.m_tDestinationPosition, l_tMovementAction.m_tNodeID))
@@ -259,6 +267,20 @@ bool CBaseMonster::bfAssignMovement(CScriptEntityAction* tpEntityAction)
     }
     }
 
+    if (l_tMovementAction.m_tGoalType == CScriptMovementAction::eGoalTypeLevelNodePosition &&
+        strstr(Core.Params, "-survival_route_test"))
+    {
+        static u32 last_trace = 0;
+        if (Device.dwTimeGlobal - last_trace > 5000)
+        {
+            last_trace = Device.dwTimeGlobal;
+            Msg("* [survival-motion] id=%u requested=%u action=%u speed=%.3f pathspeed=%.3f delta=%.4f clientdelta=%.4f force=%d pos=%.2f,%.2f,%.2f",
+                ID(), u32(l_tMovementAction.m_tMoveAction), u32(anim().m_tAction),
+                control().movement().velocity_current(), control().path_builder().old_desirable_speed(),
+                Device.fTimeDelta, client_update_fdelta(), int(m_force_real_speed),
+                Position().x, Position().y, Position().z);
+        }
+    }
     return (true);
 }
 

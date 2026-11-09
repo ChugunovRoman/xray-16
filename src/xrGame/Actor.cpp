@@ -33,6 +33,7 @@
 #include "xrEngine/xr_input.h"
 //
 #include "Actor.h"
+#include "bodycam_motion.h"
 #include "ActorAnimation.h"
 #include "actor_anim_defs.h"
 #include "HudItem.h"
@@ -943,7 +944,7 @@ void CActor::Die(IGameObject* who)
     {
         pcstr camera = READ_IF_EXISTS(pSettingsOpenXRay, r_string, "gameplay", "actor_death_camera", "freelook");
 
-        if (xr_strcmp("firsteye", camera) == 0 || g_first_person_death)
+        if (gw_bodycam_motion::active() || xr_strcmp("firsteye", camera) == 0 || g_first_person_death)
             cam_Set(eacFirstEye);
         else if (xr_strcmp("freelook", camera) == 0)
             cam_Set(eacFreeLook);

@@ -622,6 +622,7 @@
     <ClInclude Include="BastArtifact.h" />
     <ClInclude Include="BlackDrops.h" />
     <ClInclude Include="BlackGraviArtifact.h" />
+    <ClInclude Include="bodycam_motion.h" />
     <ClInclude Include="Bolt.h" />
     <ClInclude Include="BoneProtections.h" />
     <ClInclude Include="BottleItem.h" />
@@ -1276,6 +1277,7 @@
     <ClInclude Include="UITimeDilator.h" />
     <ClInclude Include="UIZoneMap.h" />
     <ClInclude Include="ui\ArtefactDetectorUI.h" />
+    <ClInclude Include="ui\bodycam_sms_scroll.h" />
     <ClInclude Include="ui\FactionState.h" />
     <ClInclude Include="ui\FractionState.h" />
     <ClInclude Include="ui\KillMessageStruct.h" />

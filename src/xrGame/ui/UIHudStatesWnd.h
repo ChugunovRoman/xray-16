@@ -87,6 +87,16 @@ public:
     void InitFromXml(CUIXml& xml, LPCSTR path);
     void Load_section();
     virtual void Update();
+    void Draw() override;
+    void DrawBodycam(CActor* actor);
+    void DrawGodEyes();
+    CUIWindow m_godVideo{"God mode video"};
+    CUIStatic* m_godEyes{};
+    u32 m_godVideoActivation{};
+    CUIWindow m_bodycamAmmo{"BODYCAM ammunition"};
+    CUIStatic* m_bodycamAmmoIcon{};
+    CUIStatic* m_bodycamAmmoClip{};
+    CUIStatic* m_bodycamAmmoReserve{};
     //	virtual void	Draw				();
 
     void on_connected();

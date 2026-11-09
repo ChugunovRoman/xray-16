@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "../bodycam_motion.h"
 #include "UIMainIngameWnd.h"
 #include "UIMessagesWindow.h"
 #include "UIZoneMap.h"
@@ -289,17 +290,37 @@ void CUIMainIngameWnd::Draw()
 
     UIMotionIcon->SetNoise((s16)(0xffff & iFloor(pActor->m_snd_noise * 100.0f)));
 
-    UIMotionIcon->Draw();
+    const bool bodycam=gw_bodycam_motion::hud_active();
+    xr_vector<std::pair<CUIWindow*,Frect>> bodycam_positions;
+    xr_vector<std::pair<CUIWindow*,bool>> bodycam_hidden;
+    auto move_bodycam=[&](CUIWindow* w,float x,float y,float width,float height){if(w){const auto p=w->GetWndPos(),s=w->GetWndSize();bodycam_positions.emplace_back(w,Frect().set(p.x,p.y,p.x+s.x,p.y+s.y));w->SetWndRect(Frect().set(x,y,x+width,y+height));}};
+    auto hide_bodycam=[&](CUIWindow* w){if(w){bodycam_hidden.emplace_back(w,w->IsShown());w->Show(false);}};
+    if(bodycam)
+    {
+        for(auto* w:m_quick_slots_icons)hide_bodycam(w);
+        for(auto* w:m_quick_slots_texts)hide_bodycam(w);
+        hide_bodycam(UIArtefactPanel);
+        CUIStatic* status[]={m_ind_bleeding,m_ind_radiation,m_ind_starvation,m_ind_weapon_broken,
+            m_ind_helmet_broken,m_ind_outfit_broken,m_ind_overweight};
+        for(int i=0;i<7;++i) move_bodycam(status[i],1024.f-(342.f-i*24.f)*UI().get_current_kx(),602.f,18.f*UI().get_current_kx(),22.f);
+        CUIStatic* boost[]={m_ind_boost_psy,m_ind_boost_radia,m_ind_boost_chem,m_ind_boost_wound,
+            m_ind_boost_weight,m_ind_boost_health,m_ind_boost_power,m_ind_boost_rad};
+        for(int i=0;i<8;++i) move_bodycam(boost[i],1024.f-(342.f-i*20.f)*UI().get_current_kx(),626.f,16.f*UI().get_current_kx(),18.f);
+    }
+    else UIMotionIcon->Draw();
 
     UIZoneMap->visible = true;
+    bool tmp = UIMotionIcon->IsShown();
+    if(bodycam)UIMotionIcon->Show(false);
     UIZoneMap->Render();
 
-    bool tmp = UIMotionIcon->IsShown();
     UIMotionIcon->Show(false);
     CUIWindow::Draw();
     UIMotionIcon->Show(tmp);
 
     RenderQuickInfos();
+    for(auto& entry:bodycam_positions)entry.first->SetWndRect(entry.second);
+    for(auto& entry:bodycam_hidden)entry.first->Show(entry.second);
 }
 
 void CUIMainIngameWnd::SetMPChatLog(CUIWindow* pChat, CUIWindow* pLog)
@@ -340,7 +361,7 @@ void CUIMainIngameWnd::Update()
         lookat_player = Game().lookat_player();
     }
     bool b_God = (GodMode() || (!lookat_player)) ? true : lookat_player->testFlag(GAME_PLAYER_FLAG_INVINCIBLE);
-    if (b_God)
+    if (b_God && !gw_bodycam_motion::god_vitals())
     {
         SetWarningIconColor(ewiInvincible, 0xffffffff);
     }
@@ -895,6 +916,7 @@ void CUIMainIngameWnd::UpdateQuickSlots()
 
 void CUIMainIngameWnd::DrawMainIndicatorsForInventory()
 {
+    if(gw_bodycam_motion::hud_active())return;
     CActor* pActor = smart_cast<CActor*>(Level().CurrentViewEntity());
     if (!pActor)
         return;

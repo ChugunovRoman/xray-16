@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "bodycam_motion.h"
 #include "HUDManager.h"
 #include "HUDTarget.h"
 #include "Actor.h"
@@ -159,7 +160,13 @@ void CHUDManager::RenderUI()
 
     if (true /*|| psHUD_Flags.is(HUD_DRAW | HUD_DRAW_RT)*/)
     {
-        HitMarker.Render();
+        bool bodycamHidden=false;
+        if(gw_bodycam_motion::hud_active())
+        {
+            const auto* actor=smart_cast<CActor*>(Level().CurrentViewEntity());
+            bodycamHidden=!actor || !actor->g_Alive() || Device.Paused() || (pUIGame && pUIGame->TopInputReceiver());
+        }
+        if(!bodycamHidden)HitMarker.Render();
         if (pUIGame)
             pUIGame->Render();
 

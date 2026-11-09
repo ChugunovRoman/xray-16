@@ -1,4 +1,6 @@
 #include "StdAfx.h"
+#include "bodycam_motion.h"
+#include "UIGameCustom.h"
 #include "HUDTarget.h"
 #include "xrMaterialSystem/GameMtlLib.h"
 
@@ -118,6 +120,12 @@ void CHUDTarget::CursorOnFrame()
 extern ENGINE_API std::atomic<bool> g_bRendering;
 void CHUDTarget::Render()
 {
+    if(gw_bodycam_motion::active())
+    {
+        const auto* actor=smart_cast<CActor*>(Level().CurrentViewEntity());
+        if(!actor || !actor->g_Alive() || (CurrentGameUI() && CurrentGameUI()->TopInputReceiver()) || Device.Paused())return;
+    }
+
     using namespace ::detail::hud_target;
 
     BOOL b_do_rendering = (psHUD_Flags.is(HUD_CROSSHAIR | HUD_CROSSHAIR_RT | HUD_CROSSHAIR_RT2));
@@ -265,6 +273,7 @@ void CHUDTarget::Render()
     }
 
     //отрендерить кружочек или крестик
+    if (gw_bodycam_motion::active()) return; // Preserve separate optics and target information.
     if (!m_bShowCrosshair)
     {
         GEnv.UIRender->StartPrimitive(6, IUIRender::ptTriList, UI().m_currentPointType);

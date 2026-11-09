@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "Layers/xrRender_R2/r2.h"
+#include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/IGame_Level.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -73,6 +75,9 @@ void CRenderTarget::u_calc_tc_duality_ss(Fvector2& r0, Fvector2& r1, Fvector2& l
 
 bool CRenderTarget::u_need_PP()
 {
+    if (ps_r__bodycam && !RImplementation.IsSecondViewportRenderPass() && g_pGameLevel &&
+        !(g_pGamePersistent && g_pGamePersistent->OnRenderPPUI_query()))
+        return true;
     bool _blur = (param_blur > 0.001f);
     bool _gray = (param_gray > 0.001f);
     bool _noise = (param_noise > 0.001f);

@@ -325,6 +325,9 @@ float ps_r2_gloss_factor = 4.0f;
 //- Mad Max
 
 // Temporary A/B switches of the render: like CCC_Integer, but not kept in user.ltx (always start at the default)
+int ps_r__bodycam = 0;
+static int bodycam_support = 1;
+
 class CCC_IntegerNotSavedR final : public CCC_Integer
 {
 public:
@@ -1126,6 +1129,8 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__parallel_skeleton_visbox_min_bones", &r__parallel_skeleton_visbox_min_bones, 8, 512);
     CMD4(CCC_Integer, "r__parallel_main_build_grain", &r__parallel_main_build_grain, 4, 4096);
     CMD4(CCC_Integer, "r__parallel_main_build_min", &r__parallel_main_build_min, 0, 65536);
+    CMD4(CCC_IntegerNotSavedR, "r__bodycam_support", &bodycam_support, 1, 1);
+    CMD4(CCC_IntegerNotSavedR, "r__bodycam", &ps_r__bodycam, 0, 1);
     CMD4(CCC_IntegerNotSavedR, "r__svp_lens_margin_pct", &ps_r__svp_lens_margin_pct, 10, 100);
 }
 } // namespace xray::render::RENDER_NAMESPACE

@@ -8,12 +8,17 @@
 
 #include "StdAfx.h"
 #include "UIMessagesWindow.h"
+#include "../bodycam_motion.h"
+#include "../Level.h"
+#include "../UIGameCustom.h"
 #include "UIGameLog.h"
 #include "UIChatWnd.h"
 #include "xrUICore/XML/xrUIXmlParser.h"
 #include "UIXmlInit.h"
 #include "UIInventoryUtilities.h"
 #include "game_news.h"
+#include "xrEngine/StringTable/StringTable.h"
+#include "../alife_registry_wrappers.h"
 #include "UIPdaMsgListItem.h"
 #include "xrGame/game_type.h"
 
@@ -101,12 +106,45 @@ void CUIMessagesWindow::Init(float x, float y, float width, float height)
     }
 }
 
+static bool BodycamExcludedNews(const GAME_NEWS_DATA* news)
+{
+    if(news->news_text.c_str())
+    {
+        const auto text=CStringTable().translate(news->news_text);
+        if(text.c_str() && (strstr(text.c_str(),"Fatal Error") || strstr(news->news_text.c_str(),"st_yuriy_semetskiy_death_")))return true;
+    }
+    return false;
+}
+
+void CUIMessagesWindow::RestoreBodycamNews()
+{
+    if(m_bodycamHistoryRestored || !gw_bodycam_motion::hud_active())return;
+    auto* actor=smart_cast<CActor*>(Level().CurrentViewEntity());
+    if(!actor || !actor->game_news_registry)return;
+    m_bodycamHistoryRestored=true;
+    // Already-delivered rows are never re-imported. Registry is the authoritative saved history.
+    if(!m_pGameLog->Empty())return;
+    auto& history=actor->game_news_registry->registry().objects();
+    xr_vector<const GAME_NEWS_DATA*> latest;
+    for(auto it=history.rbegin();it!=history.rend() && latest.size()<2;++it)
+        if(!BodycamExcludedNews(&*it) && it->texture_name.size())latest.push_back(&*it);
+    for(auto it=latest.rbegin();it!=latest.rend();++it)AddIconedPdaMessage(*it);
+    m_bodycamRestoreLatest=!latest.empty();
+    if(strstr(Core.Params,"-bodycam_sms_test"))Msg("* [bodycam_sms] restored=%u history=%u",u32(latest.size()),u32(history.size()));
+}
+
 void CUIMessagesWindow::AddIconedPdaMessage(const GAME_NEWS_DATA* news)
 {
+    if(gw_bodycam_motion::hud_active())
+    {
+        if(BodycamExcludedNews(news))return;
+        RestoreBodycamNews();
+        if(strstr(Core.Params,"-bodycam_sms_test"))Msg("* [bodycam_sms] add caption=%s bytes=%u",news->news_caption.c_str(),news->news_text.size());
+    }
     CUIPdaMsgListItem* pItem = m_pGameLog->AddPdaMessage();
 
-    cpcstr time_str = GetTimeAsString(news->receive_time, InventoryUtilities::etpTimeToMinutes).c_str();
-    pItem->UITimeText.SetText(time_str);
+    const auto time_str = GetTimeAsString(news->receive_time, InventoryUtilities::etpTimeToMinutes);
+    pItem->UITimeText.SetText(time_str.c_str());
     pItem->UITimeText.AdjustWidthToText();
     Fvector2 p = pItem->UICaptionText.GetWndPos();
     p.x = pItem->UITimeText.GetWndPos().x + pItem->UITimeText.GetWidth() + 3.0f;
@@ -146,4 +184,65 @@ void CUIMessagesWindow::Show(bool show)
         m_pGameLog->Show(show);
     if (m_pChatLog)
         m_pChatLog->Show(show);
+}
+
+
+void CUIMessagesWindow::ApplyBodycamLayout()
+{
+    if(!IsGameTypeSingle() || !m_pGameLog)return;
+    const bool active=gw_bodycam_motion::hud_active();
+    const float k=UI().get_current_kx();
+    if(active && !m_bodycamStyle)
+    {
+        const auto p=m_pGameLog->GetWndPos(),s=m_pGameLog->GetWndSize();
+        m_originalLogRect.set(p.x,p.y,p.x+s.x,p.y+s.y);
+    }
+    if(active)
+    {
+        RestoreBodycamNews();
+        if(!m_bodycamReady)
+        {
+            m_bodycamFrame.InitTexture("ui\\gw_bodycam\\sms");
+            m_bodycamFrame.SetTextureRect(Frect().set(27,112,1642,831));
+            m_bodycamFrame.SetStretchTexture(true);
+            m_bodycamDark.InitTextureEx("ui\\gw_bodycam\\gps","hud\\bodycam_back");
+            m_bodycamDark.SetStretchTexture(true);m_bodycamReady=true;
+        }
+        m_bodycamFrame.SetWndRect(Frect().set(8*k,618,488*k,760));
+        m_bodycamDark.SetWndRect(Frect().set(31*k,643,465*k,734));
+        m_pGameLog->SetWndRect(Frect().set(37*k,644,459*k,734));
+        xr_vector<CUIWindow*> rejected;
+        for(auto* item:m_pGameLog->Items())
+            if(auto* news=smart_cast<CUIPdaMsgListItem*>(item))
+                if(strstr(news->UIMsgText.GetText(),"Fatal Error"))rejected.push_back(item);
+        for(auto* item:rejected)m_pGameLog->RemoveWindow(item);
+    }
+    else if(m_bodycamStyle){m_pGameLog->SetWndRect(m_originalLogRect);m_bodycamHistoryRestored=false;}
+    bool changed=active!=m_bodycamStyle;
+    if(active || m_bodycamStyle)
+    {
+        for(auto* item:m_pGameLog->Items())
+            if(auto* news=smart_cast<CUIPdaMsgListItem*>(item))
+                changed=news->ApplyBodycamLayout(active,active?m_pGameLog->GetWidth()-m_pGameLog->GetHorizIndent():m_pGameLog->GetDesiredChildWidth(),k)||changed;
+    }
+    m_bodycamStyle=active;
+    if(changed)m_pGameLog->ForceUpdate();
+    if(active && m_bodycamRestoreLatest){m_pGameLog->BodycamLatest();m_bodycamRestoreLatest=false;}
+}
+
+void CUIMessagesWindow::Update()
+{
+    ApplyBodycamLayout();CUIWindow::Update();
+}
+
+void CUIMessagesWindow::Draw()
+{
+    if(!IsGameTypeSingle() || !gw_bodycam_motion::hud_active())
+    {
+        CUIWindow::Draw();return;
+    }
+    auto* actor=smart_cast<CActor*>(Level().CurrentViewEntity());
+    // m_pGameLog->IsShown(): hud:hide_messages() (Show(false)) hides the log, as CUIWindow::Draw does natively
+    if(!actor || !actor->g_Alive() || CurrentGameUI()->TopInputReceiver() || Device.Paused() || !gw_bodycam_motion::sms_visible() || !m_pGameLog->IsShown())return;
+    m_bodycamDark.Draw();m_bodycamFrame.Draw();m_pGameLog->Draw();
 }

@@ -88,6 +88,9 @@ protected:
     // pair (an old frame with a new src, or vice versa) across two concurrent MakeMeCrow() writes.
     std::atomic<u64> m_crow_packed{0};
     std::atomic<u32> m_main_pass_frame{0};
+    // Explicit opt-in for scenario participants whose travel/combat must keep
+    // progressing at the same rate outside the camera's regular update radius.
+    std::atomic_bool m_force_client_update{false};
     // Bones prepass: the frame this object was last noted for the next frame's bones prepass (renderable_Render,
     // any pass, any render thread); dedups the note to once per frame. See CLevel::BonesPrepassNote.
     std::atomic<u32> m_bones_prepass_note_frame{0};
@@ -95,6 +98,7 @@ protected:
     u32 m_ucl_lod_skip_frame{0};
 
 public:
+    void force_client_update(bool enabled) { m_force_client_update.store(enabled, std::memory_order_relaxed); }
     // Seen in the main render pass (frustum + HOM passed; shadow passes do not count) within the last `frames`
     // frames. The render of frame F runs before the UpdateCL of frame F+1, so 1 = "on screen last frame".
     bool rendered_in_main_pass(u32 frames = 1) const;
@@ -206,7 +210,7 @@ public:
 #endif
     virtual void MakeMeCrow() override;
     virtual void IAmNotACrowAnyMore() override { m_is_crow.store(false, std::memory_order_relaxed); }
-    virtual bool AlwaysTheCrow() override { return FALSE; }
+    virtual bool AlwaysTheCrow() override { return m_force_client_update.load(std::memory_order_relaxed); }
     virtual bool AmICrow() const override { return m_is_crow.load(std::memory_order_relaxed); }
     // Network
     virtual bool Local() const override { return Props.net_Local; }

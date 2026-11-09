@@ -539,6 +539,16 @@ int CApplication::Run()
         FrameMarkEnd(FRAME_MARK_APPLICATION_RUN);
     } // while (!SDL_QuitRequested())
 
+    // SDL can request quit before the deferred disconnect gets its next frame.
+    // Destroy the loaded level while its callbacks and TaskScheduler still exist;
+    // otherwise its registered physics worker keeps TaskManager teardown waiting.
+    if (g_pGameLevel)
+    {
+        // Preserve the normal disconnect handler's "quitting" path (no menu reopen).
+        Engine.Event.Defer("KERNEL:quit");
+        Engine.Event.Signal("KERNEL:disconnect");
+    }
+
     Device.Shutdown();
 
     return 0;

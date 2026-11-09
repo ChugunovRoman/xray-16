@@ -1,5 +1,7 @@
 #include "StdAfx.h"
+#include "bodycam_motion.h"
 #include "Actor.h"
+#include "Include/xrRender/Kinematics.h"
 #include "xrEngine/CameraBase.h"
 #ifdef DEBUG
 #include "PHDebug.h"
@@ -282,6 +284,42 @@ float ik_cam_shift_tolerance = 0.2f;
 float ik_cam_shift_speed = 0.01f;
 float ik_cam_shift_interpolation = 4.f;
 
+namespace
+{
+struct BodycamDeathCamera
+{
+    CActor* actor=nullptr;
+    Fvector position{};
+    float elapsed=0;
+} bodycamDeathCamera;
+
+void update_bodycam_death_camera(CActor* actor,int head,Fvector& point,Fvector& angles,float dt)
+{
+    auto& state=bodycamDeathCamera;
+    if(state.actor!=actor)
+    {
+        state.actor=actor;state.position=Device.vCameraPosition;state.elapsed=0;
+    }
+    const float step=Device.Paused()?0.f:clampr(dt,0.f,.05f);
+    state.elapsed+=step;
+    const float t=clampr(state.elapsed/1.6f,0.f,1.f),ease=t*t*(3.f-2.f*t);
+    Fvector target=actor->Position();target.y+=.22f+(1.f-ease)*1.2f;
+    if(auto* visual=smart_cast<IKinematics*>(actor->Visual());visual && head>=0 && head!=BI_NONE)
+    {
+        visual->CalculateBones();
+        Fmatrix headWorld;headWorld.mul(actor->XFORM(),visual->LL_GetTransform(u16(head)));
+        target=headWorld.c;target.y+=.08f;
+    }
+    // Follow the physical head with bounded translation; do not inherit ragdoll angular spikes.
+    Fvector delta;delta.sub(target,state.position);
+    const float distance=delta.magnitude();
+    if(distance>EPS && (state.elapsed<3.f || distance>.005f))
+        state.position.mad(delta,_min(1.f-expf(-8.f*step),2.2f*step/distance));
+    point=state.position;
+    angles.set(.16f*ease,0,1.05f*ease);
+}
+}
+
 void CActor::cam_Update(float dt, float fFOV)
 {
     if (m_holder)
@@ -374,7 +412,12 @@ void CActor::cam_Update(float dt, float fFOV)
     xform.transform_tiny(point);
 
     CCameraBase* C = cam_Active();
+    if(gw_bodycam_motion::active() && !g_Alive())
+        update_bodycam_death_camera(this,m_head,point,dangle,dt);
+    else bodycamDeathCamera.actor=nullptr;
 
+    if (cam_active == eacFirstEye)
+        gw_bodycam_motion::camera(this, point, dangle, C->yaw, C->pitch, dt);
     C->Update(point, dangle);
     C->f_fov = fFOV;
 

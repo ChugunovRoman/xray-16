@@ -114,6 +114,13 @@ void CScriptMovementAction::script_register(lua_State* luaState)
                 self->SetPatrolPath(path, path_name);
             })
             .def("position", &CScriptMovementAction::SetPosition)
+            .def("level_path", +[](CScriptMovementAction* self)
+            {
+                // Explicit, checkpointed routes must not detour via coarse
+                // game-graph representatives on the same level.
+                if (self->m_tGoalType == CScriptMovementAction::eGoalTypePathNodePosition)
+                    self->m_tGoalType = CScriptMovementAction::eGoalTypeLevelNodePosition;
+            })
             .def("input", &CScriptMovementAction::SetInputKeys)
             .def("completed", &CScriptAbstractAction::completed)
     ];

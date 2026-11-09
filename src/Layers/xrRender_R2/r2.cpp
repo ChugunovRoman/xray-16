@@ -505,6 +505,18 @@ static class cl_pos_decompress_params2 : public R_constant_setup
     }
 } binder_pos_decompress_params2;
 
+// Bodycam postprocess (r__bodycam): x = 1 while the bodycam look is on (main viewport, a level, no menu PP),
+// y = global time. Read by gw_bodycam.h in postprocess*.ps.
+static class cl_bodycam_params : public R_constant_setup
+{
+    void setup(CBackend& cmd_list, R_constant* C) override
+    {
+        const bool enabled = ps_r__bodycam && !RImplementation.IsSecondViewportRenderPass() &&
+            g_pGameLevel && !(g_pGamePersistent && g_pGamePersistent->OnRenderPPUI_query());
+        cmd_list.set_c(C, enabled ? 1.f : 0.f, Device.fTimeGlobal, 0.f, 0.f);
+    }
+} binder_bodycam_params;
+
 // Main render scale (r__render_scale): x,y = size of the downsized scene the upscale reads,
 // z = unsharp amount already weighted by the stretch (r__render_scale_sharpen * (Device/scene - 1),
 // saturated), w = 1 while the main pass renders scaled (0 otherwise; x,y are then Device, z = 0).
@@ -922,6 +934,7 @@ void CRender::create()
     Resources->RegisterConstantSetup("sun_shafts_intensity", &binder_sun_shafts_intensity);
     Resources->RegisterConstantSetup("pos_decompression_params", &binder_pos_decompress_params);
     Resources->RegisterConstantSetup("pos_decompression_params2", &binder_pos_decompress_params2);
+    Resources->RegisterConstantSetup("bodycam_params", &binder_bodycam_params);
     Resources->RegisterConstantSetup("render_scale_params", &binder_render_scale_params);
     Resources->RegisterConstantSetup("m_AlphaRef", &binder_alpha_ref);
 #if defined(USE_DX11)

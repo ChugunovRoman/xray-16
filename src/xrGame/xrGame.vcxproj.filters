@@ -4812,6 +4812,9 @@
     <ClInclude Include="Actor.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
+    <ClInclude Include="bodycam_motion.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
     <ClInclude Include="Checker.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
@@ -6043,6 +6046,9 @@
       <Filter>UI\Multiplayer\HUD\Chat</Filter>
     </ClInclude>
     <ClInclude Include="ui\UIGameLog.h">
+      <Filter>UI\Multiplayer\HUD\GameLog</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\bodycam_sms_scroll.h">
       <Filter>UI\Multiplayer\HUD\GameLog</Filter>
     </ClInclude>
     <ClInclude Include="ui\UISpeechMenu.h">

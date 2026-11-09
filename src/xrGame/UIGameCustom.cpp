@@ -14,6 +14,8 @@
 #include "ui/UIMessagesWindow.h"
 #include "ui/UIHudStatesWnd.h"
 #include "Actor.h"
+#include "bodycam_motion.h"
+#include "xrScriptEngine/script_engine.hpp"
 #include "Inventory.h"
 #include "game_cl_base.h"
 
@@ -95,6 +97,12 @@ void CUIGameCustom::OnFrame()
         PERF_SCOPE(hud_ui_window);
         Window->Update();
     }
+    // Actor binder callbacks are scheduled, not per render frame. Drive the ECG from the UI clock.
+    if(gw_bodycam_motion::hud_active())
+    {
+        luabind::functor<void> update;
+        if(GEnv.ScriptEngine->functor("gw_bodycam_hud.frame_update",update))update();
+    }
     // update windows
     if (GameIndicatorsShown() && psHUD_Flags.is(HUD_DRAW | HUD_DRAW_RT))
     {
@@ -111,8 +119,16 @@ void CUIGameCustom::OnFrame()
 
 void CUIGameCustom::Render()
 {
+    CActor* bodycamActor=smart_cast<CActor*>(Level().CurrentViewEntity());
+    const bool bodycam=gw_bodycam_motion::hud_active();
+    const bool bodycamDead=bodycam && bodycamActor && !bodycamActor->g_Alive();
+    const bool bodycamHide=bodycam && (!bodycamActor || bodycamDead || TopInputReceiver() || Device.Paused());
     for (StaticDrawableWrapper* item : CustomStatics)
-        item->Draw();
+    {
+        const char* name=item->m_name.c_str();
+        const bool own=0==xr_strcmp(name,"gw_bodycam_vitals") || 0==strncmp(name,"cs_smart_capture_",17);
+        if(!bodycamDead && !(bodycamHide && own))item->Draw();
+    }
     Window->Draw();
 
     // HUD overlay scope (g_3d_scopes 3): live HUD snapshot composited over the world, below
@@ -127,7 +143,7 @@ void CUIGameCustom::Render()
     // USE_OGL is a render-layer private macro (not defined in xrGame), so the check is runtime, not
     // preprocessor.
     const float overlayAlpha = GEnv.Render->GetHudOverlayAlpha();
-    if (!GEnv.Render->CompositeHudOverlayNative() &&
+    if (!bodycamHide && !GEnv.Render->CompositeHudOverlayNative() &&
         GEnv.Render->IsHudOverlayActive() && overlayAlpha > 0.01f)
     {
         if (!m_pHudOverlay)
@@ -147,7 +163,7 @@ void CUIGameCustom::Render()
     if (pEntity)
     {
         CActor* pActor = smart_cast<CActor*>(pEntity);
-        if (pActor && pActor->HUDview() && pActor->g_Alive() &&
+        if (!bodycamHide && pActor && pActor->HUDview() && pActor->g_Alive() &&
             psHUD_Flags.is(HUD_WEAPON | HUD_WEAPON_RT | HUD_WEAPON_RT2))
         {
             CInventory& inventory = pActor->inventory();
@@ -159,7 +175,7 @@ void CUIGameCustom::Render()
                     item->render_item_ui();
             }
         }
-        if (GameIndicatorsShown() && psHUD_Flags.is(HUD_DRAW | HUD_DRAW_RT))
+        if (!bodycamHide && GameIndicatorsShown() && psHUD_Flags.is(HUD_DRAW | HUD_DRAW_RT))
             UIMainIngameWnd->Draw();
     }
     m_pMessagesWnd->Draw();

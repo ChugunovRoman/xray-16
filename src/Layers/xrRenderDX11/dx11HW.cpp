@@ -264,6 +264,14 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
     }
     else if (strstr(Core.Params, "-d3d11_allow_internal_threads"))
         Msg("* D3D11: driver internal threading allowed (-d3d11_allow_internal_threads)");
+    // Installed driver/Sentry combinations can still overflow NVIDIA worker stacks.
+    // Keep normal launches safe; the explicit allow flag above remains available.
+    // (3807ef, GitLab: overrides the "allowed by default" above for every NVIDIA user, the hw policy is not consulted.)
+    else if (Caps.id_vendor == kPciVendorNvidia)
+    {
+        createDeviceFlags |= D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
+        Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (NVIDIA startup safety default)");
+    }
     else if (xray::hw::PolicyValid(hw_policy) && hw_policy.prevent_internal_threads)
     {
         createDeviceFlags |= D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;

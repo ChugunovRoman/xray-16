@@ -328,6 +328,7 @@ public:
     IC CCameraBase* cam_FirstEye() { return cameras[eacFirstEye]; }
 
     EActorCameras active_cam() const { return cam_active; } // KD: we need to know which cam is active outside actor methods
+    const xr_vector<const CArtefact*>& GetBeltArtefacts() const { return m_ArtefactsOnBelt; }
     virtual void cam_Set(EActorCameras style); //Alundaio: made public
 
 protected:

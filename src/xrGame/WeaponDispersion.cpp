@@ -5,6 +5,7 @@
 #include "StdAfx.h"
 
 #include "Weapon.h"
+#include "bodycam_motion.h"
 #include "InventoryOwner.h"
 #include "Actor.h"
 #include "inventory_item_impl.h"
@@ -52,7 +53,7 @@ float CWeapon::GetFireDispersion(float cartridge_k, bool for_crosshair)
 
 //////////////////////////////////////////////////////////////////////////
 // Для эффекта отдачи оружия
-void CWeapon::AddShotEffector() { inventory_owner().on_weapon_shot_start(this); }
+void CWeapon::AddShotEffector() { gw_bodycam_motion::shot(this); inventory_owner().on_weapon_shot_start(this); }
 void CWeapon::RemoveShotEffector()
 {
     CInventoryOwner* pInventoryOwner = smart_cast<CInventoryOwner*>(H_Parent());

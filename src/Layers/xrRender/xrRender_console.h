@@ -4,6 +4,8 @@ extern ENGINE_API int ps_r__Supersample;
 
 namespace xray::render::RENDER_NAMESPACE
 {
+extern int ps_r__bodycam; // Session-owned, never saved to user.ltx.
+
 // Common
 extern ECORE_API u32 ps_r_sun_shafts; //=	0;
 extern ECORE_API const xr_token qsun_shafts_token[];
