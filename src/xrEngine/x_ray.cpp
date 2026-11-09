@@ -17,6 +17,7 @@
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrNetServer/NET_AuthCheck.h"
 
+#include "IGame_Level.h" // g_pGameLevel (CApplication::Run: the level is destroyed before the quit)
 #include "IGame_Persistent.h"
 #include "LightAnimLibrary.h"
 #include "XR_IOConsole.h"
