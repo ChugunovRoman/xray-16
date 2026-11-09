@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "XMLDocument.hpp"
+#include "xrCore/ContentPatches.h"
 #include "xrCore/Text/Utf8Utils.hpp"
 
 pcstr UI_PATH = UI_PATH_DEFAULT;
@@ -145,6 +146,383 @@ void ParseFile(pcstr path, CMemoryWriter& W, IReader* F, XMLDocument* xml, bool 
     }
 }
 
+namespace
+{
+// The text of an xml as UTF-8: the BOM stripped, a legacy CP1251 file transcoded (with its declaration)
+pcstr XmlTextToUtf8(pcstr text, xr_string& converted, pcstr file_name)
+{
+    // Strip UTF-8 BOM if present
+    text = XRay::Utf8::StripBom(text);
+
+    // Auto-detect legacy CP1251 XML files and transcode them to UTF-8.
+    // This keeps compatibility with old mod content while the engine works internally in UTF-8.
+    if (XRay::Utf8::IsValid(text))
+        return text;
+
+    Msg("! XML file '%s' is not valid UTF-8, converting from Windows-1251 to UTF-8", file_name);
+    converted = XRay::Utf8::FromCP1251(text);
+
+    // Update the XML declaration encoding if it claims windows-1251
+    const char windows1251[] = "encoding=\"windows-1251\"";
+    size_t pos = converted.find(windows1251);
+    if (pos != xr_string::npos)
+        converted.replace(pos, std::size(windows1251) - 1, "encoding=\"utf-8\"");
+    else
+    {
+        const char windows1251sq[] = "encoding='windows-1251'";
+        pos = converted.find(windows1251sq);
+        if (pos != xr_string::npos)
+            converted.replace(pos, std::size(windows1251sq) - 1, "encoding='utf-8'");
+    }
+    return converted.c_str();
+}
+
+// XMLOverride (plans/addons_api_support/09-content-addons-vfs.md 5.2, 13-extension-model.md 3; the syntax of IXRay).
+// mod_<name>_*.xml next to <name>.xml (xray::content_patches::FindModFiles: the layers of the file system in order,
+// then the names) is applied to the document of <name>.xml after it is parsed. The patch repeats the path of tags
+// from the top of the document to the nodes it changes; a node of the path is matched among the children of the
+// same tag by its "id" attribute, else by "name", else the first one. A node with the attribute override:
+//   override="add"      the node (without the attribute) is appended to the matched parent. A node with an id / a
+//                       name a node of its tag in the parent has already replaces that node, with a warning: the
+//                       readers take the first node of an id as a rule, a second one would not be read (as [new] of
+//                       DLTX over an existing section)
+//   override="replace"  the matched node is replaced by this one
+//   override="remove"   the matched node is removed
+// A string of a string table - <string id="..."> right under the root <string_table> - without override is set: added,
+// or the string of that id replaced. A patch of a table is a list of strings, as a table of its own: a table of an
+// addon named mod_<x>_*.xml next to <x>.xml (taken as its patch) keeps its new ids. Such a string is marked for the
+// string table (kPatchOwnerAttr and the others below): its owner and layer are the ones of the patch, not of <x>.xml.
+// The ui variants are patched separately: the 16:9 file inventory_new_16.xml takes mod_inventory_new_16_*.xml.
+enum class XmlOverrideMode : u8
+{
+    None,
+    Add,
+    Replace,
+    Remove,
+    Unknown,
+};
+
+XmlOverrideMode XmlOverrideModeOf(const TiXmlElement* element)
+{
+    const pcstr mode = element->Attribute("override");
+    if (!mode)
+        return XmlOverrideMode::None;
+    if (0 == xr_strcmpi(mode, "add"))
+        return XmlOverrideMode::Add;
+    if (0 == xr_strcmpi(mode, "replace"))
+        return XmlOverrideMode::Replace;
+    if (0 == xr_strcmpi(mode, "remove"))
+        return XmlOverrideMode::Remove;
+    return XmlOverrideMode::Unknown;
+}
+
+// The attribute a node is matched by: "id", else "name", else none
+pcstr XmlOverrideKey(const TiXmlElement* element, pcstr& value)
+{
+    value = element->Attribute("id");
+    if (value)
+        return "id";
+    value = element->Attribute("name");
+    if (value)
+        return "name";
+    return nullptr;
+}
+
+TiXmlElement* XmlOverrideFind(TiXmlNode* parent, const TiXmlElement* pattern)
+{
+    pcstr value;
+    const pcstr key = XmlOverrideKey(pattern, value);
+    for (TiXmlElement* element = parent->FirstChildElement(pattern->Value()); element;
+         element = element->NextSiblingElement(pattern->Value()))
+    {
+        if (!key)
+            return element;
+        const pcstr candidate = element->Attribute(key);
+        if (candidate && 0 == xr_strcmp(candidate, value))
+            return element;
+    }
+    return nullptr;
+}
+
+// "w/main_wnd/btn[id=x]": the node in the log and its atom
+xr_string XmlOverrideLabel(const xr_string& path, const TiXmlElement* element)
+{
+    xr_string label = path;
+    if (!label.empty())
+        label += '/';
+    label += element->Value();
+    pcstr value;
+    if (const pcstr key = XmlOverrideKey(element, value))
+    {
+        label += '[';
+        label += key;
+        label += '=';
+        label += value;
+        label += ']';
+    }
+    return label;
+}
+
+struct XmlOverridePatch
+{
+    pcstr target; // the short name of the patched xml
+    pcstr file; // the short name of the patch file
+    pcstr owner;
+    u16 layer{};
+    pcstr target_owner; // the owner of the patched xml (its own nodes)
+    u32 strings_added{}; // the strings of a string table set by this patch
+    u32 strings_replaced{};
+};
+
+// The string of a string table: <string id="..."> right under the root <string_table> of the document
+bool XmlOverrideIsTableString(const TiXmlNode* base_parent, const TiXmlElement* element)
+{
+    const TiXmlElement* root = base_parent->ToElement();
+    return root && root->Parent() && root->Parent()->Type() == TiXmlNode::DOCUMENT &&
+        0 == xr_strcmp(root->Value(), "string_table") && 0 == xr_strcmp(element->Value(), "string") &&
+        element->Attribute("id");
+}
+
+// The string table (xrEngine/StringTable) reads the owner and the layer of a string a patch set from these
+// attributes (no reader of a table knows them), and the owner of the string it replaced: the conflicts of the ids
+// and the order of the layers are the ones of the strings, not of the file patched
+void XmlOverrideMarkTableString(const XmlOverridePatch& patch, TiXmlElement* element, const TiXmlElement* replaced)
+{
+    string16 layer;
+    xr_sprintf(layer, "%u", u32(patch.layer));
+    element->SetAttribute(XMLDocument::kPatchOwnerAttr, patch.owner);
+    element->SetAttribute(XMLDocument::kPatchLayerAttr, layer);
+    if (!replaced)
+        return;
+    // The owners the replaced string had replaced already, then its own one (the file patched for a string of it)
+    xr_string over;
+    if (const pcstr earlier = replaced->Attribute(XMLDocument::kPatchOverAttr))
+    {
+        over = earlier;
+        over += ',';
+    }
+    const pcstr previous = replaced->Attribute(XMLDocument::kPatchOwnerAttr);
+    over += previous ? previous : patch.target_owner;
+    element->SetAttribute(XMLDocument::kPatchOverAttr, over.c_str());
+}
+
+// target (a child of base_parent) is replaced by element (a child of patch_parent with an override)
+void XmlOverrideReplaceNode(TiXmlNode* base_parent, TiXmlNode* patch_parent, TiXmlElement* element,
+    TiXmlElement* target)
+{
+    element->RemoveAttribute("override");
+    patch_parent->UnlinkChild(element);
+    base_parent->LinkBeforeChild(target, element);
+    base_parent->UnlinkChild(target);
+    xr_delete(target);
+}
+
+void XmlOverrideWarn(const XmlOverridePatch& patch, pcstr what, const xr_string& label)
+{
+    xr_string text = "~ [addon:";
+    text += patch.owner;
+    text += "] ";
+    text += patch.file;
+    text += ": ";
+    text += what;
+    text += ' ';
+    text += label;
+    text += " (";
+    text += patch.target;
+    text += ')';
+    if (xray::content_patches::FirstTime(text.c_str()))
+        Msg("%s", text.c_str());
+}
+
+constexpr pcstr kXmlOverrideAddExists =
+    "override=\"add\" of a node that exists already - replaced by this one (as override=\"replace\"):";
+
+void XmlOverrideRecord(const XmlOverridePatch& patch, const xr_string& label)
+{
+    using namespace xray::content_patches;
+    xr_string previous;
+    if (RecordAtom(AtomKind::Xml, patch.target, label.c_str(), patch.owner, &previous))
+    {
+        Msg("~ [addon:%s] %s: node %s is changed by addon '%s' too - '%s' wins (the order of the addons), console "
+            "dltx_conflicts", patch.owner, patch.target, label.c_str(), previous.c_str(), patch.owner);
+    }
+}
+
+// A string of a string table set by a patch (XmlOverrideIsTableString): replaces the string of its id or is appended.
+// Its atom is recorded by the string table (the id among all the tables), not here.
+void XmlOverrideSetTableString(XmlOverridePatch& patch, TiXmlNode* base_parent, TiXmlNode* patch_parent,
+    TiXmlElement* element, XmlOverrideMode mode, const xr_string& label)
+{
+    TiXmlElement* target = XmlOverrideFind(base_parent, element);
+    XmlOverrideMarkTableString(patch, element, target);
+    if (target)
+    {
+        if (mode == XmlOverrideMode::Add)
+            XmlOverrideWarn(patch, kXmlOverrideAddExists, label);
+        XmlOverrideReplaceNode(base_parent, patch_parent, element, target);
+        ++patch.strings_replaced;
+        return;
+    }
+    element->RemoveAttribute("override");
+    patch_parent->UnlinkChild(element);
+    base_parent->LinkEndChild(element);
+    ++patch.strings_added;
+}
+
+// The children of patch_parent applied to base_parent (the nodes of the patch with an override move to the base)
+void XmlOverrideApply(XmlOverridePatch& patch, TiXmlNode* base_parent, TiXmlNode* patch_parent,
+    const xr_string& path)
+{
+    TiXmlElement* next = nullptr;
+    for (TiXmlElement* element = patch_parent->FirstChildElement(); element; element = next)
+    {
+        next = element->NextSiblingElement();
+        const xr_string label = XmlOverrideLabel(path, element);
+        const XmlOverrideMode mode = XmlOverrideModeOf(element);
+        // A string of a table: set (without override or with add), replace as any node - the string table records it
+        if (XmlOverrideIsTableString(base_parent, element) &&
+            (mode == XmlOverrideMode::None || mode == XmlOverrideMode::Add ||
+                (mode == XmlOverrideMode::Replace && XmlOverrideFind(base_parent, element))))
+        {
+            XmlOverrideSetTableString(patch, base_parent, patch_parent, element, mode, label);
+            continue;
+        }
+        switch (mode)
+        {
+        case XmlOverrideMode::None:
+        {
+            TiXmlElement* target = XmlOverrideFind(base_parent, element);
+            if (!target)
+            {
+                XmlOverrideWarn(patch, "no node", label);
+                break;
+            }
+            XmlOverrideApply(patch, target, element, label);
+            break;
+        }
+        case XmlOverrideMode::Add:
+        {
+            if (base_parent->Type() == TiXmlNode::DOCUMENT)
+            {
+                XmlOverrideWarn(patch, "override=\"add\" at the top of the document is not supported:", label);
+                break;
+            }
+            pcstr value;
+            const bool keyed = XmlOverrideKey(element, value) != nullptr;
+            // A node of this tag and id / name is there (of the base or added by an earlier patch): two nodes of one id
+            // are read as one (the first, as a rule) or as two - the node is replaced, as override="replace"
+            if (TiXmlElement* target = keyed ? XmlOverrideFind(base_parent, element) : nullptr)
+            {
+                XmlOverrideWarn(patch, kXmlOverrideAddExists, label);
+                XmlOverrideReplaceNode(base_parent, patch_parent, element, target);
+                XmlOverrideRecord(patch, label); // two addons adding one id: a conflict, the later one is read
+                break;
+            }
+            element->RemoveAttribute("override");
+            patch_parent->UnlinkChild(element);
+            base_parent->LinkEndChild(element);
+            if (keyed)
+                XmlOverrideRecord(patch, label);
+            break;
+        }
+        case XmlOverrideMode::Replace:
+        {
+            TiXmlElement* target = XmlOverrideFind(base_parent, element);
+            if (!target)
+            {
+                XmlOverrideWarn(patch, "override=\"replace\": no node", label);
+                break;
+            }
+            XmlOverrideReplaceNode(base_parent, patch_parent, element, target);
+            XmlOverrideRecord(patch, label);
+            break;
+        }
+        case XmlOverrideMode::Remove:
+        {
+            if (base_parent->Type() == TiXmlNode::DOCUMENT)
+            {
+                // The readers take the first element of the document: a document without it is not loaded
+                XmlOverrideWarn(patch, "override=\"remove\" at the top of the document is not supported:", label);
+                break;
+            }
+            TiXmlElement* target = XmlOverrideFind(base_parent, element);
+            if (!target)
+            {
+                XmlOverrideWarn(patch, "override=\"remove\": no node", label);
+                break;
+            }
+            base_parent->UnlinkChild(target);
+            xr_delete(target);
+            XmlOverrideRecord(patch, label);
+            break;
+        }
+        case XmlOverrideMode::Unknown:
+            XmlOverrideWarn(patch, "override must be add, replace or remove:", label);
+            break;
+        }
+    }
+}
+
+// The patch files of the xml full_name applied to its parsed document. path_alias - for the #include of the patches.
+void XmlOverrideApplyFiles(XMLDocument* xml, TiXmlDocument& doc, pcstr path_alias, pcstr full_name)
+{
+    xr_vector<xray::content_patches::ModFile> patches;
+    if (!xray::content_patches::FindModFiles(full_name, patches))
+        return;
+    xr_string target_owner;
+    xray::content_patches::FileOwner(full_name, target_owner);
+    for (const xray::content_patches::ModFile& file : patches)
+    {
+        XmlOverridePatch patch;
+        patch.target = xray::content_patches::ShortName(full_name);
+        patch.file = xray::content_patches::ShortName(file.name.c_str());
+        patch.owner = file.owner.c_str();
+        patch.layer = file.layer;
+        patch.target_owner = target_owner.c_str();
+
+        IReader* F = xray::content_patches::OpenModFile(file);
+        if (!F)
+        {
+            Msg("! [addon:%s] %s: the patch file cannot be opened", patch.owner, patch.file);
+            continue;
+        }
+        CMemoryWriter W;
+        ParseFile(path_alias, W, F, xml, false, 0);
+        W.w_stringZ("");
+        xray::content_patches::CloseModFile(file, F);
+
+        xr_string converted;
+        const pcstr text = XmlTextToUtf8(reinterpret_cast<pcstr>(W.pointer()), converted, patch.file);
+        TiXmlDocument patch_doc;
+        patch_doc.Parse(&patch_doc, text);
+        if (patch_doc.Error())
+        {
+            Msg("! [addon:%s] %s: %s (row %d), the patch is skipped", patch.owner, patch.file, patch_doc.ErrorDesc(),
+                patch_doc.ErrorRow());
+            continue;
+        }
+        xr_string applied = "* [addon:";
+        applied += patch.owner;
+        applied += "] ";
+        applied += patch.file;
+        applied += " patches ";
+        applied += patch.target;
+        if (xray::content_patches::FirstTime(applied.c_str()))
+            Msg("%s", applied.c_str());
+        XmlOverrideApply(patch, &doc, &patch_doc, "");
+        if (patch.strings_added || patch.strings_replaced)
+        {
+            // The ids of a table named mod_<x>_*.xml are not lost: the author sees where they went
+            string512 text;
+            xr_sprintf(text, "* [addon:%s] %s: %u string ids added to %s, %u replaced (a patch of a string table)",
+                patch.owner, patch.file, patch.strings_added, patch.target, patch.strings_replaced);
+            if (xray::content_patches::FirstTime(text))
+                Msg("%s", text);
+        }
+    }
+}
+} // namespace
+
 bool XMLDocument::Load(pcstr path_alias, pcstr path, pcstr xml_filename, bool fatal)
 {
     shared_str fn = correct_file_name(path, xml_filename);
@@ -186,39 +564,25 @@ bool XMLDocument::Load(pcstr path, pcstr xml_filename, bool fatal)
     W.w_stringZ("");
     FS.r_close(F);
 
-    return Set(reinterpret_cast<pcstr>(W.pointer()), fatal);
+    if (!Set(reinterpret_cast<pcstr>(W.pointer()), fatal))
+        return false;
+
+    // XMLOverride: mod_<name>_*.xml next to the file (a cached listing of the folder, nothing for most files)
+    string_path full_name;
+    pcstr full = xml_filename;
+    if (path && path[0] && FS.update_path(full_name, path, xml_filename, false))
+        full = full_name;
+    XmlOverrideApplyFiles(this, m_Doc, path, full);
+    m_root = m_Doc.FirstChildElement(); // a patch may replace the root
+    return true;
 }
 
 bool XMLDocument::Set(pcstr text, bool fatal)
 {
     R_ASSERT(text != nullptr);
 
-    // Strip UTF-8 BOM if present
-    text = XRay::Utf8::StripBom(text);
-
-    // Auto-detect legacy CP1251 XML files and transcode them to UTF-8.
-    // This keeps compatibility with old mod content while the engine works internally in UTF-8.
     xr_string convertedText;
-    if (!XRay::Utf8::IsValid(text))
-    {
-        Msg("! XML file '%s' is not valid UTF-8, converting from Windows-1251 to UTF-8", m_xml_file_name);
-        convertedText = XRay::Utf8::FromCP1251(text);
-
-        // Update the XML declaration encoding if it claims windows-1251
-        const char windows1251[] = "encoding=\"windows-1251\"";
-        size_t pos = convertedText.find(windows1251);
-        if (pos != xr_string::npos)
-            convertedText.replace(pos, std::size(windows1251) - 1, "encoding=\"utf-8\"");
-        else
-        {
-            const char windows1251sq[] = "encoding='windows-1251'";
-            pos = convertedText.find(windows1251sq);
-            if (pos != xr_string::npos)
-                convertedText.replace(pos, std::size(windows1251sq) - 1, "encoding='utf-8'");
-        }
-
-        text = convertedText.c_str();
-    }
+    text = XmlTextToUtf8(text, convertedText, m_xml_file_name);
 
     m_Doc.Parse(&m_Doc, text);
 

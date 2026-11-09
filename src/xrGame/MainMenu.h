@@ -196,6 +196,13 @@ public:
     // switch); the menu is built again by the scripts of the new state. Main thread, no Lua code on the stack.
     // before_rebuild: between the old menu gone and the new one built
     void RestartScripts(const std::function<void()>& before_rebuild = {});
+    // Console addon_reload (addon_host.cpp): the shown menu was built with the old registrations of the addon (its
+    // buttons) - it is built again by the scripts of the same Lua state. Main thread, no Lua code on the stack
+    void RebuildUI()
+    {
+        if (IsActive())
+            ReloadUI();
+    }
 
     LPCSTR GetGSVer();
 

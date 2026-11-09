@@ -47,6 +47,8 @@ public:
     void OnFrame();
     void Dump();
     bool Peek(pcstr EName);
+    // The same, with the parameters of the first deferred event of the name (P1, P2 may be nullptr)
+    bool Peek(pcstr EName, u64* P1, u64* P2 = nullptr);
 
     void _destroy();
 };

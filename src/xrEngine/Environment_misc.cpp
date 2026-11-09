@@ -1160,6 +1160,34 @@ void CEnvironment::ED_Reload()
     OnFrame();
 }
 
+// A weather addon (the slot world.weather) or the common content of an addon may bring a cycle or an effect the base
+// has not: the list of the names (WeatherCycles / WeatherFXs) is built from the layers of that moment only. The menu
+// does not draw the weather, a level is not loaded: everything goes and is read again as at the start (the cycles
+// already read - by a level loaded before - included, a provider of the weather may have changed them). The configs
+// of the constructor (ambients, sound channels, effects) belong to the content too.
+void CEnvironment::OnContentChanged()
+{
+    ZoneScoped;
+    if (g_pGameLevel)
+    {
+        Msg("! [weathers] the content changed while a level is loaded: the weathers are not read again");
+        return;
+    }
+    unload();
+    const auto reload_config = [](CInifile*& config, pcstr path)
+    {
+        CInifile::Destroy(config);
+        config = nullptr;
+        string_path filePath;
+        if (FS.update_path(filePath, "$game_config$", path, false))
+            config = xr_new<CInifile>(filePath, true, true, false);
+    };
+    reload_config(m_ambients_config, "environment\\ambients.ltx");
+    reload_config(m_sound_channels_config, "environment\\sound_channels.ltx");
+    reload_config(m_effects_config, "environment\\effects.ltx");
+    load();
+}
+
 void CEnvironment::save() const
 {
     ZoneScoped;

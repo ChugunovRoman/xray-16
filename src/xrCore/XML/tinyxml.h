@@ -575,6 +575,12 @@ public:
 
     TiXmlNode* LinkEndChild(TiXmlNode* addThis);
 
+    // OpenXRay (XMLOverride, xrCore/XML/XMLDocument.cpp): moving nodes between documents.
+    // Takes the child out of this node: the caller owns it with its subtree then. Null - not a child of this node.
+    TiXmlNode* UnlinkChild(TiXmlNode* child);
+    // Links a node that is linked nowhere before `before` (a child of this node; null - at the end, as LinkEndChild)
+    TiXmlNode* LinkBeforeChild(TiXmlNode* before, TiXmlNode* addThis);
+
     /// Navigate to a sibling node.
     const TiXmlNode* PreviousSibling() const { return prev; }
     TiXmlNode* PreviousSibling() { return prev; }
@@ -1023,6 +1029,11 @@ public:
                  safe type casts on the referenced node.
     */
     const char* GetText() const;
+
+    // OpenXRay (XMLOverride): no attribute of that name - nothing to do
+    void RemoveAttribute(const char* name);
+    // OpenXRay (XMLOverride): sets the value of the attribute, adds it when there is none
+    void SetAttribute(const char* name, const char* value);
 
     /*	Attribtue parsing starts: next char past '<'
                          returns: next char past '>'

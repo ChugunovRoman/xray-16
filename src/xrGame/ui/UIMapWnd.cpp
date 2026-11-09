@@ -21,6 +21,7 @@
 #include "xrUICore/ListBox/UIListBoxItem.h"
 #include "xrEngine/xr_input.h" //remove me !!!
 #include "UIHelper.h"
+#include "addon_slots.h"
 
 CUIMapWnd* g_map_wnd = NULL; // quick temporary solution -(
 CUIMapWnd* GetMapWnd() { return g_map_wnd; }
@@ -87,14 +88,20 @@ bool init_map_spots_static(CUIStatic& icon, pcstr node_id)
     if (!node_id || !node_id[0])
         return false;
 
+    // map_spots.xml of the content set it was read at: a switch of the location pack / the providers
+    // (gw::slots::ContentGeneration) reads it again
     static CUIXml xml;
     static bool loaded = false;
-    if (!loaded)
+    static u32 generation = u32(-1);
+    if (generation != gw::slots::ContentGeneration())
     {
+        generation = gw::slots::ContentGeneration();
+        xml.ClearInternal();
+        xml.SetLocalRoot(nullptr);
         loaded = xml.Load(CONFIG_PATH, UI_PATH, UI_PATH_DEFAULT, "map_spots.xml", true);
-        if (!loaded)
-            return false;
     }
+    if (!loaded)
+        return false;
 
     if (!xml.NavigateToNode(node_id, 0))
         return false;

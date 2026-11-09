@@ -97,6 +97,9 @@ CGameSpy_Browser::CGameSpy_Browser(const SMasterListConfig& masterListCfg)
     m_bTryingToConnectToMasterServer = false;
     m_bShowCMSErr = false;
     m_inited = false;
+    // online services are disabled (CGameSpy_Full without -gamespy): ServerBrowserNewA (internet) returns NULL
+    if (__GSIACResult != GSIACAvailable)
+        return;
     m_pGSBrowser = ServerBrowserNewA(masterListCfg.gamename, masterListCfg.gamename, masterListCfg.secretkey, 0,
         GAMESPY_BROWSER_MAX_UPDATES, QVERSION_QR2, SBFalse, SBCallback, this);
     if (!m_pGSBrowser)

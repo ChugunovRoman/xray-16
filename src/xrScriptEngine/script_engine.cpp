@@ -64,6 +64,87 @@ pcstr stringify_lua_top_for_log(lua_State* L, xr_string& storage)
     storage += '>';
     return storage.c_str();
 }
+
+// 09-content-addons-vfs.md section 6 (C5): a package.loaders entry that finds the `require`d module in the game file
+// system - the layers of the addons and the archives the physical package.path does not see. A module name is a path
+// with dots for the folder separators, as in package.path; looked up (the first found wins):
+//   $game_data$\<name>.script     require("scripts.gw_x.util") -> gamedata\scripts\gw_x\util.script (the old meaning)
+//   $game_scripts$\<name>.script  require("gw_x.util")         -> gamedata\scripts\gw_x\util.script
+//   the same two with .lua
+// The chunk is loaded as is - without file_header (no namespace table, no setfenv): a module runs in the globals of the
+// state and gives its table by `return`, exactly as with the physical loader of package.path before; only the UTF-8 BOM
+// is stripped (as CScriptEngine::load_buffer does). Chunk name "@<full path>" (as do_file). Errors follow the loaders of
+// Lua 5.1: not found - a "\n\tno file" string, a syntax error - an error to the caller of require
+int gw_vfs_require_loader(lua_State* L)
+{
+    pcstr module_name = luaL_checkstring(L, 1);
+    const size_t length = xr_strlen(module_name);
+    string_path relative;
+    // a module name is a dotted name, not a path: what holds a separator is left to the other loaders
+    if (!length || length + 8 >= sizeof(relative) || strpbrk(module_name, "/\\:"))
+    {
+        lua_pushfstring(L, "\n\tno game file system file for module '%s'", module_name);
+        return 1;
+    }
+
+    xr_strcpy(relative, module_name);
+    for (pstr c = relative; *c; ++c)
+    {
+        if (*c == '.')
+            *c = _DELIMITER;
+    }
+
+    struct Candidate
+    {
+        pcstr alias;
+        pcstr extension;
+    };
+    static constexpr Candidate candidates[] = {
+        {"$game_data$", ".script"},
+        {"$game_scripts$", ".script"},
+        {"$game_data$", ".lua"},
+        {"$game_scripts$", ".lua"},
+    };
+
+    for (const Candidate& candidate : candidates)
+    {
+        string_path file_name;
+        if (!FS.exist(file_name, candidate.alias, relative, candidate.extension))
+            continue;
+
+        IReader* reader = FS.r_open(file_name);
+        if (!reader)
+            continue;
+
+#ifndef MASTER_GOLD
+        Msg("* Loading module: %s", file_name);
+#endif
+        pcstr buffer = static_cast<pcstr>(reader->pointer());
+        size_t size = reader->length();
+        if (size >= 3 && static_cast<u8>(buffer[0]) == 0xEF && static_cast<u8>(buffer[1]) == 0xBB &&
+            static_cast<u8>(buffer[2]) == 0xBF)
+        {
+            buffer += 3;
+            size -= 3;
+        }
+
+        string_path chunk_name;
+        strconcat(sizeof(chunk_name), chunk_name, "@", file_name);
+        const int error = luaL_loadbuffer(L, buffer, size, chunk_name);
+        FS.r_close(reader);
+        if (error)
+        {
+            pcstr message = lua_tostring(L, -1);
+            return luaL_error(L, "error loading module '%s' from file '%s':\n\t%s", module_name, file_name,
+                message ? message : "<no error message>");
+        }
+        return 1;
+    }
+
+    lua_pushfstring(L, "\n\tno file '%s.script' / '%s.lua' in the game file system ($game_data$, $game_scripts$)",
+        relative, relative);
+    return 1;
+}
 } // namespace
 
 static const char* file_header_old =
@@ -625,6 +706,13 @@ luabind::object CScriptEngine::name_space(LPCSTR namespace_name)
     }
 }
 
+namespace
+{
+CScriptEngine::ErrorMessageHook g_error_message_hook = nullptr;
+} // namespace
+
+void CScriptEngine::SetErrorMessageHook(ErrorMessageHook hook) { g_error_message_hook = hook; }
+
 bool CScriptEngine::print_output(lua_State* L, pcstr caScriptFileName, int errorCode, pcstr caErrorText)
 {
     CScriptEngine* scriptEngine = GetInstance(L);
@@ -645,7 +733,11 @@ bool CScriptEngine::print_output(lua_State* L, pcstr caScriptFileName, int error
     {
         S = stringify_lua_top_for_log(L, messageBuf);
         if (S && *S && errorCode)
+        {
             scriptEngine->script_log(LuaMessageType::Error, "[LUA] %s", S);
+            if (g_error_message_hook)
+                g_error_message_hook(S);
+        }
         else if (errorCode)
             scriptEngine->script_log(LuaMessageType::Error,
                 "[LUA] Runtime error with non-printable object (type=%s); trace follows.",
@@ -994,6 +1086,33 @@ void CScriptEngine::init(export_func exporter, bool loadGlobalNamespace)
 
         luaL_dostring(lua(), packagePath);
      }
+
+    // 09-content-addons-vfs.md section 6 (C5): `require` through the game file system (gw_vfs_require_loader) - right
+    // after package.preload, before the physical loaders of package.path / cpath, which stay as the fallback
+    {
+        lua_State* L = lua();
+        lua_getglobal(L, LUA_LOADLIBNAME);
+        if (lua_istable(L, -1))
+        {
+            lua_getfield(L, -1, "loaders");
+            if (lua_istable(L, -1))
+            {
+                const int count = static_cast<int>(lua_objlen(L, -1));
+                const int position = count >= 1 ? 2 : 1;
+                for (int i = count; i >= position; --i)
+                {
+                    lua_rawgeti(L, -1, i);
+                    lua_rawseti(L, -2, i + 1);
+                }
+                lua_pushcfunction(L, gw_vfs_require_loader);
+                lua_rawseti(L, -2, position);
+            }
+            else
+                Msg("! [script] package.loaders is not a table: require through the game file system is off");
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
 
     // XXX nitrocaster: with vanilla scripts, '-nojit' option requires script profiler to be disabled. The reason
     // is that lua hooks somehow make 'super' global unavailable (is's used all over the vanilla scripts).

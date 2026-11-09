@@ -49,6 +49,9 @@ XRCORE_API void FramePacingContext(bool vsync, u8 window_mode, u32 monitor, u32 
 // has just ended. The timeline ends at the first game frame after the load end. Any thread, POD arguments.
 XRCORE_API void LoadMarkBegin(pcstr kind) noexcept;
 XRCORE_API void LoadMark(pcstr stage) noexcept;
+// Closes the open timeline without a load: "* [load] the timeline of '<kind>' closed: <reason>" (a start refused before
+// anything of the load, IGame_Persistent: CanStartLevel). Nothing when no timeline is open. Any thread.
+XRCORE_API void LoadMarkCancel(pcstr reason) noexcept;
 
 // --- Crash context ----------------------------------------------------------------------------------------------------
 // The text for memory_stats.txt of the crash report: the frame number, the phase of the main thread and of the calling

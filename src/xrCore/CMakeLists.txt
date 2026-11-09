@@ -196,10 +196,58 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrCore
+    NAME "FS\\ContentMerge"
+    FILES
+    ContentMerge/AtomMerge.cpp
+    ContentMerge/AtomMerge.h
+    ContentMerge/ContentMerge.cpp
+    ContentMerge/ContentMerge.h
+    ContentMerge/Delta.cpp
+    ContentMerge/DeltaJson.cpp
+    ContentMerge/DeltaJson.h
+    ContentMerge/Diff.cpp
+    ContentMerge/Diff.h
+    ContentMerge/LtxSegments.cpp
+    ContentMerge/LuaSegments.cpp
+    ContentMerge/Plan.cpp
+    ContentMerge/Plan.h
+    ContentMerge/Segments.cpp
+    ContentMerge/Segments.h
+    ContentMerge/Sha256.cpp
+    ContentMerge/TextNorm.cpp
+    ContentMerge/TextNorm.h
+    ContentMerge/XmlSegments.cpp
+)
+
+# ContentMerge is compiled without the precompiled header (as <PrecompiledHeader>NotUsing</PrecompiledHeader> of
+# xrCore.vcxproj): the same sources build gw_merge (CONTENT_MERGE_STANDALONE) and include what they use. Out of the
+# unity sources as well: a unity source would bring the precompiled header back
+set_source_files_properties(
+    ContentMerge/AtomMerge.cpp
+    ContentMerge/ContentMerge.cpp
+    ContentMerge/Delta.cpp
+    ContentMerge/DeltaJson.cpp
+    ContentMerge/Diff.cpp
+    ContentMerge/LtxSegments.cpp
+    ContentMerge/LuaSegments.cpp
+    ContentMerge/Plan.cpp
+    ContentMerge/Segments.cpp
+    ContentMerge/Sha256.cpp
+    ContentMerge/TextNorm.cpp
+    ContentMerge/XmlSegments.cpp
+    PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON
+    SKIP_UNITY_BUILD_INCLUSION ON
+)
+
+target_sources_grouped(
+    TARGET xrCore
     NAME "FS"
     FILES
     BackgroundIo.cpp
     BackgroundIo.h
+    ContentPatches.cpp
+    ContentPatches.h
     FileCRC32.cpp
     FileCRC32.h
     FileSystem.cpp

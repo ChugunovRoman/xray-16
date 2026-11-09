@@ -29,6 +29,11 @@ public:
     void RemoveMapLocation(const shared_str& spot_type, u16 id);
     bool HasMapLocation(const shared_str& spot_type, u16 id);
     void RemoveMapLocationByObjectID(u16 id); // call on destroy object
+    // CALifeStorageManager::load (09-content-addons-vfs.md section 8, C8): the locations of the saved objects that were
+    // not loaded (`ids`, any order) go right after the registries are read, as RemoveMapLocationByObjectID removes them.
+    // Without it they would stay till the first Update (no owner: not actual), and a new object given such an id meanwhile
+    // would find a location of the old one. Returns how many were removed
+    u32 RemoveMapLocationsOfObjects(const xr_vector<u16>& ids);
     void RemoveMapLocation(CMapLocation* ml);
     CMapLocation* GetMapLocation(const shared_str& spot_type, u16 id);
     void GetMapLocations(const shared_str& spot_type, u16 id, xr_vector<CMapLocation*>& res);

@@ -82,6 +82,33 @@ jobs:
       working-directory: src
       run: msbuild /m /p:Configuration="${{ matrix.Configuration }}" /p:Platform="${{ matrix.Platform }}" /p:UseSentry=true engine.sln
 
+    # gw_merge.exe beside the engine binaries (00-roadmap.md §5а decision 63/4): the launcher, the tools and the validator
+    # take every merge decision from it, there is no fallback. engine.sln does not build it: the tool alone
+    # (src/utils/gw_merge/CMakeLists.txt, standalone mode), always Release, the C runtime linked statically (/MT: no
+    # vcruntime needed). Copied into bin\<platform>\<configuration>\, so xr_pack_build.cmd (OpenXRay.*.7z) and
+    # xr_pack_engine.cmd (engine-windows-*.zip, its sha256 in .gw_engine.json of the launcher) pack it with the engine.
+    # The game release (launcher Pack) takes it from the bin\ of the game folder: copy it there with the engine
+    # (tools/release/put_gw_merge.py)
+    - name: Build gw_merge
+      shell: pwsh
+      run: |
+        $arch = if ("${{ matrix.Platform }}" -eq 'x86') { 'Win32' } else { "${{ matrix.Platform }}" }
+        cmake -S src/utils/gw_merge -B build-gw_merge -A $arch -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        cmake --build build-gw_merge --config Release --parallel 4
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        $bin = "bin/${{ matrix.Platform }}/${{ matrix.Configuration }}"
+        Copy-Item build-gw_merge/Release/gw_merge.exe "$bin/gw_merge.exe"
+        & "$bin/gw_merge.exe" version
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+
+    # The smoke test of the Linux job on the Windows build, with LuaJIT.dll of the engine (--check-lua)
+    - name: Smoke test gw_merge
+      shell: bash
+      run: |
+        bin="bin/${{ matrix.Platform }}/${{ matrix.Configuration }}"
+        bash misc/ci/gw_merge_smoke.sh "$bin/gw_merge.exe" "$bin/LuaJIT.dll"
+
     - name: Prepare artifacts
       shell: cmd
       run: misc/windows/xr_pack_build.cmd "${{ matrix.Configuration }}" "${{ matrix.Platform }}"
@@ -559,10 +586,72 @@ jobs:
           arch: ${{ matrix.platform.arch }}
           verbose: true
 
+  # gw_merge for the CI of the catalog of the addons (Global-War-Addons/index, variable GW_MERGE_URL): the tool alone,
+  # without the engine and its dependencies (src/utils/gw_merge/CMakeLists.txt, standalone mode), libstdc++/libgcc linked
+  # statically, plus LuaJIT of the engine for --check-lua (gw_merge finds libluajit-5.1.so.2 next to itself).
+  # Asset gw_merge-linux-x86_64.tar.gz (gw_merge in the root of the archive): an artifact of every run, on a version tag
+  # also an asset of the release (job release), so a stable URL is
+  # https://github.com/<owner>/<repo>/releases/download/<tag>/gw_merge-linux-x86_64.tar.gz
+  gw_merge:
+    name: gw_merge Linux x86_64
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@main
+      with:
+        submodules: false
+
+    # Only LuaJIT: the tool itself needs no submodule
+    - name: LuaJIT submodule
+      run: |
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        git submodule sync Externals/LuaJIT
+        git submodule update --init --depth 1 Externals/LuaJIT
+
+    - name: Build gw_merge
+      run: |
+        cmake -S src/utils/gw_merge -B build-gw_merge -DCMAKE_BUILD_TYPE=Release
+        cmake --build build-gw_merge --parallel 4
+
+    # The same sources and default options as the engine build (Externals/LuaJIT-proj): only loadbuffer is used
+    - name: Build LuaJIT
+      run: make -C Externals/LuaJIT/src -j4 amalg
+
+    - name: Pack gw_merge
+      run: |
+        pkg=dist/gw_merge
+        mkdir -p "$pkg"
+        cp build-gw_merge/gw_merge "$pkg/gw_merge"
+        strip "$pkg/gw_merge"
+        cp Externals/LuaJIT/src/libluajit.so "$pkg/libluajit-5.1.so.2"
+        cp Externals/LuaJIT/COPYRIGHT "$pkg/LuaJIT-COPYRIGHT"
+        tar -C "$pkg" -czf dist/gw_merge-linux-x86_64.tar.gz gw_merge libluajit-5.1.so.2 LuaJIT-COPYRIGHT
+        tar -tzvf dist/gw_merge-linux-x86_64.tar.gz
+        file "$pkg/gw_merge"
+        # No libstdc++ / libgcc_s: linked statically
+        ldd "$pkg/gw_merge"
+        if ldd "$pkg/gw_merge" | grep -E 'libstdc\+\+|libgcc_s'; then
+          echo "::error::gw_merge depends on the shared C++ runtime"
+          exit 1
+        fi
+
+    # On the packed files, unpacked as the catalog CI does it
+    - name: Smoke test gw_merge
+      run: |
+        mkdir -p smoke
+        tar -xzf dist/gw_merge-linux-x86_64.tar.gz -C smoke
+        bash misc/ci/gw_merge_smoke.sh smoke/gw_merge smoke/libluajit-5.1.so.2
+
+    - name: Upload gw_merge
+      uses: actions/upload-artifact@main
+      with:
+        name: gw_merge Linux x86_64 (github-${{ github.run_number }})
+        path: dist/gw_merge-linux-x86_64.tar.gz
+
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/') && success()
-    needs: [windows, cmake, bsd, flatpak]
+    needs: [windows, cmake, bsd, flatpak, gw_merge]
     runs-on: ubuntu-latest
     permissions:
       contents: write

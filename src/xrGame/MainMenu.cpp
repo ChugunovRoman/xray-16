@@ -113,7 +113,14 @@ CMainMenu::CMainMenu()
     {
         g_btnHint = xr_new<CUIButtonHint>();
         g_statHint = xr_new<CUIButtonHint>();
-        m_pGameSpyFull = xr_new<CGameSpy_Full>();
+        xray::StartupMark("main_menu_pre_gamespy"); // the start of CMainMenu: script reset subscription, registry, hints
+        // GlobalWar is single player: GameSpy online services are off unless -gamespy is given. With them on,
+        // CGameSpy_Full runs CheckAvailableServices - a blocking DNS lookup and an UDP query of
+        // stalkercoppc.available.gamegsc.com:27900 (up to 2 x 2000 ms without a reply), then gsCore, HTTP, SB, GP, ATLAS.
+        // Off: no network at all, the objects are still created (GetGS() and the managers below are not null)
+        const bool gamespyOnline = strstr(Core.Params, "-gamespy") != nullptr;
+        m_pGameSpyFull = xr_new<CGameSpy_Full>(gamespyOnline);
+        xray::StartupMark("main_menu_gamespy");
 
         for (cpcstr name : ErrMsgBoxTemplate)
         {

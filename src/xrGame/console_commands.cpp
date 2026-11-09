@@ -31,6 +31,8 @@
 #include "autosave_manager.h"
 #include "ai_space.h"
 #include "addon_host.h"
+#include "addon_content.h"
+#include "addon_merge.h"
 #include "addon_event_bus.h"
 #include "addon_object_events.h"
 #include "addon_data_bus.h"
@@ -54,6 +56,7 @@
 #include "MainMenu.h"
 #include "saved_game_wrapper.h"
 #include "level_pack.h"
+#include "addon_slots.h"
 #include "xrAICore/Components/ai_planner_search_limits.h"
 #include "xrAICore/Navigation/ai_graph_engine_cvars.h"
 #include "xrAICore/Navigation/level_graph.h"
@@ -1198,7 +1201,26 @@ public:
         string_path saved_game;
         strncpy_s(saved_game, sizeof(saved_game), args, MAX_PATH - 1);
 
-        if (!ai().get_alife())
+        // -load <save> of the command line (x_ray.cpp): before the game persistent, the device and the addon host -
+        // ai() must not create the AI space here. It becomes the start of the level that loads the save, as
+        // -start server(<save>/single/alife/load) client(localhost). The rest of the command line comes as the
+        // arguments: the name ends before the next parameter
+        const bool command_line = !g_pGamePersistent;
+        if (command_line)
+        {
+            _Trim(saved_game);
+            // -load "my save" (a shortcut, the launcher): the name is between the quotes
+            if (saved_game[0] == '"')
+            {
+                if (const pstr close = strchr(saved_game + 1, '"'))
+                    *close = 0;
+                memmove(saved_game, saved_game + 1, xr_strlen(saved_game));
+            }
+            else if (const pstr next = strstr(saved_game, " -"))
+                *next = 0;
+            _Trim(saved_game);
+        }
+        else if (!ai().get_alife())
         {
             Log("! ALife simulator has not been started yet");
             return;
@@ -1225,6 +1247,20 @@ public:
         if (!valid_saved_game_name(saved_game))
         {
             Msg("! Cannot load saved game %s, invalid file name", saved_game);
+            return;
+        }
+
+        if (command_line)
+        {
+            if (Engine.Event.Peek("KERNEL:start"))
+            {
+                Msg("! -load %s: -start is on the command line too, -load is ignored", saved_game);
+                return;
+            }
+            // The pack and the slot providers of the save: gw::ApplyStartupContentForLevel at the end of OnAppStart
+            string_path command;
+            xr_sprintf(command, "start server(%s/single/alife/load) client(localhost)", saved_game);
+            Console->Execute(command);
             return;
         }
 
@@ -2203,6 +2239,298 @@ public:
     }
 };
 
+// Slots (plans/addons_api_support/13-extension-model.md, section 4): slot_list - the slots, their providers, the
+// active and the chosen ones; slot_select <slot> <provider> - a switch in the main menu (as Lua addon_slots.select)
+class CCC_SlotList : public IConsole_Command
+{
+public:
+    CCC_SlotList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::slots::PrintSlots(); }
+};
+
+class CCC_SlotSelect : public IConsole_Command
+{
+public:
+    CCC_SlotSelect(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        string256 slot{}, provider{};
+        if (args)
+            sscanf(args, "%255s %255s", slot, provider);
+        if (!slot[0] || !provider[0])
+        {
+            Msg("- slot_select <slot> <provider id | core>: the slots are");
+            gw::slots::PrintSlots();
+            return;
+        }
+        if (gw::slots::RequestSelect(slot, provider, ""))
+            Msg("- [slots] %s = %s: at the next frame of the main menu", slot, provider);
+    }
+};
+
+// 13-extension-model.md 4.2: the files several addons give, the winner and what decided it (the order, a rule of the
+// author or of the player), the rules of appdata\addons.ltx [conflicts]; addon_conflicts <id> - of one addon
+class CCC_AddonConflicts : public IConsole_Command
+{
+public:
+    CCC_AddonConflicts(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        string256 id{};
+        if (args)
+            sscanf(args, "%255s", id);
+        gw::addons::PrintContentConflicts(id);
+    }
+};
+
+// 13-extension-model.md 4.2, 4.4: the choice of the player for one file several addons give - addon_file_winner
+// <file> <addon id | core> (core - the base keeps it), addon_file_winner <file> - the rule goes. Written into
+// appdata\addons.ltx [conflicts]; in the main menu the content is built again at the next frame (as slot_select),
+// in a game - at the next build (a switch in the menu, the next start)
+class CCC_AddonFileWinner : public IConsole_Command
+{
+public:
+    CCC_AddonFileWinner(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        string_path file{};
+        string256 winner{};
+        if (args)
+            sscanf(args, "%519s %255s", file, winner);
+        xr_string name;
+        if (!file[0] || !gw::addons::NormalizeRuleFile(file, name))
+        {
+            Msg("- addon_file_winner <file in gamedata\\> <addon id | core>: that addon serves the file (core - the "
+                "base); addon_file_winner <file> - the rule goes. The rules now:");
+            for (const gw::addons::FileRule& rule : gw::addons::FileRules())
+                Msg("-   file:%s = %s", rule.file.c_str(), rule.winner.c_str());
+            return;
+        }
+        if (winner[0] && 0 != xr_stricmp(winner, "core"))
+        {
+            const xr_vector<xr_string>& known = gw::addons::KnownAddonIds();
+            xr_string id = winner;
+            std::transform(id.begin(), id.end(), id.begin(), [](char c) { return char(std::tolower(u8(c))); });
+            if (std::find(known.begin(), known.end(), id) == known.end())
+            {
+                Msg("! addon_file_winner: no addon '%s' (addon_list)", winner);
+                return;
+            }
+        }
+        xr_string error;
+        if (!gw::addons::WriteFileRule(name.c_str(), winner, &error))
+        {
+            // The rules of this run stay as they were: they follow the file
+            Msg("! addon_file_winner: the rule for %s is not saved: %s", name.c_str(), error.c_str());
+            return;
+        }
+        if (gw::slots::RequestRebuild(""))
+            Msg("- [addons] file:%s = %s: the content is built again at the next frame of the main menu", name.c_str(),
+                winner[0] ? winner : "- (no rule)");
+    }
+};
+
+// 13-extension-model.md 4.2, 4.4 (00-roadmap.md 5a, decision 39): the pair rule of the player - addon_pair <winner>
+// <loser>: the content of the winner lies over the content of the loser (among the common content of the addons and
+// among the sets of the slot providers); addon_pair <winner> - every pair rule of the winner goes. Written into
+// appdata\addons.ltx [conflicts] as pair:<winner> = <loser>[, ...] (the rule the other way round goes); applied as
+// addon_file_winner: in the main menu the content is built again at the next frame, in a game - at the next build
+class CCC_AddonPair : public IConsole_Command
+{
+public:
+    CCC_AddonPair(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        string256 winner{};
+        string256 loser{};
+        if (args)
+            sscanf(args, "%255s %255s", winner, loser);
+        if (!winner[0])
+        {
+            Msg("- addon_pair <winner id> <loser id>: the content of the winner lies over the content of the loser; "
+                "addon_pair <winner id> - its pair rules go. The rules now:");
+            for (const gw::addons::PairRule& rule : gw::addons::PairRules())
+                Msg("-   pair:%s = %s", rule.winner.c_str(), rule.loser.c_str());
+            return;
+        }
+        // A new rule names installed addons; the rules of an addon that is gone can still be taken off
+        if (loser[0])
+        {
+            const xr_vector<xr_string>& known = gw::addons::KnownAddonIds();
+            for (pcstr id_text : { static_cast<pcstr>(winner), static_cast<pcstr>(loser) })
+            {
+                xr_string id = id_text;
+                std::transform(id.begin(), id.end(), id.begin(), [](char c) { return char(std::tolower(u8(c))); });
+                if (std::find(known.begin(), known.end(), id) == known.end())
+                {
+                    Msg("! addon_pair: no addon '%s' (addon_list)", id_text);
+                    return;
+                }
+            }
+        }
+        xr_string error;
+        if (!gw::addons::WritePairRule(winner, loser, &error))
+        {
+            // The rules of this run stay as they were: they follow the file
+            Msg("! addon_pair: the rule pair:%s = %s is not saved: %s", winner, loser[0] ? loser : "-",
+                error.c_str());
+            return;
+        }
+        if (gw::slots::RequestRebuild(""))
+            Msg("- [addons] pair:%s = %s: the content is built again at the next frame of the main menu", winner,
+                loser[0] ? loser : "- (no rule)");
+    }
+};
+
+// 15-merge-implementation.md 4.4 (00-roadmap.md 5a, decision 47.10): the choice of the player for one atom of a merged
+// file - addon_atom_winner <file>|<atom> <addon id | core> (core - the atom of the base), addon_atom_winner
+// <file>|<atom> - - the rule goes. The atom as addon_merges / addon_merge_show name it: it may have blanks, the winner
+// is the last word ("<file> <atom> <winner>" without '|' - the same). Written into appdata\addons.ltx [conflicts] as
+// atom:<file>|<atom> = <winner>; applied as addon_file_winner: in the main menu the merge runs again at the next frame
+class CCC_AddonAtomWinner : public IConsole_Command
+{
+public:
+    CCC_AddonAtomWinner(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        const auto trim = [](const xr_string& text) {
+            const size_t begin = text.find_first_not_of(" \t");
+            return begin == xr_string::npos ? xr_string() :
+                                              text.substr(begin, text.find_last_not_of(" \t") - begin + 1);
+        };
+        const xr_string text = trim(args ? args : "");
+        xr_string file, atom, winner;
+        const size_t last = text.find_last_of(" \t");
+        if (last != xr_string::npos)
+        {
+            winner = text.substr(last + 1);
+            const xr_string rest = trim(text.substr(0, last));
+            const size_t bar = rest.find('|');
+            const size_t blank = rest.find_first_of(" \t");
+            const size_t cut = bar != xr_string::npos ? bar : blank;
+            if (cut != xr_string::npos)
+            {
+                file = trim(rest.substr(0, cut));
+                atom = trim(rest.substr(cut + 1));
+            }
+        }
+        xr_string name;
+        if (file.empty() || atom.empty() || !gw::addons::NormalizeRuleFile(file.c_str(), name))
+        {
+            Msg("- addon_atom_winner <file in gamedata\\>|<atom> <addon id | core>: the merge of the file takes the "
+                "atom from that addon (core - the base); addon_atom_winner <file>|<atom> - : the rule goes. The "
+                "atoms: addon_merges, addon_merge_show <file>. The rules now:");
+            for (const gw::addons::AtomRule& rule : gw::addons::AtomRules())
+                Msg("-   atom:%s|%s = %s", rule.file.c_str(), rule.atom.c_str(), rule.winner.c_str());
+            return;
+        }
+        if (winner == "-")
+            winner.clear();
+        std::transform(winner.begin(), winner.end(), winner.begin(), [](char c) { return char(std::tolower(u8(c))); });
+        if (!winner.empty() && winner != "core")
+        {
+            const xr_vector<xr_string>& known = gw::addons::KnownAddonIds();
+            if (std::find(known.begin(), known.end(), winner) == known.end())
+            {
+                Msg("! addon_atom_winner: no addon '%s' (addon_list)", winner.c_str());
+                return;
+            }
+        }
+        xr_string error;
+        if (!gw::addons::WriteAtomRule(name.c_str(), atom.c_str(), winner.c_str(), &error))
+        {
+            // The rules of this run stay as they were: they follow the file
+            Msg("! addon_atom_winner: the rule for %s|%s is not saved: %s", name.c_str(), atom.c_str(), error.c_str());
+            return;
+        }
+        // The atom as written: "@gap X" goes in as "X" (WriteAtomRule)
+        const xr_string written = gw::addons::NormalizeRuleAtom(atom.c_str());
+        if (gw::slots::RequestRebuild(""))
+            Msg("- [addons] atom:%s|%s = %s: the content is built again at the next frame of the main menu",
+                name.c_str(), written.c_str(), winner.empty() ? "- (no rule)" : winner.c_str());
+    }
+};
+
+// The merge of the files several addons replace (plans/addons_api_support/15-merge-implementation.md 5.3,
+// addon_merge.h): addon_merges [id] - the merged files, their statuses and conflicts of atoms; addon_merge_show <file>
+// - the sides, the atoms, the map of the lines; addon_merge_rebuild - the cache goes, the content is built again
+class CCC_AddonMerges : public IConsole_Command
+{
+public:
+    CCC_AddonMerges(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        string256 id{};
+        if (args)
+            sscanf(args, "%255s", id);
+        gw::addons::PrintContentMerges(id);
+    }
+};
+
+class CCC_AddonMergeShow : public IConsole_Command
+{
+public:
+    CCC_AddonMergeShow(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        string_path file{};
+        if (args)
+            sscanf(args, "%519s", file);
+        gw::addons::PrintContentMerge(file);
+    }
+};
+
+class CCC_AddonMergeRebuild : public IConsole_Command
+{
+public:
+    CCC_AddonMergeRebuild(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::RebuildContentMerges(); }
+};
+
+// addons_report: appdata\logs\addons_report.json now (it is written by itself after each build of the content, once
+// a loaded level is in play and at the exit of the game)
+class CCC_AddonsReport : public IConsole_Command
+{
+public:
+    CCC_AddonsReport(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::WriteAddonsReport("console"); }
+};
+
+// The content of the addons in the file system (plans/addons_api_support/14-addon-resource-scoping.md):
+// addon_files <id> [all] - its public, private and replaced files; addon_resource <name> - the layer serving a name
+class CCC_AddonFiles : public IConsole_Command
+{
+public:
+    CCC_AddonFiles(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        string256 id{}, mode{};
+        if (args)
+            sscanf(args, "%255s %255s", id, mode);
+        if (!id[0])
+        {
+            Msg("- addon_files <addon id> [all]: the files of its mounted content (all: the public ones listed too)");
+            return;
+        }
+        gw::addons::PrintAddonFiles(id, 0 == xr_stricmp(mode, "all"));
+    }
+};
+
+class CCC_AddonResource : public IConsole_Command
+{
+public:
+    CCC_AddonResource(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    virtual void Execute(LPCSTR args)
+    {
+        if (!args || !args[0])
+        {
+            Msg("- addon_resource <name>: textures\\wpn\\wpn_ak74.dds, wpn\\wpn_ak74, @<addon id>\\wpn\\wpn_ak74, ...");
+            return;
+        }
+        gw::addons::PrintAddonResource(args);
+    }
+};
+
 // plugin_reload <addon id>: the plugin of the addon is unloaded and loaded again from its library (a rebuilt one
 // too) at the start of the next frame; it also brings back a plugin stopped by a crash
 class CCC_PluginReload : public IConsole_Command
@@ -2218,6 +2546,27 @@ public:
             Msg("! [addons] plugin_reload %s: %s", args, reason.c_str());
     }
     virtual void Info(TInfo& I) { xr_strcpy(I, "addon id: unload its plugin and load it again (also after a crash)"); }
+};
+
+// addon_reload <addon id> (08-unified-addons-api-lua-native.md 4.10, U6): the addon goes and comes back at the next
+// frame - on_unload, its save data in memory, its registrations and modules, its plugin, on_load, the save data back
+// (addon_host.h RequestAddonReload). A development command: trust = local, -addon_dir or -addon_debug
+class CCC_AddonReload : public IConsole_Command
+{
+public:
+    CCC_AddonReload(LPCSTR N) : IConsole_Command(N) {}
+    virtual void Execute(LPCSTR args)
+    {
+        xr_string reason;
+        if (gw::addons::RequestAddonReload(args, reason))
+            Msg("- [addons] addon '%s' is reloaded at the next frame", args);
+        else
+            Msg("! [addons] addon_reload %s: %s", args, reason.c_str());
+    }
+    virtual void Info(TInfo& I)
+    {
+        xr_strcpy(I, "addon id: on_unload, unload its Lua modules and plugin, load them again, on_load (development)");
+    }
 };
 
 class CCC_EventList : public IConsole_Command
@@ -3746,10 +4095,23 @@ void CCC_RegisterCommands()
 
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD1(CCC_AddonList, "addon_list");
+    CMD1(CCC_AddonFiles, "addon_files");
+    CMD1(CCC_AddonResource, "addon_resource");
     CMD1(CCC_LevelPackList, "level_pack_list");
     CMD1(CCC_LevelPackSwitch, "level_pack_switch");
+    CMD1(CCC_SlotList, "slot_list");
+    CMD1(CCC_SlotSelect, "slot_select");
+    CMD1(CCC_AddonConflicts, "addon_conflicts");
+    CMD1(CCC_AddonFileWinner, "addon_file_winner");
+    CMD1(CCC_AddonPair, "addon_pair");
+    CMD1(CCC_AddonAtomWinner, "addon_atom_winner");
+    CMD1(CCC_AddonMerges, "addon_merges");
+    CMD1(CCC_AddonMergeShow, "addon_merge_show");
+    CMD1(CCC_AddonMergeRebuild, "addon_merge_rebuild");
+    CMD1(CCC_AddonsReport, "addons_report");
     CMD3(CCC_String, "g_level_pack", gw::g_level_pack, std::size(gw::g_level_pack)); // user.ltx: the chosen pack
     CMD1(CCC_PluginReload, "plugin_reload");
+    CMD1(CCC_AddonReload, "addon_reload");
     CMD1(CCC_EventList, "event_list");
     CMD1(CCC_EventEngineSources, "gw_event_engine_sources");
     CMD1(CCC_EventSchemaCheck, "gw_event_schema_check");

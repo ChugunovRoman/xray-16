@@ -75,9 +75,11 @@ void CSavedGameWrapper::read_data(IReader& reader, gw::addons::data::SaveValues&
     }
 }
 
-bool CSavedGameWrapper::saved_game_data(pcstr saved_game_name, gw::addons::data::SaveValues& out)
+bool CSavedGameWrapper::saved_game_data(pcstr saved_game_name, gw::addons::data::SaveValues& out, SavedSpawn* spawn)
 {
     out.clear();
+    if (spawn)
+        *spawn = SavedSpawn{};
     string_path file_name;
     if (!FS.exist(saved_game_full_name(saved_game_name, file_name, SAVE_EXTENSION)))
         if (!FS.exist(saved_game_full_name(saved_game_name, file_name, SAVE_EXTENSION_LEGACY)))
@@ -100,6 +102,27 @@ bool CSavedGameWrapper::saved_game_data(pcstr saved_game_name, gw::addons::data:
     {
         IReader reader(source_data, source_count);
         read_data(reader, out);
+        if (spawn)
+        {
+            // CALifeSpawnRegistry::save: SPAWN_CHUNK_DATA { chunk 0: the name (stringZ), the GUID of its header }
+            reader.seek(0);
+            if (IReader* chunk = reader.open_chunk(SPAWN_CHUNK_DATA))
+            {
+                if (IReader* sub_chunk = chunk->open_chunk(0))
+                {
+                    string_path spawn_name;
+                    sub_chunk->r_stringZ(spawn_name, sizeof(spawn_name));
+                    if (sub_chunk->elapsed() >= static_cast<intptr_t>(sizeof(spawn->guid)))
+                    {
+                        sub_chunk->r(&spawn->guid, sizeof(spawn->guid));
+                        spawn->name = spawn_name;
+                        spawn->valid = true;
+                    }
+                    sub_chunk->close();
+                }
+                chunk->close();
+            }
+        }
     }
     xr_free(source_data);
     return true;
@@ -128,6 +151,12 @@ CSavedGameWrapper::CSavedGameWrapper(LPCSTR saved_game_name)
 
     u32 source_count = stream->r_u32();
     void* source_data = xr_malloc(source_count);
+    // Freed on every exit (the early returns below - an old, foreign or broken save shown in the load dialog)
+    struct SourceGuard
+    {
+        void* data;
+        ~SourceGuard() { xr_free(data); }
+    } source_guard{source_data};
     rtc_decompress(source_data, source_count, stream->pointer(), stream->length() - 3 * sizeof(u32));
     FS.r_close(stream);
 
@@ -186,7 +215,6 @@ CSavedGameWrapper::CSavedGameWrapper(LPCSTR saved_game_name)
             m_level_id = _LEVEL_ID(-1);
             xr_string level_name;
             m_level_name = gw::SaveValueString(data(gw::kSaveLevelNameKey), level_name) ? level_name.c_str() : "";
-            xr_free(source_data);
             return;
         }
 
@@ -248,8 +276,6 @@ CSavedGameWrapper::CSavedGameWrapper(LPCSTR saved_game_name)
             FS.r_close(spawn);
         F_entity_Destroy(object);
     }
-
-    xr_free(source_data);
 }
 
 const GwpValue* CSavedGameWrapper::data(pcstr key) const

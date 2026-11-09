@@ -82,6 +82,7 @@ public:
     IGame_Level* CreateLevel() override;
     void         DestroyLevel(IGame_Level*& lvl) override;
 
+    bool CanStartLevel(pcstr op_server) override;
     void PreStart(LPCSTR op) override;
     virtual void Start(LPCSTR op);
     virtual void Disconnect();
@@ -115,6 +116,9 @@ public:
     virtual void SetBaseDof(const Fvector3& dof);
     virtual void OnSectorChanged(IRender_Sector::sector_id_t sector);
     virtual void OnAssetsChanged();
+    // The content set (addon_slots.cpp ApplyContentSet): the loading screen is built again from the files of the new
+    // layers. false - not now (it is on the screen) or nothing to build (a dedicated server)
+    bool RecreateLoadingScreen();
     IRender_Sector::sector_id_t GetLastSectorId() const { return m_lastSectorId; }
 
     void OnWeaponIconRenderPass() override;

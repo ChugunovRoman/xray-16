@@ -113,6 +113,9 @@ void CSXML_IdToIndex::DeleteIdToIndexData()
 
     xr_delete(m_pItemDataVector);
     xr_delete(m_pIdMap);
+    // InitXmlIdToIndex takes the list of the files from pSettings again: it points into the system ini read at the
+    // time, and the content of the addons (00-roadmap.md 5a, decision 35: reload_game_globals) may change the list
+    file_str = nullptr;
 }
 
 TEMPLATE_SPECIALIZATION

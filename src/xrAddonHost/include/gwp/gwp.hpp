@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <exception>
@@ -873,6 +874,29 @@ public:
  * The raw API stays available through api() and self(). Every handler runs on the main thread.
  * The object is created in gwp_plugin_init and destroyed right after on_unload, while the engine API is still valid.
  */
+// Writes why gwp_plugin_init refuses the engine table `api` (GWP_API_FITS(api, api_min) is false) to the engine log,
+// through api->log: the header of the table and `log` keep their place in every version (see GwpEngineApi), so the
+// call is safe also when the rest of the table has another layout. Nothing is written when the table is too short
+// for `log`. @group plugin @thread main
+inline void log_version_refusal(const GwpEngineApi* api, const GwpPlugin* self, uint32_t api_min) noexcept
+{
+    if (api == nullptr || api->size < offsetof(GwpEngineApi, log) + sizeof(api->log) || api->log == nullptr)
+        return;
+    const auto part = [](uint32_t version, int shift, uint32_t mask) { return (version >> shift) & mask; };
+    const uint32_t engine = api->api_version;
+    char text[256];
+    std::snprintf(text, sizeof(text),
+        "Plugin API mismatch, the plugin does not load: built with Plugin API %u.%u.%u, needs %u.%u.%u or newer of the "
+        "same major (before 1.0: the same 0.MINOR), the engine has %u.%u.%u. Rebuild the plugin with the headers of "
+        "this engine",
+        static_cast<unsigned>(GWP_API_VERSION_MAJOR), static_cast<unsigned>(GWP_API_VERSION_MINOR),
+        static_cast<unsigned>(GWP_API_VERSION_PATCH), static_cast<unsigned>(part(api_min, 22, 0x3FFu)),
+        static_cast<unsigned>(part(api_min, 12, 0x3FFu)), static_cast<unsigned>(part(api_min, 0, 0xFFFu)),
+        static_cast<unsigned>(part(engine, 22, 0x3FFu)), static_cast<unsigned>(part(engine, 12, 0x3FFu)),
+        static_cast<unsigned>(part(engine, 0, 0xFFFu)));
+    api->log(self, GWP_LOG_ERROR, text);
+}
+
 class Plugin
 {
 public:
@@ -882,15 +906,20 @@ public:
 
     // Called by GWP_DEFINE_PLUGIN from gwp_plugin_init: checks the versions, fills `out`, then runs on_init.
     // api_min: the minimal engine API this plugin needs (GWP_MAKE_VERSION); by default the version of the headers it
-    // is built with. A lower one lets the plugin load on an older engine of the same MAJOR: then every function newer
-    // than api_min must be checked with GWP_API_HAS before the call. @group plugin @thread main
+    // is built with. A lower one lets the plugin load on an older engine of the same major (from 1.0 on the same
+    // MAJOR, before 1.0 the same 0.MINOR - only an older PATCH, see "Compatibility" in gwp_api.h): then every function
+    // newer than api_min must be checked with GWP_API_HAS before the call. @group plugin @thread main
     GwpResult init(const GwpEngineApi* api, const GwpPlugin* self, GwpPluginDesc* out,
         uint32_t api_min = GWP_API_VERSION) noexcept
     {
-        if (api == nullptr || out == nullptr || api->abi_major != GWP_API_VERSION_MAJOR)
+        if (api == nullptr || out == nullptr)
             return GWP_ERROR_VERSION_MISMATCH;
-        if (api->api_version < api_min)
+        // The major (MAJOR, the pair 0.MINOR before 1.0) and api_min: before any other call into the table
+        if (!GWP_API_FITS(api, api_min))
+        {
+            log_version_refusal(api, self, api_min);
             return GWP_ERROR_VERSION_MISMATCH;
+        }
         m_api = api;
         m_self = self;
         m_log.reset(api, self);

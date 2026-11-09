@@ -124,8 +124,16 @@ target_sources(xrGame PRIVATE
     addon_data_bus.h
     addon_event_bus.cpp
     addon_event_bus.h
+    addon_content.cpp
+    addon_content.h
     addon_host.cpp
     addon_host.h
+    addon_lua_entry.cpp
+    addon_lua_entry.h
+    addon_merge.cpp
+    addon_merge.h
+    addon_slots.cpp
+    addon_slots.h
     addon_object_events.cpp
     addon_object_events.h
     addon_timers.cpp

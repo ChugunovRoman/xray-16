@@ -21,6 +21,9 @@ namespace gw::addons::data
 {
 void FillEngineApi(GwpEngineApi& api);
 
+// A persistent value the engine owns (gw/game/level_pack*, gw/slots/*: level_pack.cpp WriteSaveContentKeys), set
+// with no owner check; GWP_T_NIL erases. As data_bus.set of Lua: data_on_changed on a real change
+void SetPersistentFromEngine(pcstr key, const GwpValue& value);
 void ResetPersistent();          // new game: drop the persistent values of the previous one
 void WriteSave(IWriter& stream); // own chunk of the ALife save stream
 void ReadSave(IReader& stream);  // replaces the persistent values; a save without the chunk gives none

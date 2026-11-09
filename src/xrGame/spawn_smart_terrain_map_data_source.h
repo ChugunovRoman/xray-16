@@ -19,6 +19,10 @@ public:
     // pack); StartSharedLoadingWhenIdle loads it again
     static void ForgetSharedLoading();
     static pcstr GetSharedSmartLevelName(pcstr smart_name, pcstr spawn_name = "all");
+    // The revision of the loaded data (Lua get_spawn_smart_map_revision): 0 - not loaded yet (the start, right after a
+    // switch of the location pack: ForgetSharedLoading), another number - the data of the smart terrains is there; it
+    // changes when the data is loaded again. Takes the loaded data if the loading has just ended
+    static u32 GetSharedRevision(pcstr spawn_name = "all");
 
     void SetSpawnName(pcstr spawn_name);
     pcstr GetSpawnName() const { return m_spawn_name.c_str(); }

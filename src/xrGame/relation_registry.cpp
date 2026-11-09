@@ -111,6 +111,36 @@ void RELATION_REGISTRY::ClearRelations(u16 person_id)
     }
 }
 
+void RELATION_REGISTRY::ClearRelationsOfRemoved(const xr_vector<u16>& person_ids)
+{
+    if (person_ids.empty())
+        return;
+
+    for (const u16 person_id : person_ids)
+        ClearRelations(person_id);
+
+    // without ALife the wrapper keeps only a local debug registry; the skipped objects exist only with ALife
+    if (!ai().get_alife())
+        return;
+
+    xr_vector<u16> removed(person_ids);
+    std::sort(removed.begin(), removed.end());
+
+    // the personal relations of the others to the removed persons: one pass over the registry (it is read-only here,
+    // the entries are changed through the wrapper below)
+    xr_vector<std::pair<u16, u16>> incoming; // (from, to)
+    for (const auto& [from, relation_data] : ai().alife().registry((CRelationRegistry*)nullptr).objects())
+    {
+        for (const auto& [to, relation] : relation_data.personal)
+        {
+            if (std::binary_search(removed.begin(), removed.end(), to))
+                incoming.emplace_back(from, to);
+        }
+    }
+    for (const auto& [from, to] : incoming)
+        relation_registry().registry().objects(from).personal.erase(to);
+}
+
 //////////////////////////////////////////////////////////////////////////
 CHARACTER_GOODWILL RELATION_REGISTRY::GetGoodwill(u16 from, u16 to) const
 {

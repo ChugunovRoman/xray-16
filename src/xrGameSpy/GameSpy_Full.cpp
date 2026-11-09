@@ -7,17 +7,31 @@
 #include "GameSpy_ATLAS.h"
 #include "Common/object_broker.h"
 
-CGameSpy_Full::CGameSpy_Full()
+CGameSpy_Full::CGameSpy_Full(bool onlineServices)
 {
     m_pGSA = NULL;
     m_pGS_HTTP = NULL;
     m_pGS_SB = NULL;
     m_pGS_GP = NULL;
+    m_bOnlineServices = onlineServices;
     //---------------------------------------
     m_pGSA = xr_new<CGameSpy_Available>();
     //-----------------------------------------------------
-    shared_str resultstr;
-    m_bServicesAlreadyChecked = m_pGSA->CheckAvailableServices(resultstr);
+    if (m_bOnlineServices)
+    {
+        shared_str resultstr;
+        m_bServicesAlreadyChecked = m_pGSA->CheckAvailableServices(resultstr);
+    }
+    else
+    {
+        // The availability check is a blocking gethostbyname and an UDP query (up to 2 x 2000 ms) - skip it.
+        // GSIACUnavailable: ServerBrowserNew (internet), gpInitialize, scInitialize, wsLoginProfile, sake and
+        // the others refuse to work, so nothing of the SDK goes to the GameSpy servers afterwards.
+        __GSIACResult = GSIACUnavailable;
+        // true: Update does not report OutOfService (the main menu would show the "service is not available" box)
+        m_bServicesAlreadyChecked = true;
+        Msg("* GameSpy: online services are disabled (start with -gamespy to enable them)");
+    }
     //-----------------------------------------------------
     gsCoreInitialize();
     m_pGS_HTTP = xr_new<CGameSpy_HTTP>();
@@ -39,6 +53,10 @@ CGameSpy_Full::~CGameSpy_Full()
 
 GSUpdateStatus CGameSpy_Full::Update()
 {
+    // GameSpy is off: the browsers have no ServerBrowser (ServerBrowserThink(NULL) would crash), GP and ATLAS
+    // are not initialized - nothing to think about; Success hides the "connecting to master server" box
+    if (!m_bOnlineServices)
+        return GSUpdateStatus::Success;
     if (!m_bServicesAlreadyChecked)
     {
         m_bServicesAlreadyChecked = true;

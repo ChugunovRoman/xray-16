@@ -77,6 +77,14 @@ bool CWeaponMagazinedWGrenade::net_Spawn(CSE_Abstract* DC)
 
     iAmmoElapsed2 = weapon->a_elapsed_grenades.grenades_count;
     m_ammoType2 = weapon->a_elapsed_grenades.grenades_type;
+    // A grenade type of an addon that is gone (CWeapon::net_Spawn does the same for the main ammo)
+    if (m_ammoType2 >= m_ammoTypes2.size() && !m_ammoTypes2.empty())
+    {
+        Msg("~ [save] %s [%s] (id %u): its grenade type %u is not in grenade_class of now (%u types) - dropped, the "
+            "first one is loaded", cName().c_str(), m_section_id.c_str(), ID(), u32(m_ammoType2),
+            u32(m_ammoTypes2.size()));
+        m_ammoType2 = 0;
+    }
 
     m_DefaultCartridge2.Load(m_ammoTypes2[m_ammoType2].c_str(), m_ammoType2);
 
@@ -950,8 +958,11 @@ void CWeaponMagazinedWGrenade::load(IReader& input_packet)
     u32 sz = 0;
     load_data(sz, input_packet);
 
+    // In the grenade mode SwitchMode above swapped in the index CWeapon::load read from the save (not checked yet: an
+    // ammo or grenade type of an addon that is gone may be past the list). net_Spawn sets and checks m_ammoType2 later
+    const u8 type2 = m_ammoType2 < m_ammoTypes2.size() ? m_ammoType2 : 0;
     CCartridge l_cartridge;
-    l_cartridge.Load(m_ammoTypes2[m_ammoType2].c_str(), m_ammoType2);
+    l_cartridge.Load(m_ammoTypes2[type2].c_str(), type2);
 
     while (sz > m_magazine2.size())
         m_magazine2.push_back(l_cartridge);

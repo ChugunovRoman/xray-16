@@ -195,6 +195,12 @@ public:
 
     static bool print_output(lua_State* L, pcstr caScriptName, int iErrorCode = 0, pcstr caErrorText = nullptr);
 
+    // A hook of the game for the message of a Lua error print_output logs: it may add lines of its own. xrGame tells
+    // which addon gave a line of a merged script (plans/addons_api_support/15-merge-implementation.md 5.3,
+    // addon_merge.h DescribeMergedLuaError). No Lua may run in it. nullptr - none
+    using ErrorMessageHook = void (*)(pcstr message);
+    static void SetErrorMessageHook(ErrorMessageHook hook);
+
 private:
     static void print_error(lua_State* L, int iErrorCode, pcstr caScriptFileName = nullptr);
 

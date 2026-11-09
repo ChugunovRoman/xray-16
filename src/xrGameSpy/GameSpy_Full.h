@@ -11,10 +11,16 @@ class CGameSpy_ATLAS;
 class XRGAMESPY_API CGameSpy_Full
 {
     bool m_bServicesAlreadyChecked;
+    bool m_bOnlineServices; // false: no availability check, the SDK is marked as unavailable, Update does nothing
 
 public:
-    CGameSpy_Full();
+    // onlineServices == false: GameSpy is off - nothing goes to the network (no DNS lookup and no UDP query of
+    // the availability check, the SDK refuses the master server, GP and ATLAS), the objects are still created
+    // so the code that takes GetGameSpyGP() / GetGameSpyBrowser() and so on does not get null pointers
+    explicit CGameSpy_Full(bool onlineServices = true);
     ~CGameSpy_Full();
+
+    bool IsOnlineServicesEnabled() const { return m_bOnlineServices; }
 
     CGameSpy_Available* GetGameSpyAvailable() const { return m_pGSA; }
     CGameSpy_HTTP* GetGameSpyHTTP() const { return m_pGS_HTTP; }

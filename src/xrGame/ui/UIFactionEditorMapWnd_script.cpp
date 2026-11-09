@@ -13,6 +13,13 @@ pcstr get_spawn_smart_level_name(pcstr smart_name)
     return CSpawnSmartTerrainMapDataSource::GetSharedSmartLevelName(smart_name);
 }
 
+// 0 - the data of the smart terrains of all.spawn is not loaded yet (get_spawn_smart_level_name gives ""); another
+// value - loaded, it changes when the data is loaded again. A window shown before the data polls it and rebuilds
+u32 get_spawn_smart_map_revision()
+{
+    return CSpawnSmartTerrainMapDataSource::GetSharedRevision();
+}
+
 void CUIFactionEditorMapWnd::script_register(lua_State* luaState)
 {
     using namespace luabind;
@@ -33,6 +40,7 @@ void CUIFactionEditorMapWnd::script_register(lua_State* luaState)
 
         def("ui_map_click_has_modifier", &ui_map_click_has_modifier),
         def("get_spawn_smart_level_name", &get_spawn_smart_level_name),
+        def("get_spawn_smart_map_revision", &get_spawn_smart_map_revision),
 
         class_<CUIFactionEditorMapWnd, CUIWindow>("CUIFactionEditorMapWnd")
             .def(constructor<>())

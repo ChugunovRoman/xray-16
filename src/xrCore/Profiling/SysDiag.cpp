@@ -1238,6 +1238,23 @@ XRCORE_API void LoadMarkBegin(pcstr kind) noexcept
     Msg("%s", line);
 }
 
+XRCORE_API void LoadMarkCancel(pcstr reason) noexcept
+{
+    string256 line{};
+    {
+        std::lock_guard<std::mutex> lock(s_load_lock);
+        if (!s_load_active)
+            return;
+        xr_sprintf(line, "* [load] the timeline of '%s' closed: %s (last stage '%s', %u marks)", s_load_kind,
+            reason ? reason : "?", s_load_stage, s_load_marks);
+        s_load_active = false;
+        s_load_end_seen = false;
+        s_load_wait_frame.store(false, std::memory_order_relaxed);
+        s_load_stage[0] = 0;
+    }
+    Msg("%s", line);
+}
+
 XRCORE_API void LoadMark(pcstr stage) noexcept
 {
     if (!stage)

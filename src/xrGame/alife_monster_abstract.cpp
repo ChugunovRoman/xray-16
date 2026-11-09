@@ -21,6 +21,7 @@
 #include "alife_monster_brain.h"
 #include "alife_monster_movement_manager.h"
 #include "alife_monster_detail_path_manager.h"
+#include "monster_community.h"
 
 void CSE_ALifeMonsterAbstract::add_online(const bool& update_registries)
 {
@@ -35,9 +36,31 @@ void CSE_ALifeMonsterAbstract::add_offline(
     brain().on_switch_offline();
 }
 
+// The team of a species ([monster_communities] of game_relations.ltx; 255 - none, the community gives it), the rule of
+// CSE_ALifeCreatureAbstract::on_spawn. on_spawn sets it once and the save keeps s_team, so a team number changed in the
+// data did not reach the creatures of an old save: the monster teams moved from 39..59 (the teams of human communities,
+// fantom..dead) to 107..127 on 2026-11-08. A monster of the old team is fixed when it comes online (CEntity::net_Spawn
+// takes the team of its species), but Lua (sim_board setup_squad_and_group: change_team(se_obj.team, ...)) can give
+// it the saved number back, and a stalker of a species with a team (species = zombie: zombied, monolith) never gets it
+static void sync_team_with_species(CSE_ALifeMonsterAbstract* monster)
+{
+    if (smart_cast<CSE_ALifeGroupAbstract*>(monster))
+        return;
+
+    pcstr species = READ_IF_EXISTS(pSettings, r_string, monster->s_name, "species", nullptr);
+    if (!species)
+        return;
+
+    const MONSTER_COMMUNITY_DATA* data = MONSTER_COMMUNITY::GetById(shared_str(species), true);
+    if (data && data->team != 255)
+        monster->s_team = data->team;
+}
+
 void CSE_ALifeMonsterAbstract::on_register()
 {
     inherited1::on_register();
+    // on a load (CALifeStorageManager::load) and on a spawn (before on_spawn, which sets the same team)
+    sync_team_with_species(this);
     brain().on_register();
 }
 

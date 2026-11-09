@@ -53,7 +53,11 @@ struct RELATION_REGISTRY
     void ChangeCommunityGoodwill(
         CHARACTER_COMMUNITY_INDEX from_community, u16 to_character, CHARACTER_GOODWILL delta_goodwill);
 
+    // the relations kept by the person: its personal relations to the others and the goodwill of the communities to it
     void ClearRelations(u16 person_id);
+    // ClearRelations of each person plus the personal relations of everybody else to them: nothing about these ids
+    // stays for a new object that gets one. For the saved objects the engine skipped on load (CALifeStorageManager::load)
+    void ClearRelationsOfRemoved(const xr_vector<u16>& person_ids);
 
     void ResetRelationsToDefault();
     CHARACTER_GOODWILL GetCommunityRelation(CHARACTER_COMMUNITY_INDEX, CHARACTER_COMMUNITY_INDEX) const;

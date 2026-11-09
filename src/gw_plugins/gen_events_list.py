@@ -73,6 +73,7 @@ TYPE_CODES = {
     "BOOL": "b",
     "VEC3": "v",
     "LUA_REF": "t",
+    "ARRAY": "t",
 }
 
 # Blocks of events_list_manual.md, all required.

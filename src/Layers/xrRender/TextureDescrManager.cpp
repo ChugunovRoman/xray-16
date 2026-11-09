@@ -525,6 +525,51 @@ void thm_cache_write(pcstr path, pcstr root, const xr_vector<thm_item>& items)
 }
 } // namespace
 
+// plans/addons_api_support/14-addon-resource-scoping.md: the textures of the alias roots of the addons
+// ($game_textures$@<id>\, the models of the addon take them by these names)
+namespace
+{
+// The length of "@<id>\" of a name of an alias root; 0 - not such a name
+size_t texture_alias_prefix(pcstr name)
+{
+    if (name[0] != '@')
+        return 0;
+    pcstr separator = strchr(name, '\\');
+    return separator ? size_t(separator - name + 1) : 0;
+}
+
+// A texture a description of the alias root `owner_name` names (bump, detail): the one of the same alias root when it
+// has the file, the one of everybody otherwise. As VisualOwnerName (FBasicVisual.cpp): the public name stays when it
+// is the same file (the same layer serves both) - one texture of the file, not two. bump: uber_deffer takes the pair
+// "<bump>" + "<bump>#" - the alias root has to have both, else "@<id>\<bump>#" is a missing texture
+shared_str texture_alias_name(pcstr owner_name, size_t prefix_length, const shared_str& name, bool bump = false)
+{
+    if (!prefix_length || !name.size() || name[0] == '@' || name[0] == '$')
+        return name;
+    string_path aliased, own_fn, public_fn;
+    xr_strcpy(aliased, owner_name);
+    aliased[prefix_length] = '\0';
+    xr_strcat(aliased, name.c_str());
+    if (!FS.exist(own_fn, "$game_textures$", aliased, ".dds"))
+        return name;
+    if (bump)
+    {
+        string_path pair, pair_fn;
+        strconcat(sizeof pair, pair, aliased, "#");
+        if (!FS.exist(pair_fn, "$game_textures$", pair, ".dds"))
+            return name;
+    }
+    if (FS.exist(public_fn, "$game_textures$", name.c_str(), ".dds"))
+    {
+        const CLocatorAPI::file* own = FS.GetFileDesc(own_fn);
+        const CLocatorAPI::file* common = FS.GetFileDesc(public_fn);
+        if (own && common && own->layer == common->layer)
+            return name;
+    }
+    return shared_str(aliased);
+}
+} // namespace
+
 void CTextureDescrMngr::ApplyTHM(const xr_string& file_name, const texture_thm_record& tp, Lock& lock)
 {
     if (STextureParams::ttImage == tp.type || STextureParams::ttTerrain == tp.type ||
@@ -538,6 +583,7 @@ void CTextureDescrMngr::ApplyTHM(const xr_string& file_name, const texture_thm_r
         texture_desc& desc = m_texture_details[fn];
         cl_dt_scaler*& dts = m_detail_scalers[fn];
         lock.Leave();
+        const size_t alias = texture_alias_prefix(fn); // 14-addon-resource-scoping.md
 
         if (tp.detail_name.size() &&
             tp.flags.is_any(STextureParams::flDiffuseDetail | STextureParams::flBumpDetail))
@@ -546,7 +592,7 @@ void CTextureDescrMngr::ApplyTHM(const xr_string& file_name, const texture_thm_r
                 xr_delete(desc.m_assoc);
 
             desc.m_assoc = xr_new<texture_assoc>();
-            desc.m_assoc->detail_name = tp.detail_name;
+            desc.m_assoc->detail_name = texture_alias_name(fn, alias, tp.detail_name);
             if (dts)
                 dts->scale = tp.detail_scale;
             else
@@ -567,11 +613,11 @@ void CTextureDescrMngr::ApplyTHM(const xr_string& file_name, const texture_thm_r
 
         if (tp.bump_mode == STextureParams::tbmUse)
         {
-            desc.m_spec->m_bump_name = tp.bump_name;
+            desc.m_spec->m_bump_name = texture_alias_name(fn, alias, tp.bump_name, true);
         }
         else if (tp.bump_mode == STextureParams::tbmUseParallax)
         {
-            desc.m_spec->m_bump_name = tp.bump_name;
+            desc.m_spec->m_bump_name = texture_alias_name(fn, alias, tp.bump_name, true);
             desc.m_spec->m_use_steep_parallax = true;
         }
     }
@@ -698,10 +744,71 @@ void CTextureDescrMngr::Load()
 
     LoadTHM("$game_textures$", listTHM);
     LoadTHM("$level$", listTHM);
+    LinkAliasTHM();
 
 #ifndef MASTER_GOLD
     Msg("%s, texture descriptions loaded for %d ms", __FUNCTION__, timer.GetElapsed_ms());
 #endif
+}
+
+// 14-addon-resource-scoping.md: a texture of an alias root without a .thm of its own (@<id>\T.dds and no @<id>\T.thm)
+// takes the description of T - else its bump is lost (uber_deffer takes the bump from the description) - with the
+// bump and the detail of the alias root when it has them
+void CTextureDescrMngr::LinkAliasTHM()
+{
+    if (!FS.layers_count())
+        return;
+    FS_FileSet roots;
+    FS.file_list(roots, "$game_textures$", FS_ListFolders | FS_RootOnly);
+    u32 linked = 0;
+    for (const FS_File& root : roots)
+    {
+        if (root.name.empty() || root.name[0] != '@')
+            continue;
+        string_path folder;
+        FS.update_path(folder, "$game_textures$", root.name.c_str());
+        FS_FileSet files;
+        FS.file_list(files, folder, FS_ListFiles, "*.dds");
+        for (const FS_File& file : files)
+        {
+            string_path own, common;
+            strconcat(sizeof own, own, root.name.c_str(), file.name.c_str());
+            fix_texture_thm_name(own);
+            xr_strcpy(common, file.name.c_str());
+            fix_texture_thm_name(common);
+            if (m_texture_details.find(own) != m_texture_details.end())
+                continue; // a .thm of its own
+            const auto base = m_texture_details.find(common);
+            if (base == m_texture_details.end())
+                continue;
+            const texture_desc source = base->second; // the insert below may rehash the map
+            const size_t alias = root.name.size();
+            texture_desc& desc = m_texture_details[own];
+            if (source.m_assoc)
+            {
+                desc.m_assoc = xr_new<texture_assoc>(*source.m_assoc);
+                desc.m_assoc->detail_name = texture_alias_name(own, alias, source.m_assoc->detail_name);
+            }
+            if (source.m_spec)
+            {
+                desc.m_spec = xr_new<texture_spec>(*source.m_spec);
+                desc.m_spec->m_bump_name = texture_alias_name(own, alias, source.m_spec->m_bump_name, true);
+            }
+            const auto scaler = m_detail_scalers.find(common);
+            if (scaler != m_detail_scalers.end() && scaler->second)
+            {
+                const float scale = scaler->second->scale;
+                cl_dt_scaler*& dts = m_detail_scalers[own];
+                if (dts)
+                    dts->scale = scale;
+                else
+                    dts = xr_new<cl_dt_scaler>(scale);
+            }
+            ++linked;
+        }
+    }
+    if (linked)
+        Msg("* [thm] %u textures of the addon alias roots take the description of the same name", linked);
 }
 
 void CTextureDescrMngr::UnLoad()

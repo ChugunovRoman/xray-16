@@ -1988,6 +1988,14 @@ void CWeaponMagazined::load(IReader& input_packet)
     SetQueueSize(m_iQueueSize);
     load_data(m_iShotNum, input_packet);
     load_data(m_iCurFireMode, input_packet);
+    // fire_modes of an addon that is gone (GetCurrentFireMode: m_aFireModes[m_iCurFireMode])
+    if (m_bHasDifferentFireModes && !m_aFireModes.empty() && (m_iCurFireMode < 0 || m_iCurFireMode >= int(m_aFireModes.size())))
+    {
+        Msg("~ [save] %s [%s] (id %u): its fire mode %d is not in fire_modes of now (%u) - dropped, the last one is "
+            "set", cName().c_str(), m_section_id.c_str(), ID(), m_iCurFireMode, u32(m_aFireModes.size()));
+        m_iCurFireMode = int(m_aFireModes.size()) - 1;
+        SetQueueSize(GetCurrentFireMode());
+    }
 }
 
 void CWeaponMagazined::net_Export(NET_Packet& P)

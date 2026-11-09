@@ -1183,6 +1183,25 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
 
     m_flagsAddOnState = E->m_addon_flags.get();
     m_ammoType = E->ammo_type;
+    // A save made with an addon that is gone (a DLTX patch of the base weapon: >ammo_class, scopes): the indexes of
+    // the save may point past the lists of the config of now - the first ammo type, the scope goes (decision 6 of
+    // 00-roadmap.md 5a skips an unknown section, an item of the base stays)
+    if (m_ammoType >= m_ammoTypes.size() && !m_ammoTypes.empty())
+    {
+        Msg("~ [save] %s [%s] (id %u): its ammo type %u is not in ammo_class of now (%u types) - dropped, the first "
+            "one is loaded", cName().c_str(), m_section_id.c_str(), ID(), u32(m_ammoType), u32(m_ammoTypes.size()));
+        m_ammoType = 0;
+        E->ammo_type = 0;
+    }
+    if (E->cur_scope != 0 && E->cur_scope >= m_scopes.size())
+    {
+        Msg("~ [save] %s [%s] (id %u): its scope %u is not in scopes of now (%u) - dropped", cName().c_str(),
+            m_section_id.c_str(), ID(), u32(E->cur_scope), u32(m_scopes.size()));
+        E->cur_scope = 0;
+        m_cur_scope = 0; // load() has reset it already
+        m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonScope;
+        E->m_addon_flags.set(CSE_ALifeItemWeapon::eWeaponAddonScope, false);
+    }
     if (pSettings->line_exist(m_section_id.c_str(), "scope_zoom_factor"))
         m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(m_section_id.c_str(), "scope_zoom_factor");
 
@@ -1406,6 +1425,10 @@ void CWeapon::load(IReader& input_packet)
     iAmmoElapsed = input_packet.r_u16();
     m_cur_scope = input_packet.r_u8();
     m_flagsAddOnState = input_packet.r_u8();
+    // A scope of an addon that is gone (the save of the scopes of then): net_Spawn logs it and drops the scope flag,
+    // here only the index for UpdateAddonsVisibility (m_scopes[m_cur_scope])
+    if (m_cur_scope >= m_scopes.size())
+        m_cur_scope = 0;
     UpdateAddonsVisibility();
     m_ammoType = input_packet.r_u8();
     m_zoom_params.m_bIsZoomModeNow = input_packet.r_u8() == 1 ? true : false;

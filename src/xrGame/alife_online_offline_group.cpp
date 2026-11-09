@@ -181,6 +181,25 @@ u32 CSE_ALifeOnlineOfflineGroup::sanitize_members(const char* where)
     return problems;
 }
 
+u32 CSE_ALifeOnlineOfflineGroup::drop_unloaded_members()
+{
+    xr_vector<ALife::_OBJECT_ID> lost;
+    for (const auto& member : m_members)
+    {
+        if (!ai().alife().objects().object(member.first, true))
+            lost.push_back(member.first);
+    }
+
+    for (const ALife::_OBJECT_ID member_id : lost)
+    {
+        Msg("~ [save] squad [%s] id=%u: member %u is not loaded (skipped object), dropped from the squad",
+            name_replace(), u32(ID), u32(member_id));
+        m_members.erase(member_id);
+    }
+
+    return u32(lost.size());
+}
+
 void CSE_ALifeOnlineOfflineGroup::update()
 {
     // plans/lua_to_cpp/57-gw-eoc-next-steps.md, E0 (diagnostics only, -npc_cpp_profile): alife/squad_update/members -
@@ -587,7 +606,17 @@ void CSE_ALifeOnlineOfflineGroup::on_after_game_load()
     m_members.clear();
 
     for (i = temp; i != e; ++i)
+    {
+        // C8: register_member asserts on an id the registry has no object for (drop_unloaded_members has dropped the
+        // skipped ones; this keeps any other missing one from a null dereference in release)
+        if (!smart_cast<MEMBER*>(ai().alife().objects().object(*i, true)))
+        {
+            Msg("! [GW] squad [%s] id=%u: on_after_game_load - member %u is not in the ALife object registry, dropped",
+                name_replace(), u32(ID), u32(*i));
+            continue;
+        }
         register_member(*i);
+    }
 
     log_squad_trace_basic("on_after_game_load:end", this);
 }

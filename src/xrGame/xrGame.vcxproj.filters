@@ -4644,7 +4644,19 @@
     <ClInclude Include="addon_api_common.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
+    <ClInclude Include="addon_content.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_host.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_lua_entry.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_merge.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_slots.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_object_events.h">
@@ -7840,7 +7852,19 @@
     <ClCompile Include="addon_timers.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
+    <ClCompile Include="addon_content.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
     <ClCompile Include="addon_host.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_lua_entry.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_merge.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_slots.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_object_events.cpp">

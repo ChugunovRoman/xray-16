@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
+#include "addon_content.h"
 #include "addon_api_console.h"
 #include "level_pack.h"
 #include "GamePersistent.h"
@@ -112,13 +113,24 @@ IGame_Level* CGamePersistent::CreateLevel()
 extern void stat_memory_level_destroyed();
 extern void stat_memory_tick();
 
+namespace
+{
+// 13-extension-model.md 4.2: addons_report.json is written again once a loaded level is in play (OnFrame)
+bool g_addons_report_level_written = false;
+} // namespace
+
 void CGamePersistent::DestroyLevel(IGame_Level*& lvl)
 {
     xr_delete(lvl);
+    g_addons_report_level_written = false; // the next level (a load of a save in a game too) writes it again
     // 50c: what the unload gave back - the level geometry (~IGame_Level -> level_Unload), the objects, the instances;
     // mi_collect(true) returns the memory the allocator kept after the level to the OS
     stat_memory_level_destroyed();
 }
+
+// 10-location-packs.md: the load of a save of the command line that cannot load in this run (its pack or the provider
+// of its slot is not installed) does not start
+bool CGamePersistent::CanStartLevel(pcstr op_server) { return gw::CanStartLevel(op_server); }
 
 void CGamePersistent::PreStart(LPCSTR op)
 {
@@ -139,7 +151,9 @@ void CGamePersistent::OnAppStart()
     GMLib.Load(); // XXX: not ready to be loaded in parallel. Crashes on Linux, rare crashes on Windows and bugs with water became mercury on Windows.
     xray::StartupMark("app_gmlib"); // 50z1: game materials, their sounds and wallmarks
 
-    // init game globals
+    // init game globals: the files of the base - nothing of the addons is mounted yet; the content set reads them again
+    // with the layers of the addons (addon_slots.cpp ReloadContentConfigs: reload_game_globals), always after the wait
+    // below (the first frame of the menu, ApplyStartupContentForLevel at the end)
 #ifndef XR_PLATFORM_WINDOWS
     init_game_globals();
 #else
@@ -158,10 +172,13 @@ void CGamePersistent::OnAppStart()
 
     inherited::OnAppStart();
     // 10-location-packs.md: the game starts on the built-in location pack; the chosen one is applied at the first frame
-    // of the menu, the way a switch in the menu goes
+    // of the menu, the way a switch in the menu goes (before the level when the command line starts one: see the end)
     gw::RequestStartupLevelPack();
+    // A level load right away from the command line (-start, -load): the save it loads may bring other content (see
+    // the end) - the map waits for it, else the content set would wait here for the map of the old all.spawn to load
+    const bool level_waits = Engine.Event.Peek("KERNEL:start");
     // 50z3-startup-slow-disk-io.md: on a slow disk once the main menu has settled (or a map wants it), not here
-    if (!gw::LevelPackSwitchPending()) // the switch loads the map of its own pack
+    if (!gw::LevelPackSwitchPending() && !level_waits) // the switch loads the map of its own pack
         CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle("all");
     xray::StartupMark("app_smart_terrain_map_started"); // 50z1
 
@@ -175,10 +192,25 @@ void CGamePersistent::OnAppStart()
     TaskScheduler->Wait(initializeGlobals);
 #endif
     xray::StartupMark("app_game_globals_wait"); // 50z1: Ansel, the wait for init_game_globals (xml of dialogs, profiles)
+
+    // A level load right away from the command line (-start, its KERNEL:start waits for the first frame): no menu to
+    // mount the content at - it is mounted now, before the level. After the wait: init_game_globals reads the files
+    u64 start_server = 0;
+    if (level_waits && Engine.Event.Peek("KERNEL:start", &start_server))
+    {
+        gw::ApplyStartupContentForLevel(pcstr(start_server));
+        xray::StartupMark("app_addon_content"); // 50z1: the content of the addons for the level of the command line
+        if (!gw::LevelPackSwitchPending()) // the content of the level is there (after the content set: a no-op)
+            CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle("all");
+    }
 }
 
 void CGamePersistent::OnAppEnd()
 {
+    // 13-extension-model.md 4.2: the last state of the addons for the launcher - the patches of the configs read in
+    // this run (the levels too). Before anything goes: the host, the slots and the file system are all still here
+    gw::addons::WriteAddonsReport("exit");
+
     if (m_pMainMenu->IsActive())
         m_pMainMenu->Activate(false);
 
@@ -700,6 +732,14 @@ void CGamePersistent::OnFrame()
     if (!g_pGameLevel->bReady)
         return;
 
+    // 13-extension-model.md 4.2: the load of the level read configs (DLTX, XML patches of the addons) - their atoms
+    // reach addons_report.json once the precache is over. Once per level, the main thread
+    if (!g_addons_report_level_written && Device.dwPrecacheFrame == 0)
+    {
+        g_addons_report_level_written = true;
+        gw::addons::WriteAddonsReport("level");
+    }
+
     g_pGameLevel->WorldRendered(false);
 
     if (Device.Paused())
@@ -1030,6 +1070,27 @@ void CGamePersistent::OnAssetsChanged()
 {
     IGame_Persistent::OnAssetsChanged();
     StringTable().rescan();
+}
+
+// 10-location-packs.md: UILoadingScreen reads ui_mm_loading_screen.xml and the textures it names once, in its
+// constructor (OnAppStart: the files of the base). A location pack or a slot provider may bring its own - the screen is
+// built again after the ui textures of the new layers (UI().OnUIReset). m_pLoadingScreen is the only pointer to it (the
+// engine reaches it through g_pGamePersistent only: LoadTitle, LoadStage, LoadDraw, ShowLoadingScreen). Not while it
+// is on the screen: CLoadScreenRenderer draws it (a level load, the precache); the content set never runs then
+bool CGamePersistent::RecreateLoadingScreen()
+{
+    if (GEnv.isDedicatedServer || !GEnv.UI || !m_pLoadingScreen)
+        return false;
+    if (load_screen_renderer.IsActive() || Device.dwPrecacheFrame != 0)
+    {
+        Msg("! [level_pack] the loading screen is shown: it keeps the layout of the previous content");
+        return false;
+    }
+    // The new one first: the textures both use stay loaded
+    ILoadingScreen* previous = m_pLoadingScreen;
+    m_pLoadingScreen = xr_new<UILoadingScreen>();
+    xr_delete(previous);
+    return true;
 }
 
 void CGamePersistent::OnWeaponIconRenderPass()

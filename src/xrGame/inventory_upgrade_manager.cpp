@@ -355,6 +355,12 @@ bool Manager::upgrade_add(CInventoryItem& item, shared_str const& upgrade_id)
     return false;
 }
 
+bool Manager::upgrade_exists(shared_str const& item_section, shared_str const& upgrade_id)
+{
+    Root* root_p = get_root(item_section);
+    return root_p && get_upgrade(upgrade_id) && root_p->contain_upgrade(upgrade_id);
+}
+
 bool Manager::upgrade_install(CInventoryItem& item, shared_str const& upgrade_id, bool loading)
 {
     Upgrade* upgrade = upgrade_verify(item.m_section_id, upgrade_id);

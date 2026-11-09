@@ -23,6 +23,7 @@
 #include "xrEngine/XR_IOConsole.h"
 #include "addon_host.h"
 #include "addon_event_bus.h"
+#include "addon_lua_entry.h"
 #include "alife_time_skip.h"
 
 #ifdef DEBUG
@@ -71,6 +72,9 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     LPCSTR start_game_callback = pSettings->r_string(alife_section, "start_game_callback");
     luabind::functor<void> functor;
     R_ASSERT2(GEnv.ScriptEngine->functor(start_game_callback, functor), "failed to get start game callback");
+    // Addons: on_game_start of the modules of the addons is not called by axr_main.on_game_start inside
+    // start_game_callback (unprotected: a Lua error is fatal here) but after it, one protected call per module
+    gw::addons::PrepareAddonGameStart();
 #ifndef LUABIND_NO_EXCEPTIONS
     try
     {
@@ -127,6 +131,8 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
 #else
     functor(isNewGame);
 #endif
+    // A Lua error in one of them is logged, the addon is marked failed, the game starts
+    gw::addons::RunAddonGameStart();
 
     // Addons: a game session starts. After start_game_callback, so Lua subscribers (on_game_start) are in place;
     // before load(), so it comes before alife_on_load.

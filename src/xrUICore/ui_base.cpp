@@ -4,6 +4,9 @@
 #include "xrCore/XML/XMLDocument.hpp"
 #include "XML/UIXmlInitBase.h"
 #include "XML/UITextureMaster.h"
+#include "xrCore/ContentPatches.h"
+
+#include <algorithm>
 
 CUICursor& GetUICursor() { return GEnv.UI->GetUICursor(); }
 UICore& UI() { return *GEnv.UI; }
@@ -250,22 +253,51 @@ UICore::~UICore()
 
 void UICore::ReadTextureInfo()
 {
-    string_path buf;
-    FS_FileSet files;
+    // plans/addons_api_support/09-content-addons-vfs.md 5.2: the files of textures_descr\ in the order of the file
+    // system layers (the base first, then the layers as mounted; by the name inside a layer) - an id given twice takes
+    // the texture of the later file. mod_<name>_*.xml there is an XMLOverride patch of <name>.xml, not a file of its
+    // own.
+    struct TextureDescrFile
+    {
+        xr_string name; // relative to $game_config$
+        xr_string owner;
+        u16 layer{};
+    };
 
     const auto ParseFileSet = [&](pcstr path)
     {
+        string_path buf;
+        FS_FileSet files;
         FS.file_list(files, "$game_config$", FS_ListFiles,
             strconcat(sizeof(buf), buf, path, DELIMITER "textures_descr" DELIMITER "*.xml")
         );
+        xr_vector<TextureDescrFile> ordered;
+        ordered.reserve(files.size());
         for (const auto& file : files)
         {
-            string_path path, name;
-            _splitpath(file.name.c_str(), nullptr, path, name, nullptr);
+            string_path full;
+            FS.update_path(full, "$game_config$", file.name.c_str());
+            if (xray::content_patches::IsPatchFile(full))
+                continue;
+            TextureDescrFile& entry = ordered.emplace_back();
+            entry.name = file.name;
+            entry.layer = xray::content_patches::FileLayer(full);
+            xray::content_patches::FileOwner(full, entry.owner);
+        }
+        std::sort(ordered.begin(), ordered.end(), [](const TextureDescrFile& a, const TextureDescrFile& b)
+        {
+            if (a.layer != b.layer)
+                return a.layer < b.layer;
+            return a.name < b.name;
+        });
+        for (const TextureDescrFile& file : ordered)
+        {
+            string_path folder, name;
+            _splitpath(file.name.c_str(), nullptr, folder, name, nullptr);
             xr_strcat(name, ".xml");
-            path[xr_strlen(path) - 1] = '\0'; // cut the latest '\\'
+            folder[xr_strlen(folder) - 1] = '\0'; // cut the latest '\\'
 
-            CUITextureMaster::ParseShTexInfo(path, name);
+            CUITextureMaster::ParseShTexInfo(folder, name, file.owner.c_str());
         }
     };
 

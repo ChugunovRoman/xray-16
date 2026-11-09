@@ -53,10 +53,25 @@ rem --- source and build directories -------------------------------------------
 if "%GW_SRC%"=="" set "GW_SRC=%GW_PLUGINS_DIR%"
 if "%GW_SRC%"=="" set "GW_SRC=%~dp0..\..\..\GlobalWar\addons"
 for %%I in ("%GW_SRC%") do set "GW_SRC=%%~fI"
-if not exist "%GW_SRC%\CMakeLists.txt" (
-    echo [gw_plugins] no plugins at "%GW_SRC%", skipping
-    exit /b 0
+if exist "%GW_SRC%\CMakeLists.txt" goto :have_sources
+rem No CMakeLists.txt: fine where there are no plugins (the engine CI checks out xray-16 alone), an error where an
+rem author points at plugins - a silent "skipping" with code 0 would leave the old library in bin\ unnoticed.
+if exist "%GW_SRC%\addon.ltx" (
+    echo [gw_plugins] error: "%GW_SRC%" is an addon folder, not a folder of addons: pass the folder that holds it
+    echo [gw_plugins]   ^(that folder needs the CMakeLists.txt and the cmake folder of GlobalWar\addons^)
+    exit /b 1
 )
+for /d %%D in ("%GW_SRC%\*") do (
+    if exist "%%~fD\addon.ltx" if exist "%%~fD\CMakeLists.txt" goto :no_root_cmake
+    if exist "%%~fD\addon.ltx" findstr /l /i /c:"[plugin]" "%%~fD\addon.ltx" >nul 2>nul && goto :no_root_cmake
+)
+echo [gw_plugins] no plugins at "%GW_SRC%", skipping
+exit /b 0
+:no_root_cmake
+echo [gw_plugins] error: "%GW_SRC%" holds addons with plugins, but has no CMakeLists.txt: copy the CMakeLists.txt
+echo [gw_plugins]   and the cmake folder of GlobalWar\addons into it
+exit /b 1
+:have_sources
 
 for %%I in ("%~dp0..\xrAddonHost\include") do set "GW_SDK=%%~fI"
 
@@ -117,6 +132,7 @@ if not exist "%GW_BUILD%\CMakeCache.txt" (
     "%GW_CMAKE%" -S "%GW_SRC%" -B "%GW_BUILD%" -G Ninja ^
         -DCMAKE_BUILD_TYPE=%GW_BUILD_TYPE% ^
         -DCMAKE_MAKE_PROGRAM="%GW_NINJA%" ^
+        -DCMAKE_C_COMPILER=cl.exe ^
         -DCMAKE_CXX_COMPILER=cl.exe ^
         -DGWP_SDK_INCLUDE_DIR="%GW_SDK%"
     if errorlevel 1 (

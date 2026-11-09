@@ -732,7 +732,9 @@ public:
 
         m_worker = Threading::RunThread("smart_terrain_map", [this, requested_spawn_name]()
         {
-            auto* snapshot = xr_new<SSharedSmartTerrainSnapshot>();
+            // new, not xr_new: the snapshot is freed with delete / std::unique_ptr (the CRT heap of xrGame); xr_new
+            // takes the memory from xrCore (mimalloc), and delete of it corrupts the heap (c0000374 on a pack switch)
+            auto* snapshot = new SSharedSmartTerrainSnapshot();
             snapshot->spawn_name = requested_spawn_name.c_str();
 
             // 50z3-startup-slow-disk-io.md: a slow disk - the file is read ahead in the background I/O slot first
@@ -1021,6 +1023,13 @@ pcstr CSpawnSmartTerrainMapDataSource::GetSharedSmartLevelName(pcstr smart_name,
     cache.StartDeferred(true); // 50z3-startup-slow-disk-io.md: a script wants it (the faction select)
     cache.PublishPending();
     return cache.FindLevelNameBySmartName(spawn_name, smart_name);
+}
+
+u32 CSpawnSmartTerrainMapDataSource::GetSharedRevision(pcstr spawn_name)
+{
+    CSharedSmartTerrainMapCache& cache = CSharedSmartTerrainMapCache::Instance();
+    cache.PublishPending();
+    return cache.GetRevision(spawn_name);
 }
 
 void CSpawnSmartTerrainMapDataSource::SetSpawnName(pcstr spawn_name)

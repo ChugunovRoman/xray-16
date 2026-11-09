@@ -4,7 +4,10 @@
 #include "xr_level_controller.h"
 
 #include "xrCore/XML/XMLDocument.hpp"
+#include "xrCore/ContentPatches.h"
 #include "xrCore/Threading/ParallelForEach.hpp"
+
+#include <algorithm>
 
 constexpr pcstr OPENXRAY_XML = "openxray.xml";
 
@@ -59,14 +62,44 @@ void CStringTable::Init()
     xr_sprintf(files_mask, "text" DELIMITER "%s" DELIMITER "*.xml", pData->m_sLanguage.c_str());
     FS.file_list(fset, "$game_config$", FS_ListFiles, files_mask);
 
-    xr_parallel_for_each(fset, [this](const FS_File& it)
-    {
-        string_path fn, ext;
-        _splitpath(it.name.c_str(), nullptr, nullptr, fn, ext);
-        xr_strcat(fn, ext);
+    // plans/addons_api_support/09-content-addons-vfs.md 5.2: the files are parsed in parallel, then merged in the
+    // order of the file system layers (the base first, then the layers as mounted; by the name inside a layer):
+    // an id given twice takes the value of the later file, whatever thread parsed it first. The mask takes the
+    // subfolders of text\<lang>\ too: a file is opened by its path relative to text\<lang>\.
+    string_path language_folder;
+    xr_sprintf(language_folder, "text" DELIMITER "%s" DELIMITER, pData->m_sLanguage.c_str());
+    xr_fs_strlwr(language_folder); // as the index spells the names: the case stays where the file system keeps it
+    const size_t language_folder_length = xr_strlen(language_folder);
 
-        Load(fn);
+    xr_vector<StringTableFile> files;
+    files.reserve(fset.size());
+    for (const FS_File& it : fset)
+    {
+        string_path full;
+        FS.update_path(full, "$game_config$", it.name.c_str());
+        if (xray::content_patches::IsPatchFile(full))
+            continue; // mod_<name>_*.xml: XMLOverride applies it to <name>.xml, its new ids are added there
+        StringTableFile& file = files.emplace_back();
+        pcstr relative = it.name.c_str();
+        if (0 == strncmp(relative, language_folder, language_folder_length))
+            relative += language_folder_length;
+        file.name = relative;
+        file.layer = xray::content_patches::FileLayer(full);
+        xray::content_patches::FileOwner(full, file.owner);
+    }
+    std::sort(files.begin(), files.end(), [](const StringTableFile& a, const StringTableFile& b)
+    {
+        if (a.layer != b.layer)
+            return a.layer < b.layer;
+        return a.name < b.name;
     });
+
+    xr_parallel_for_each(files, [this](StringTableFile& file)
+    {
+        Load(file);
+    });
+
+    Merge(files);
 
     if (!translate("st_currency", pData->m_sCurrency) &&
         !translate("ui_st_money_descr", pData->m_sCurrency) && // OGSR
@@ -206,7 +239,7 @@ shared_str CStringTable::GetCurrency() const
 
 xr_token* CStringTable::GetLanguagesToken() const { return languagesToken.data(); }
 
-void CStringTable::Load(LPCSTR xml_file_full)
+void CStringTable::Load(StringTableFile& file) const
 {
     ZoneScoped;
 
@@ -214,38 +247,131 @@ void CStringTable::Load(LPCSTR xml_file_full)
     string_path _s;
     strconcat(sizeof(_s), _s, "text" DELIMITER, pData->m_sLanguage.c_str());
 
-    uiXml.Load(CONFIG_PATH, _s, xml_file_full);
+    uiXml.Load(CONFIG_PATH, _s, file.name.c_str());
 
     //общий список всех записей таблицы в файле
-    const size_t string_num = uiXml.GetNodesNum(uiXml.GetRoot(), "string");
+    CONST_XML_NODE root = uiXml.GetRoot();
+    const size_t string_num = uiXml.GetNodesNum(root, "string");
+    file.strings.reserve(string_num);
 
-    for (size_t i = 0; i < string_num; ++i)
+    // The <string> nodes one after another, as GetNodesNum counts them (an index into them walks the list from the
+    // start each time)
+    for (CONST_XML_NODE node = root ? root->FirstChild("string") : nullptr; node; node = node->NextSibling("string"))
     {
-        LPCSTR string_name = uiXml.ReadAttrib(uiXml.GetRoot(), "string", i, "id", NULL);
-        LPCSTR string_text = uiXml.Read(uiXml.GetRoot(), "string:text", i, NULL);
+        LPCSTR string_name = uiXml.ReadAttrib(node, "id", NULL);
+        LPCSTR string_text = uiXml.Read(node->FirstChild("text"), NULL);
 
         if (!string_text)
         {
 #ifndef MASTER_GOLD
-            Msg("! [%s] string table entry[%s] doesn't have a translation (no 'text' tag)", xml_file_full, string_name);
+            Msg("! [%s] string table entry[%s] doesn't have a translation (no 'text' tag)", file.name.c_str(),
+                string_name);
 #endif
             continue;
         }
+        if (!string_name)
+            continue;
 
-        [[maybe_unused]] bool duplicate{};
-        const STRING_VALUE str_val = ParseLine(string_text); // NOLINT
+        StringTableEntry& entry = file.strings.emplace_back();
+        entry.id = string_name;
+        entry.value = ParseLine(string_text);
+        // A string a patch of this file set (XMLOverride): its owner and layer are the ones of the patch
+        if (const pcstr patch_owner = uiXml.ReadAttrib(node, XMLDocument::kPatchOwnerAttr, nullptr))
         {
-            std::lock_guard guard{ pDataMutex };
-#ifndef MASTER_GOLD
-            duplicate = pData->m_StringTable.find(string_name) != pData->m_StringTable.end();
-#endif
-            pData->m_StringTable[string_name] = str_val;
+            entry.owner = patch_owner;
+            entry.layer = static_cast<u16>(atoi(uiXml.ReadAttrib(node, XMLDocument::kPatchLayerAttr, "0")));
+            entry.over = uiXml.ReadAttrib(node, XMLDocument::kPatchOverAttr, "");
         }
-#ifndef MASTER_GOLD
-        if (duplicate)
-            Msg("~ duplicate string table id [%s]", string_name);
-#endif
     }
+}
+
+void CStringTable::Merge(const xr_vector<StringTableFile>& files)
+{
+    ZoneScoped;
+    using namespace xray::content_patches;
+
+    // The strings in the order of application: by the layer of the string - a string a patch set (XMLOverride) has the
+    // layer and the owner of the patch, not of the file patched - then in the order of the files and of a file.
+    struct MergeItem
+    {
+        const StringTableFile* file;
+        const StringTableEntry* entry;
+        const xr_string* owner;
+        u16 layer;
+    };
+    xr_vector<MergeItem> items;
+    for (const StringTableFile& file : files)
+    {
+        for (const StringTableEntry& entry : file.strings)
+        {
+            const bool patched = !entry.owner.empty();
+            items.push_back({ &file, &entry, patched ? &entry.owner : &file.owner, patched ? entry.layer : file.layer });
+        }
+    }
+    std::stable_sort(items.begin(), items.end(),
+        [](const MergeItem& a, const MergeItem& b) { return a.layer < b.layer; });
+
+    // id -> the string that gave the value now: an id of another owner replaces it (the later one wins). An atom
+    // (13-extension-model.md 4.2) is recorded for an id two owners give only: the ids of one owner are no conflict.
+    xr_string atoms_file = "text" DELIMITER;
+    atoms_file += pData->m_sLanguage.c_str();
+    xr_map<STRING_ID, u32> origin;
+    xr_map<xr_string, u32> replaced_base; // owner -> base ids replaced
+    xr_vector<xr_string> previous_owners; // the owners that gave the id before this string
+    for (u32 index = 0; index < items.size(); ++index)
+    {
+        const MergeItem& item = items[index];
+        const STRING_ID& id = item.entry->id;
+        const xr_string& owner = *item.owner;
+        previous_owners.clear();
+        // The strings of the id a patch replaced in its file (they never get here) gave it before the patch
+        const xr_string& over = item.entry->over;
+        for (size_t start = 0; start < over.size();)
+        {
+            size_t end = over.find(',', start);
+            if (end == xr_string::npos)
+                end = over.size();
+            if (end > start)
+                previous_owners.emplace_back(over.substr(start, end - start));
+            start = end + 1;
+        }
+        auto [it, inserted] = origin.emplace(id, index);
+        if (!inserted)
+        {
+            const MergeItem& previous = items[it->second];
+#ifndef MASTER_GOLD
+            if (*previous.owner == owner && over.empty())
+            {
+                Msg("~ duplicate string table id [%s] (%s, %s)", id.c_str(), previous.file->name.c_str(),
+                    item.file->name.c_str());
+            }
+#endif
+            previous_owners.emplace_back(*previous.owner);
+            it->second = index;
+        }
+        const bool other = std::any_of(previous_owners.begin(), previous_owners.end(),
+            [&owner](const xr_string& previous) { return previous != owner; });
+        if (other)
+        {
+            if (std::find(previous_owners.begin(), previous_owners.end(), kBaseOwner) != previous_owners.end())
+                ++replaced_base[owner];
+            for (const xr_string& previous : previous_owners)
+            {
+                if (previous != owner)
+                    RecordAtom(AtomKind::String, atoms_file.c_str(), id.c_str(), previous.c_str());
+            }
+            xr_string previous_owner;
+            if (RecordAtom(AtomKind::String, atoms_file.c_str(), id.c_str(), owner.c_str(), &previous_owner))
+            {
+                Msg("~ [addon:%s] string id [%s] (%s%s) is given by addon '%s' too - '%s' wins (the order of the "
+                    "addons), console dltx_conflicts", owner.c_str(), id.c_str(), item.file->name.c_str(),
+                    item.entry->owner.empty() ? "" : ", patched", previous_owner.c_str(), owner.c_str());
+            }
+        }
+        pData->m_StringTable[id] = item.entry->value;
+    }
+    for (const auto& [owner, count] : replaced_base)
+        Msg("* [addon:%s] replaces %u strings of the base (%s)", owner.c_str(), count, atoms_file.c_str());
 }
 
 void CStringTable::ReloadLanguage()

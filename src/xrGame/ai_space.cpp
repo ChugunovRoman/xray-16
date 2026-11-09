@@ -24,6 +24,8 @@
 #include "addon_host.h"
 #include "addon_event_bus.h"
 #include "addon_goap.h"
+#include "addon_lua_entry.h"
+#include "addon_merge.h"
 #include "level_pack.h"
 
 CAI_Space* g_ai_space;
@@ -59,6 +61,8 @@ void CAI_Space::init()
 
         VERIFY(!GEnv.ScriptEngine);
         GEnv.ScriptEngine = xr_new<CScriptEngine>(false, true);
+        // A Lua error in a merged script of the addons: the addon that gave the line (15-merge-implementation.md 5.3)
+        CScriptEngine::SetErrorMessageHook(&gw::addons::DescribeMergedLuaError);
         RestartScriptEngine();
     }
 
@@ -71,11 +75,14 @@ CAI_Space::~CAI_Space()
 
     if (GEnv.ScriptEngine != nullptr)
     {
+        // The Lua parts of the addons end with the Lua state (the exit of the game): on_unload, Lua is still whole
+        gw::addons::RunLuaUnloadEntries();
         m_events_notifier.FireEvent(EVENT_SCRIPT_ENGINE_RESET);
     }
 
     unload();
     xr_delete(GEnv.ScriptEngine); // XXX: wrapped into try..catch(...) in vanilla source
+    CScriptEngine::SetErrorMessageHook(nullptr);
 
     // Plugins outlive Lua: unloaded after the script engine is gone.
     gw::addons::Shutdown();
@@ -112,6 +119,10 @@ void CAI_Space::RegisterScriptClasses()
         }
         result(const_cast<CObjectFactory*>(&object_factory()));
     }
+    // The classes of the addons ([lua] entry: <entry>.on_register_classes), after the base ones and before
+    // register_script makes the table clsid. One protected call per addon: a Lua error in one does not end the game
+    // (the CMake Release build defines LUABIND_NO_EXCEPTIONS - a registrator above has no such protection)
+    gw::addons::RunLuaClassEntries();
 #endif
 }
 
@@ -201,6 +212,9 @@ void CAI_Space::RestartScriptEngine()
 
     if (GEnv.ScriptEngine != nullptr)
     {
+        // The Lua parts of the addons end with the old Lua state: on_unload before anything of it goes (no call
+        // when no entry ran in it - the first restart has no Lua state yet)
+        gw::addons::RunLuaUnloadEntries();
         m_events_notifier.FireEvent(EVENT_SCRIPT_ENGINE_RESET);
     }
 
@@ -214,6 +228,9 @@ void CAI_Space::RestartScriptEngine()
         m_events_notifier.FireEvent(EVENT_SCRIPT_ENGINE_STARTED);
         gw::addons::goap::OnScriptRestart();
         gw::addons::events::Emit(gw::addons::events::EBuiltin::EngineOnScriptStart);
+        // The Lua parts of the addons ([lua] entry): after their plugins saw the new Lua state, before the scripts
+        // make any window (the main menu is built after this - CMainMenu::RestartScripts, ReloadUI)
+        gw::addons::RunLuaEntries();
     }
 }
 

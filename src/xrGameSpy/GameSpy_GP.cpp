@@ -46,6 +46,10 @@ CGameSpy_GP::CGameSpy_GP()
 CGameSpy_GP::~CGameSpy_GP() { ShutDown(); }
 bool CGameSpy_GP::Init()
 {
+    // online services are disabled (CGameSpy_Full without -gamespy): gpInitialize would refuse anyway, do not
+    // trigger the VERIFY; m_GPConnection stays NULL, Think and the gp* calls with it report errors and do nothing
+    if (__GSIACResult != GSIACAvailable)
+        return false;
     GPResult init_res = gpInitialize(&m_GPConnection, GAMESPY_PRODUCTID, GAMESPY_GP_NAMESPACE_ID, GP_PARTNERID_GAMESPY);
     VERIFY2(init_res == GP_NO_ERROR, "GameSpy GP: failed to initialize");
     if (init_res != GP_NO_ERROR)

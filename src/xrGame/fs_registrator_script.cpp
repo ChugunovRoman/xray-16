@@ -43,6 +43,31 @@ LPCSTR update_path_script(CLocatorAPI* fs, LPCSTR initial, LPCSTR src)
     return temp_2.c_str();
 }
 
+// plans/addons_api_support/13-extension-model.md: the file on the disk that serves a name now, the layers of the
+// addons included (update_path only joins the folder of the path with the name: it does not see the layers).
+// "" - no such file, or it lies in an archive (no file of its own on the disk)
+LPCSTR physical_path_script(CLocatorAPI* fs, LPCSTR initial, LPCSTR name)
+{
+    string_path full;
+    if (!fs->update_path(full, initial, name, false))
+        return "";
+    const CLocatorAPI::file* desc = fs->GetFileDesc(full);
+    if (!desc)
+        return "";
+    string_path physical;
+    if (!fs->physical_name(*desc, physical))
+    {
+        if (desc->vfs != std::numeric_limits<size_t>::max()) // VFS_STANDARD_FILE of LocatorAPI.cpp: a loose file
+            return ""; // inside an archive
+        xr_strcpy(physical, full); // a loose file of the base: its name is the file
+    }
+#ifndef XR_PLATFORM_WINDOWS // XXX: replace with runtime case-sensitivity flag check
+    convert_path_separators(physical);
+#endif
+    shared_str result = physical;
+    return result.c_str();
+}
+
 //Alundaio: Set flag to rescan all files in path
 void rescan_path_script(CLocatorAPI* fs, pcstr initial)
 {
@@ -290,6 +315,7 @@ void fs_registrator::script_register(lua_State* luaState)
             ]
             .def("path_exist", &CLocatorAPI::path_exist)
             .def("update_path", &update_path_script)
+            .def("physical_path", &physical_path_script)
             .def("get_path", static_cast<FS_Path*(CLocatorAPI::*)(pcstr)>(&CLocatorAPI::get_path))
             .def("get_path", static_cast<bool(CLocatorAPI::*)(pcstr, FS_Path**)>(&CLocatorAPI::get_path))
             .def("append_path", &CLocatorAPI::append_path)

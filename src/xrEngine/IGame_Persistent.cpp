@@ -6,6 +6,7 @@
 #include "ILoadingScreen.h"
 #include "PerformanceAlert.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/SysDiag.hpp"
 #include "StringTable/StringTable.h"
 #include "xrScriptEngine/script_engine.hpp"
 
@@ -760,14 +761,22 @@ void IGame_Persistent::OnEvent(EVENT E, u64 P1, u64 P2)
 
     if (E == eStart)
     {
+        pstr op_server = pstr(P1);
+        pstr op_client = pstr(P2);
+        if (!CanStartLevel(op_server))
+        {
+            // CCC_Start opened the load timeline (LoadMarkBegin("start")): no load follows
+            xray::perf::LoadMarkCancel("the start is refused");
+            xr_free(op_server);
+            xr_free(op_client);
+            return;
+        }
 #ifndef _EDITOR
         // 50k-slow-disk-early-prefetch.md: the early warm-up of the menu hands over to the prefetch of this load (its
         // PreStart empties the file set of the session, Prefetch skips what was read)
         prefetch_early_stop();
         menu_phase_end(); // 50z3-startup-slow-disk-io.md
 #endif
-        pstr op_server = pstr(P1);
-        pstr op_client = pstr(P2);
         Level_Current = u32(-1);
         R_ASSERT(nullptr == g_pGameLevel);
         Console->Execute("main_menu off");

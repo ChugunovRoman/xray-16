@@ -16,6 +16,7 @@
 
 #include "ai_space.h"
 #include "alife_simulator.h"
+#include "alife_object_registry.h"
 #include "inventory_upgrade_manager.h"
 #include "inventory_upgrade.h"
 #include "Level.h"
@@ -169,9 +170,28 @@ void CInventoryItem::net_Spawn_install_upgrades(CSE_Abstract* DC) // net_Spawn
 
     ai().alife().inventory_upgrade_manager().init_install(*this); // from pSettings
 
+    inventory::upgrade::Manager& manager = ai().alife().inventory_upgrade_manager();
     for (const auto& upgrade : saved_upgrades)
     {
-        ai().alife().inventory_upgrade_manager().upgrade_install(*this, upgrade.c_str(), true);
+        // An upgrade of an addon that is gone (or of the upgrade tree of then): upgrade_install would dereference
+        // null in Release (upgrade_verify checks with VERIFY2 only). It goes from the save of the item too
+        if (!manager.upgrade_exists(m_section_id, upgrade))
+        {
+            // The id and the name from the spawn packet: CInventoryItemObject::net_Spawn calls this before
+            // CGameObject::net_Spawn sets them (ID() is the one of before - 0xffff or of an object of the pool)
+            Msg("~ [save] %s [%s] (id %u): its upgrade '%s' is not in the upgrades of now - dropped",
+                DC->name_replace(), m_section_id.c_str(), u32(DC->ID), upgrade.c_str());
+            // The spawn packet is a copy: the object of ALife is the one the next save writes
+            const auto drop = [&upgrade](Upgrades_type& list) {
+                list.erase(std::remove(list.begin(), list.end(), upgrade), list.end());
+            };
+            drop(pSE_InventoryItem->m_upgrades);
+            if (auto* alife_item =
+                    smart_cast<CSE_ALifeInventoryItem*>(ai().alife().objects().object(DC->ID, true)))
+                drop(alife_item->m_upgrades);
+            continue;
+        }
+        manager.upgrade_install(*this, upgrade.c_str(), true);
     }
 }
 

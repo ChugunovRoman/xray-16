@@ -200,6 +200,32 @@ void CMapManager::RemoveMapLocationByObjectID(u16 id) // call on destroy object
     }
 }
 
+u32 CMapManager::RemoveMapLocationsOfObjects(const xr_vector<u16>& ids)
+{
+    if (ids.empty())
+        return 0;
+    xr_vector<u16> sorted(ids);
+    std::sort(sorted.begin(), sorted.end());
+    const auto skipped = [&sorted](const SLocationKey& key) {
+        return std::binary_search(sorted.begin(), sorted.end(), key.object_id);
+    };
+    // The same release as RemoveMapLocationByObjectID: the objectives of the tasks that took a location on their load
+    // (SGameTaskObjective::CreateMapLocation) drop it, the location is deleted in the next Update
+    u32 removed = 0;
+    for (const SLocationKey& key : Locations())
+    {
+        if (!skipped(key))
+            continue;
+        if (IsGameTypeSingle())
+            Level().GameTaskManager().MapLocationRelcase(key.location);
+        Destroy(key.location);
+        ++removed;
+    }
+    if (removed)
+        Locations().erase(std::remove_if(Locations().begin(), Locations().end(), skipped), Locations().end());
+    return removed;
+}
+
 void CMapManager::RemoveMapLocation(CMapLocation* ml)
 {
     FindLocation key(ml);

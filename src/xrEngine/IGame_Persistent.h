@@ -75,6 +75,11 @@ public:
                 _GetItem(cmd_line, i, m_params[i], '/');
                 xr_strlwr(m_params[i]);
             }
+#if !defined(XR_PLATFORM_WINDOWS)
+            // A case-sensitive file system: the save of a load is found by its name as written (CCC_Start keeps it)
+            if (n == 4 && !xr_strcmp(m_new_or_load, "load"))
+                _GetItem(cmd_line, 0, m_game_or_spawn, '/');
+#endif
         }
     };
     params m_game_params;
@@ -123,6 +128,9 @@ public:
     virtual IGame_Level* CreateLevel() { return nullptr; }
     virtual void         DestroyLevel(IGame_Level*& lvl) { VERIFY(lvl == nullptr); }
 
+    // KERNEL:start, before anything of the load (the menu, the prefetch, PreStart): false - the game refuses this start
+    // (the reason is in the log), no level is created and the main menu stays
+    virtual bool CanStartLevel(pcstr /*op_server*/) { return true; }
     virtual void PreStart(pcstr op);
     virtual void Start(pcstr op);
     virtual void Disconnect();

@@ -154,7 +154,41 @@ int entry_point(pcstr commandLine)
 }
 
 #if defined(XR_PLATFORM_WINDOWS)
-int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, char* commandLine, int cmdShow)
+namespace
+{
+// The command line in UTF-8 (plans/addons_api_support/00-roadmap.md 5a, decision 34), as every string of the engine
+// (Core.Params: the FS paths of -fsltx, -addon_dir, the saves of -start / -load). The one WinMain gets is in the ANSI
+// code page: a Cyrillic name comes in bytes of cp1251 the FS (UTF-8) does not find, a character the code page lacks -
+// as '?'. The program name is skipped as the CRT skips it for lpCmdLine: up to the first blank outside the quotes,
+// then the blanks. Empty for an empty command line or on a failure (the caller keeps lpCmdLine then).
+std::string CommandLineUtf8()
+{
+    const wchar_t* line = GetCommandLineW();
+    if (!line)
+        return {};
+    bool quoted = false;
+    while (*line > L' ' || (*line && quoted))
+    {
+        if (*line == L'"')
+            quoted = !quoted;
+        ++line;
+    }
+    while (*line && *line <= L' ')
+        ++line;
+    if (!*line)
+        return {};
+    const int size = WideCharToMultiByte(CP_UTF8, 0, line, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1)
+        return {};
+    std::string result(static_cast<size_t>(size), '\0');
+    if (!WideCharToMultiByte(CP_UTF8, 0, line, -1, &result[0], size, nullptr, nullptr))
+        return {};
+    result.resize(static_cast<size_t>(size - 1)); // without the terminating zero
+    return result;
+}
+
+// No objects to unwind here: __try does not allow them (C2712), the UTF-8 copy lives in WinMain
+int RunGuarded(pcstr commandLine)
 {
     int result = 0;
     // Stack overflow on the game thread is handled inside GameThreadEntry; this covers the fallback
@@ -172,6 +206,14 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, char* commandLine, int 
 
     return result;
 }
+} // namespace
+
+int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, char* ansiCommandLine, int cmdShow)
+{
+    // Lives until the game ends: the game thread and Core.Params (a copy) take it
+    const std::string commandLine = CommandLineUtf8();
+    return RunGuarded(commandLine.empty() ? ansiCommandLine : commandLine.c_str());
+}
 #else
 int main(int argc, char *argv[])
 {
@@ -183,16 +225,23 @@ int main(int argc, char *argv[])
         int i;
         if(argc > 1)
         {
+            // An argument with a blank goes in quotes, as on Windows (its command line keeps the quotes the shell
+            // got): "-addon_dir /home/me/My Addons" would else read as "/home/me/My" and a stray "Addons"
             size_t sum = 1;
             for(i = 1; i < argc; ++i)
-                sum += strlen(argv[i]) + 1;
+                sum += strlen(argv[i]) + 3;
 
             commandLine = (char*)xr_malloc(sum);
             ZeroMemory(commandLine, sum);
 
             for(i = 1; i < argc; ++i)
             {
+                const bool quoted = strpbrk(argv[i], " \t") != nullptr && !strchr(argv[i], '"');
+                if (quoted)
+                    strcat(commandLine, "\"");
                 strcat(commandLine, argv[i]);
+                if (quoted)
+                    strcat(commandLine, "\"");
                 strcat(commandLine, " ");
             }
 

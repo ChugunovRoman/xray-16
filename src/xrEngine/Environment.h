@@ -373,6 +373,10 @@ public:
     // editor-related
     void ED_Reload();
 
+    // The layers of the file system changed with no level (xrGame addon_slots.cpp ApplyContentSet): the names of the
+    // weather cycles and effects and the environment configs are read again from the new layers
+    void OnContentChanged();
+
     CInifile* m_ambients_config{};
     CInifile* m_sound_channels_config{};
     CInifile* m_effects_config{};

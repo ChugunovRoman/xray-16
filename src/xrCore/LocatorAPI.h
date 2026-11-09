@@ -187,13 +187,34 @@ private:
         xr_set<pcstr, pred_str> added; // names nothing had before the layer (files and folders)
         u32 files{};
         bool writable{}; // w_open of a name a layer serves writes into this one (writable_layer_name)
+
+        // plans/addons_api_support/14-addon-resource-scoping.md: the addon the layer belongs to (empty - none) and its
+        // alias roots - folders of the layer mounted once more under other names ($game_textures$@<owner>\, ...),
+        // private files included. Their entries are the entries of this layer: covered / added hold them too, the
+        // layer leaves with all of them at once (unmount_layer).
+        struct alias_root
+        {
+            string_path physical_root; // as physical_root above
+            string_path virtual_root; // as virtual_root above
+            size_t virtual_root_length{};
+            u32 files{};
+        };
+        xr_string owner;
+        xr_vector<alias_root> aliases;
+        xr_vector<xr_string> private_masks; // PatternMatch masks of names relative to physical_root, lower case, '\'
+        xr_vector<xr_string> private_names; // the files the masks kept out of virtual_root: relative, lower case
     };
     xr_vector<fs_layer*> m_layers; // a stack: m_layers[i] is the layer i + 1
 
-    bool layer_walk(u16 index, pcstr physical_dir, pcstr virtual_dir);
+    // files - the counter of the root walked; private_prefix - the length of the physical root the private masks are
+    // relative to (0 - no filter: an alias root, a layer without masks)
+    bool layer_walk(u16 index, pcstr physical_dir, pcstr virtual_dir, u32& files, size_t private_prefix);
+    bool layer_private(const fs_layer& L, pcstr relative_name) const;
+    u32 layer_covered_files(const fs_layer& L) const;
     void register_under_layers(const file& top, const file& desc);
     bool writable_layer_name(pcstr virtual_name, string_path& physical) const;
     u16 writable_layer_of(pcstr physical_name, string_path& virtual_name) const;
+    void layer_file_delete(files_it I); // file_delete of a file of a writable layer
 
     Lock* m_auth_lock;
     u64 m_auth_code{};
@@ -276,6 +297,12 @@ public:
     CStreamReader* rs_open(pcstr initial, pcstr N);
     IReader* r_open(pcstr initial, pcstr N);
     IReader* r_open(pcstr N) { return r_open(nullptr, N); }
+    // plans/addons_api_support/15-merge-implementation.md, 2.1 (the ancestor of a merge).
+    // The entry of the name in the layers <= max_layer (0 - the base: a loose file of gamedata\ or of an archive),
+    // walking the covered chain down from the entry that serves the name now. nullptr - no such entry.
+    // The name is resolved as by r_open; r_close closes the reader.
+    IReader* r_open_under(pcstr path, pcstr name, u16 max_layer = 0);
+    IReader* r_open_base(pcstr path, pcstr name) { return r_open_under(path, name, 0); }
     void r_close(IReader*& S);
     void r_close(CStreamReader*& fs);
 
@@ -317,6 +344,11 @@ public:
     bool get_path(pcstr path, FS_Path** outPath);
     FS_Path* append_path(pcstr path_alias, pcstr root, pcstr add, bool recursive);
     pcstr update_path(string_path& dest, pcstr initial, pcstr src, bool crashOnNotFound = true);
+    // A name under $game_data$ with "." / ".." components (an #include "..\x.ltx", a path of a script) as the index
+    // spells it: the components collapsed, lower case, '\'. A name not under $game_data$ or without them stays.
+    // False (logged once): ".." leaves $game_data$ - the name must not be opened (the files of the addons lie
+    // outside it, a private one only under its alias root: 14-addon-resource-scoping.md)
+    bool collapse_game_data_dots(string_path& name);
 
     size_t file_list(FS_FileSet& dest, pcstr path, u32 flags = FS_ListFiles, pcstr mask = nullptr);
 
@@ -328,14 +360,61 @@ public:
     // index on other threads (a reader keeps a pointer to an entry): only while no background loading runs.
     // writable: w_open / w_open_ex of a name some layer serves write into the top writable layer (its folder is
     // created by the mount); a name only the base has is written where it lies, as without layers.
-    u16 mount_layer(pcstr id, pcstr physical_root, pcstr virtual_root = nullptr, bool writable = false);
+    // plans/addons_api_support/14-addon-resource-scoping.md: what an addon layer adds to mount_layer
+    struct layer_options
+    {
+        // The addon the layer belongs to (layer_owner): a-z 0-9 _ (no '@', no separators). A folder of the layer
+        // named "@..." is skipped then: those names are the alias roots of the addons.
+        pcstr owner = nullptr;
+        // PatternMatch masks ('*' takes '\' too) of the names relative to physical_root ("textures\wpn\x.dds",
+        // "textures\my\*"): such files are not mounted at virtual_root, only under the alias roots (private)
+        const xr_vector<xr_string>* private_masks = nullptr;
+    };
+    u16 mount_layer(pcstr id, pcstr physical_root, pcstr virtual_root = nullptr, bool writable = false,
+        const layer_options* options = nullptr);
+    // One more root of the top layer `id` (14-addon-resource-scoping.md): the files of physical_root (a folder of the
+    // layer as a rule: <addon>\gamedata\textures\) take the names of virtual_root too ($game_textures$@<owner>\), the
+    // private ones included. No folder physical_root - nothing to mount, true. Not for a writable layer.
+    bool mount_layer_alias(pcstr id, pcstr physical_root, pcstr virtual_root);
     // Only the top layer (the last mounted): the covered entries come back, the names it added leave
     bool unmount_layer(pcstr id);
+    // An entry of a folder of a layer that layer_walk leaves out with its subtree, by the entry itself: a name of
+    // ignore_name (Thumbs.db, .svn, .vs, *.pdb ...), a hidden entry on Windows (_A_HIDDEN), a name starting with '.'
+    // on POSIX (the '*' of glob does not match it). `physical` - the path of the entry on the disk (UTF-8). A walk of
+    // the folder of a layer outside the index (the merge of the addons, addon_merge.cpp) takes the files it mounts
+    static bool layer_walk_skips(pcstr physical);
     u16 find_layer(pcstr id) const; // 0 - not mounted
     u16 layers_count() const { return u16(m_layers.size()); }
     pcstr layer_id(u16 index) const;
+    pcstr layer_owner(u16 index) const; // the addon of the layer (layer_options::owner), nullptr - none / the base
+    u16 find_layer_of_owner(pcstr owner) const; // the top layer of the addon, 0 - none
     // The file on the disk of an entry of a layer; false for the base entries (their name is the file)
     bool physical_name(const file& desc, string_path& dest) const;
+    struct layer_stats
+    {
+        u32 files{}; // at virtual_root (public)
+        u32 private_files{}; // kept out of virtual_root by the masks
+        u32 alias_files{}; // under the alias roots
+        u32 covered_files{}; // the files of other layers / the base the public ones cover (replace) now
+    };
+    bool get_layer_stats(u16 index, layer_stats& out) const;
+    // plans/addons_api_support/13-extension-model.md, 4.2: the files the public root of the layer covers now (not the
+    // folders, not the names of its alias roots) - the conflicts of the addons (console addon_conflicts)
+    struct layer_covered_entry
+    {
+        xr_string name; // the index name: the full path, lower case
+        u16 under{}; // the layer of the entry it covers (0 - the base)
+        u16 serving{}; // the layer that serves the name now: this one or a layer above it
+    };
+    void get_layer_covered(u16 index, xr_vector<layer_covered_entry>& out) const;
+    // plans/addons_api_support (decision 63): the files of the base (layer 0: the loose files of the folders of
+    // fsgame.ltx and the files of the archives - what r_open_base finds) under the folder of the path alias `path`,
+    // the ones the layers cover now included: the names relative to that folder as the index spells them (lower case
+    // on Windows, the separator of the index), not the folders. Sorted, each once; no such alias - empty
+    void get_base_files(pcstr path, xr_vector<xr_string>& out);
+    // The roots and the stats of the layer (console addon_files); list: the replaced and the private names, all:
+    // the public ones too
+    void print_layer(u16 index, bool list, bool all) const;
 
     void auth_generate(xr_vector<shared_str>& ignore, xr_vector<shared_str>& important);
     u64 auth_get();

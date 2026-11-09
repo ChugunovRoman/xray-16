@@ -169,6 +169,8 @@ constexpr pcstr kBuiltinNames[] = {
     "alife_on_time_skip_step",
     "alife_on_time_skip_end",
     "relation_on_before_action",
+    "addons_content_applied",
+    "alife_objects_skipped",
 };
 static_assert(std::size(kBuiltinNames) == static_cast<size_t>(EBuiltin::Count_) - 1, "kBuiltinNames != EBuiltin");
 
@@ -219,6 +221,8 @@ constexpr pcstr kBuiltinSchemas[] = {
     "NNNb", // alife_on_time_skip_step (step ms, index from 1, steps, tick)
     "NN",   // alife_on_time_skip_end (total ms, steps)
     "sooINbIN", // relation_on_before_action (action, from, to, relation, delta, danger, hit type, health lost)
+    "sbst", // addons_content_applied (when, ok, world, providers: an array of "<slot>=<provider>")
+    "stt",  // alife_objects_skipped (save name, ids: an array of INT, sections: an array of STRING)
 };
 static_assert(std::size(kBuiltinSchemas) == std::size(kBuiltinNames), "kBuiltinSchemas != kBuiltinNames");
 
@@ -1651,6 +1655,33 @@ int LuaIsEngineSource(lua_State* L)
     return 1;
 }
 
+// _gw_internal.event_bus_lua_subscriptions(): every live Lua subscription - an array of {id, event, handler} in the
+// order of the events and of their subscribers. For gw_addons_entry.script (console addon_reload): it finds the
+// subscriptions of the modules of an addon by the environment of their handlers and removes them by id.
+int LuaListLuaSubscriptions(lua_State* L)
+{
+    const Bus& bus = GetBus();
+    lua_createtable(L, static_cast<int>(bus.lua_subscriptions.size()), 0);
+    int index = 0;
+    for (const xr_unique_ptr<Event>& event : bus.events)
+    {
+        for (const Subscriber& subscriber : event->subscribers)
+        {
+            if (!subscriber.alive || subscriber.kind == ESubscriberKind::Native || subscriber.lua_ref == LUA_NOREF)
+                continue;
+            lua_createtable(L, 0, 3);
+            lua_pushnumber(L, static_cast<lua_Number>(subscriber.id));
+            lua_setfield(L, -2, "id");
+            lua_pushlstring(L, event->name.c_str(), event->name.size());
+            lua_setfield(L, -2, "event");
+            lua_rawgeti(L, LUA_REGISTRYINDEX, subscriber.lua_ref);
+            lua_setfield(L, -2, "handler");
+            lua_rawseti(L, -2, ++index);
+        }
+    }
+    return 1;
+}
+
 // Lua value -> GwpValue for every argument (strings point into the Lua stack, array items into `arena`).
 // 16 arguments without an allocation.
 struct ArgBuffer
@@ -2307,6 +2338,7 @@ void CEventBusScript::script_register(lua_State* L)
     const luaL_Reg internal_functions[] = {
         { "event_bus_set_lua_adapter", &LuaSetLuaAdapter },
         { "event_bus_is_engine_source", &LuaIsEngineSource },
+        { "event_bus_lua_subscriptions", &LuaListLuaSubscriptions }, // gw_addons_entry.script: addon_reload
     };
     lua_newtable(L); // event_bus
     lua_newtable(L); // name -> id cache, shared by all functions as upvalue 1

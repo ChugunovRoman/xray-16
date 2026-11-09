@@ -1,17 +1,22 @@
 #include "stdafx.h"
 
 #include <cerrno>
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 
 #include "Debug/xrSentry.hpp"
 #include "FileSystem.h"
 #include "xrCore/xr_token.h"
 #include "xrCore/Profiling/IniLoadStats.hpp"
+#include "ContentPatches.h"
+#include "xrCommon/xr_map.h"
+
+#include <algorithm>
+#include <atomic>
 
 #if XR_PERF_METRICS
-#include <algorithm>
 #include <mutex>
-#include "xrCommon/xr_map.h"
 #endif
 
 XRCORE_API CInifile const* pSettings = nullptr;
@@ -252,6 +257,8 @@ namespace
 // The name of the next Load on this thread, set right before the call: the file, an #include, null = from memory
 thread_local pcstr tl_ini_load_name = nullptr;
 thread_local u32 tl_ini_load_depth = 0; // Load is recursive (#include): only the outermost one is timed
+// The files the Load calls of this thread are inside of, the outermost first (null - from memory): a cycle of #include
+thread_local xr_vector<pcstr> tl_ini_load_chain;
 thread_local xray::ini_stats::Source tl_ini_source{};
 
 constexpr pcstr ini_layer_names[] = {"engine", "lua_file", "lua_string", "obj_custom_data", "se_custom_data",
@@ -371,6 +378,7 @@ struct IniLoadScope
     explicit IniLoadScope(pcstr name_) noexcept : name(name_)
     {
         const bool outermost = tl_ini_load_depth++ == 0;
+        tl_ini_load_chain.push_back(name);
 #if XR_PERF_METRICS
         if (!outermost)
             PERF_INC(ini_load_include);
@@ -385,6 +393,7 @@ struct IniLoadScope
     ~IniLoadScope() noexcept
     {
         --tl_ini_load_depth;
+        tl_ini_load_chain.pop_back();
 #if XR_PERF_METRICS
         if (timed)
             IniRecordLoad(name, xray::perf::Ticks() - t0);
@@ -394,6 +403,40 @@ struct IniLoadScope
     IniLoadScope(const IniLoadScope&) = delete;
     IniLoadScope& operator=(const IniLoadScope&) = delete;
 };
+
+// The same file, case and separators aside
+bool IniSameFile(pcstr a, pcstr b)
+{
+    for (; *a && *b; ++a, ++b)
+    {
+        const char ca = *a == '/' ? '\\' : static_cast<char>(tolower(static_cast<unsigned char>(*a)));
+        const char cb = *b == '/' ? '\\' : static_cast<char>(tolower(static_cast<unsigned char>(*b)));
+        if (ca != cb)
+            return false;
+    }
+    return *a == *b;
+}
+
+// Before #include of `name`: a file of the chain of this thread included again (a cycle, a patch among them) or a
+// chain too deep - Fatal with the chain, not a stack overflow with no word why
+constexpr size_t kIniMaxIncludeDepth = 64;
+void IniCheckIncludeChain(pcstr name)
+{
+    bool cycle = false;
+    for (pcstr open : tl_ini_load_chain)
+        cycle = cycle || (open && IniSameFile(open, name));
+    if (!cycle && tl_ini_load_chain.size() < kIniMaxIncludeDepth)
+        return;
+    xr_string chain;
+    for (pcstr open : tl_ini_load_chain)
+    {
+        chain += open ? open : ini_text_name;
+        chain += " -> ";
+    }
+    chain += name;
+    xrDebug::Fatal(DEBUG_INFO, cycle ? "#include cycle: %s" : "#include chain deeper than 64 files: %s",
+        chain.c_str());
+}
 } // namespace
 
 namespace xray::ini_stats
@@ -551,6 +594,513 @@ bool CInifile::Sect::line_exist(pcstr line, pcstr* value)
 }
 //------------------------------------------------------------------------------
 
+// DLTX (plans/addons_api_support/09-content-addons-vfs.md 5.1, 13-extension-model.md 3; the syntax of IXRay / Anomaly).
+// The patch files of a root file and of the files it includes (xray::content_patches::FindModFiles:
+// mod_<file>_*.ltx next to the file, as IXRay) are applied after the whole tree of the root is read, in the order of
+// the layers of the file system, then by the names:
+//   [new]:parents      a new section (the same name again - a warning, the later one replaces it)
+//   ![sec]             a change of an existing section (no section - a warning, skipped)
+//   ![sec]:p,!q        ... with its parents changed: p is appended (the last parent wins), q is removed
+//   !![sec]            the section is deleted
+//   key = value        a key set (in ![sec] and [new])
+//   !key               the own key of the section deleted (an inherited value stays: the parent gives it)
+//   >key = a,b         items appended to the list of the key (created when there is none)
+//   <key = a           items removed from the list of the key
+// The inheritance of the tree is evaluated after them: a change of a parent reaches the sections that inherit it, as in
+// IXRay. While no mod_*.ltx lies under $game_config$ (content_patches::AnyModFiles) a root is read as before, in one
+// pass. A patch syntax line in a file that is not a patch is a warning, its section is skipped.
+namespace
+{
+struct DltxListOp
+{
+    char mode; // '>' append, '<' remove
+    shared_str key;
+    shared_str value;
+    pcstr owner; // of the patch (DltxState::patches lives while the ops do)
+};
+
+enum class DltxHeaderKind : u8
+{
+    New,
+    Modify,
+    Delete,
+};
+
+struct DltxHeader
+{
+    DltxHeaderKind kind{DltxHeaderKind::New};
+    xr_string parents; // the text after "]:"
+};
+
+struct DltxState
+{
+    enum class Mode : u8
+    {
+        Base, // the tree of the root: the parents are recorded, not resolved
+        Patch, // a patch file
+    };
+    Mode mode{Mode::Base};
+    pcstr root_short{}; // the root file for the log and the atoms ("system.ltx")
+    xr_map<shared_str, xr_vector<shared_str>> parents; // section -> its parents (lower case): the last one wins
+    xr_map<shared_str, xr_vector<DltxListOp>> list_ops; // applied after the inheritance, in order
+    xr_map<shared_str, xr_string> declared_by; // the sections a patch declared ([new]) -> the owner
+    xr_set<shared_str> deleted; // deleted by a patch (!![sec]) and not declared again
+    xr_set<shared_str> parents_patched; // the parents changed by a patch: a missing parent is a warning there
+    // The patch files of the root and of its #include (Base collects them), applied in the order of the layers
+    xr_vector<xray::content_patches::ModFile> patches;
+    const xray::content_patches::ModFile* patch{};
+    pcstr patch_short{};
+    bool record_atoms{}; // the first application of this patch to this root (since the layers changed)
+    // Base: the parents a section of the tree names before they are declared (child, parent). Without DLTX such a
+    // section is "Can't find section": the root works in the DLTX mode only - a warning after the tree is read.
+    xr_vector<std::pair<shared_str, shared_str>> forward_parents;
+
+    void AddPatchesOf(pcstr file_name)
+    {
+        xr_vector<xray::content_patches::ModFile> found;
+        if (!xray::content_patches::FindModFiles(file_name, found))
+            return;
+        for (auto& file : found)
+        {
+            // One name may come from several layers (two addons with a patch of one name): each one is a patch
+            const bool known = std::any_of(patches.begin(), patches.end(),
+                [&file](const xray::content_patches::ModFile& other)
+                { return other.name == file.name && other.layer == file.layer; });
+            if (!known)
+                patches.emplace_back(std::move(file));
+        }
+    }
+};
+
+// Set by the constructor of a root with patches for the Load of its tree and of the patch files (#include included)
+thread_local DltxState* tl_dltx = nullptr;
+
+// tl_dltx for the time of one load: restored however the load ends (a nested CInifile gets its own or none)
+struct DltxScope
+{
+    DltxState* const outer;
+    explicit DltxScope(DltxState* state) : outer(tl_dltx) { tl_dltx = state; }
+    ~DltxScope() { tl_dltx = outer; }
+    DltxScope(const DltxScope&) = delete;
+    DltxScope& operator=(const DltxScope&) = delete;
+};
+
+// A warning of a patch, once (a root is opened many times by the scripts)
+void DltxWarn(pcstr text)
+{
+    if (xray::content_patches::FirstTime(text))
+        Msg("%s", text);
+}
+
+void DltxWarnFormat(pcstr format, ...)
+{
+    string4096 text;
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(text, sizeof text, format, args); // truncates a long text, never fails on it
+    va_end(args);
+    DltxWarn(text);
+}
+
+void DltxInsertItem(CInifile::Items& items, const CInifile::Item& I)
+{
+    auto it = std::lower_bound(items.begin(), items.end(), I.first.c_str(), item_pred);
+    if (it != items.end() && it->first.equal(I.first))
+        it->second = I.second;
+    else
+        items.insert(it, I);
+}
+
+bool DltxIsHeader(pcstr str)
+{
+    return str[0] == '[' || (str[0] == '!' && (str[1] == '[' || (str[1] == '!' && str[2] == '[')));
+}
+
+// "![name]:parents" -> the kind and the parents text; str is cut, the result is the lower case name. Null - a bad
+// header.
+pstr DltxParseHeader(pstr str, DltxHeader& header)
+{
+    pstr p = str;
+    if (p[0] == '!' && p[1] == '!')
+    {
+        header.kind = DltxHeaderKind::Delete;
+        p += 3;
+    }
+    else if (p[0] == '!')
+    {
+        header.kind = DltxHeaderKind::Modify;
+        p += 2;
+    }
+    else
+    {
+        header.kind = DltxHeaderKind::New;
+        p += 1;
+    }
+    pstr close = strchr(p, ']');
+    if (!close)
+        return nullptr;
+    header.parents.clear();
+    if (close[1] == ':')
+        header.parents = close + 2;
+    *close = 0;
+    return xr_strlwr(p);
+}
+
+void DltxReadParents(pcstr list, xr_vector<shared_str>& out)
+{
+    const int count = _GetItemCount(list);
+    for (int i = 0; i < count; ++i)
+    {
+        string512 name;
+        _GetItem(list, i, name);
+        if (name[0])
+            out.emplace_back(xr_strlwr(name));
+    }
+}
+
+CInifile::Root::iterator DltxFind(CInifile::Root& data, pcstr name)
+{
+    auto it = std::lower_bound(data.begin(), data.end(), name, sect_pred);
+    if (it != data.end() && 0 == xr_strcmp((*it)->Name.c_str(), name))
+        return it;
+    return data.end();
+}
+
+// plans/addons_api_support/00-roadmap.md 5a, 38: one mod_*.ltx under $game_config$ reads every root in the DLTX mode
+// (as IXRay). -dltx_force reads them so without any mod_*.ltx: a check that the base (and the files of the addons
+// without patches) load with the deferred inheritance. Logged once.
+bool DltxForced()
+{
+    if (!Core.Params || !strstr(Core.Params, "-dltx_force"))
+        return false;
+    static std::atomic_bool logged{ false };
+    if (!logged.exchange(true))
+    {
+        Msg("* [dltx] -dltx_force: every read only root ltx is read in the DLTX mode (the inheritance after the whole "
+            "tree and its patches), mod_*.ltx or not");
+    }
+    return true;
+}
+
+// The parents the tree named before their sections: they exist now (declared later in the tree, or by a patch).
+// A missing one is left to DltxEvaluator (Fatal, as without DLTX).
+void DltxWarnForwardParents(DltxState& S, CInifile::Root& data)
+{
+    for (const auto& [child, parent] : S.forward_parents)
+    {
+        if (DltxFind(data, parent.c_str()) == data.end())
+            continue;
+        DltxWarnFormat("~ [dltx] %s: [%s] inherits [%s] that is declared after it (later in the tree or by a patch) - "
+            "this loads in the DLTX mode only: without mod_*.ltx under configs\\ it is \"Can't find section\"",
+            S.root_short, child.c_str(), parent.c_str());
+    }
+}
+
+void DltxRecord(DltxState& S, pcstr atom, pcstr owner)
+{
+    using namespace xray::content_patches;
+    if (!S.record_atoms)
+        return; // recorded by an earlier open of this root (the scripts open roots many times)
+    xr_string previous;
+    if (RecordAtom(AtomKind::Ltx, S.root_short, atom, owner, &previous))
+    {
+        Msg("~ [addon:%s] %s: %s is changed by addon '%s' too - '%s' wins (the order of the addons), console "
+            "dltx_conflicts", owner, S.root_short, atom, previous.c_str(), owner);
+    }
+}
+
+// The list changes of the key by `owner` itself: a set or a delete after them in the patches of the same owner
+// overrides them. The list changes of the other owners stay and apply to the new value (an addon appending to a list
+// is not undone by another one setting the key).
+void DltxEraseListOps(DltxState& S, const shared_str& section, pcstr key, pcstr owner)
+{
+    auto ops = S.list_ops.find(section);
+    if (ops == S.list_ops.end())
+        return;
+    auto& list = ops->second;
+    list.erase(std::remove_if(list.begin(), list.end(), [key, owner](const DltxListOp& op)
+    {
+        return 0 == xr_strcmp(op.key.c_str(), key) && 0 == xr_strcmp(op.owner, owner);
+    }), list.end());
+}
+
+// The keys of a section of a patch (in the order of the file) applied to the own keys of target
+void DltxApplyKeys(DltxState& S, CInifile::Sect& target, const CInifile::Items& keys)
+{
+    const pcstr owner = S.patch->owner.c_str();
+    for (const CInifile::Item& I : keys)
+    {
+        pcstr raw = I.first.c_str();
+        if (!raw || !raw[0])
+            continue;
+        const char op = raw[0];
+        string4096 key;
+        xr_strcpy(key, (op == '!' || op == '>' || op == '<') ? raw + 1 : raw);
+        _Trim(key);
+        if (!key[0])
+            continue;
+        if (op == '>' || op == '<')
+        {
+            S.list_ops[target.Name].push_back(DltxListOp{op, shared_str(key), I.second, owner});
+            continue; // an item of a list is not an atom: two addons extend one list without a conflict
+        }
+        DltxEraseListOps(S, target.Name, key, owner);
+        if (op == '!')
+        {
+            auto it = std::lower_bound(target.Data.begin(), target.Data.end(), key, item_pred);
+            if (it != target.Data.end() && 0 == xr_strcmp(it->first.c_str(), key))
+                target.Data.erase(it);
+        }
+        else
+        {
+            CInifile::Item item;
+            item.first = key;
+            item.second = I.second;
+            DltxInsertItem(target.Data, item);
+        }
+        const xr_string atom = xr_string("[") + target.Name.c_str() + "] " + key;
+        DltxRecord(S, atom.c_str(), owner);
+    }
+}
+
+// A section of a patch file read by Load (current): applied to the tree, then deleted
+void DltxApplySection(DltxState& S, CInifile::Root& data, const DltxHeader& header, CInifile::Sect* current)
+{
+    const pcstr owner = S.patch->owner.c_str();
+    const shared_str name = current->Name;
+    auto it = DltxFind(data, name.c_str());
+    const xr_string atom = xr_string("[") + name.c_str() + "]";
+
+    switch (header.kind)
+    {
+    case DltxHeaderKind::New:
+    {
+        CInifile::Sect* target;
+        if (it != data.end())
+        {
+            const auto declared = S.declared_by.find(name);
+            DltxWarnFormat("~ [addon:%s] %s: [%s] of %s exists already (%s%s) and is declared again without '!' - "
+                "replaced by the new one", owner, S.patch_short, name.c_str(), S.root_short,
+                declared != S.declared_by.end() ? "addon " : "base",
+                declared != S.declared_by.end() ? declared->second.c_str() : "");
+            target = *it;
+            target->Data.clear();
+            S.parents.erase(name);
+            S.list_ops.erase(name);
+        }
+        else
+        {
+            target = xr_new<CInifile::Sect>();
+            target->Name = name;
+            data.insert(std::lower_bound(data.begin(), data.end(), name.c_str(), sect_pred), target);
+        }
+        S.declared_by[name] = owner;
+        S.deleted.erase(name);
+        S.parents_patched.insert(name);
+        if (!header.parents.empty())
+        {
+            xr_vector<shared_str> parents;
+            DltxReadParents(header.parents.c_str(), parents);
+            auto& own = S.parents[name];
+            for (const shared_str& parent : parents)
+            {
+                if (parent.c_str()[0] != '!')
+                    own.push_back(parent);
+            }
+        }
+        DltxRecord(S, atom.c_str(), owner);
+        DltxApplyKeys(S, *target, current->Data);
+        break;
+    }
+    case DltxHeaderKind::Modify:
+    {
+        if (it == data.end())
+        {
+            DltxWarnFormat("~ [addon:%s] %s: ![%s] - %s has no such section, skipped", owner, S.patch_short,
+                name.c_str(), S.root_short);
+            break;
+        }
+        if (!header.parents.empty())
+        {
+            xr_vector<shared_str> changes;
+            DltxReadParents(header.parents.c_str(), changes);
+            auto& own = S.parents[name];
+            for (const shared_str& change : changes)
+            {
+                const bool remove = change.c_str()[0] == '!';
+                const shared_str parent = remove ? shared_str(change.c_str() + 1) : change;
+                own.erase(std::remove(own.begin(), own.end(), parent), own.end());
+                if (!remove)
+                    own.push_back(parent);
+            }
+            S.parents_patched.insert(name);
+            DltxRecord(S, (atom + ":parents").c_str(), owner);
+        }
+        DltxApplyKeys(S, **it, current->Data);
+        break;
+    }
+    case DltxHeaderKind::Delete:
+    {
+        if (it == data.end())
+        {
+            DltxWarnFormat("~ [addon:%s] %s: !![%s] - %s has no such section, nothing to delete", owner,
+                S.patch_short, name.c_str(), S.root_short);
+            break;
+        }
+        if (!current->Data.empty())
+        {
+            DltxWarnFormat("~ [addon:%s] %s: !![%s] - the keys after it are ignored", owner, S.patch_short,
+                name.c_str());
+        }
+        DltxRecord(S, atom.c_str(), owner);
+        xr_delete(*it);
+        data.erase(it);
+        S.parents.erase(name);
+        S.list_ops.erase(name);
+        S.declared_by.erase(name);
+        S.parents_patched.erase(name);
+        S.deleted.insert(name);
+        break;
+    }
+    }
+    xr_delete(current);
+}
+
+void DltxApplyListOp(CInifile::Items& items, const DltxListOp& op)
+{
+    auto it = std::lower_bound(items.begin(), items.end(), op.key.c_str(), item_pred);
+    const bool found = it != items.end() && it->first.equal(op.key);
+    if (!found && op.mode == '<')
+        return;
+
+    xr_vector<xr_string> list;
+    if (found && it->second.c_str())
+    {
+        const pcstr value = it->second.c_str();
+        const int count = _GetItemCount(value);
+        for (int i = 0; i < count; ++i)
+        {
+            xr_string item;
+            _GetItem(value, i, item);
+            if (!item.empty())
+                list.emplace_back(std::move(item));
+        }
+    }
+    const pcstr change = op.value.c_str() ? op.value.c_str() : "";
+    const int count = _GetItemCount(change);
+    for (int i = 0; i < count; ++i)
+    {
+        xr_string item;
+        _GetItem(change, i, item);
+        if (item.empty())
+            continue;
+        if (op.mode == '>')
+            list.emplace_back(std::move(item));
+        else
+            list.erase(std::remove(list.begin(), list.end(), item), list.end());
+    }
+
+    xr_string joined;
+    for (const xr_string& item : list)
+    {
+        if (!joined.empty())
+            joined += ',';
+        joined += item;
+    }
+    const shared_str value = joined.empty() ? shared_str() : shared_str(joined.c_str());
+    if (found)
+        it->second = value;
+    else
+    {
+        CInifile::Item result;
+        result.first = op.key;
+        result.second = value;
+        items.insert(it, result);
+    }
+}
+
+// The inheritance and the list changes of a root with patches, after all of them: the own keys of each section
+// become the final ones (the parents in order - the last one wins, then the own keys, then the list changes)
+struct DltxEvaluator
+{
+    DltxState& S;
+    CInifile::Root& data;
+    xr_map<CInifile::Sect*, CInifile::Items> result;
+    xr_map<CInifile::Sect*, u8> state; // 1 - being evaluated, 2 - done
+
+    const CInifile::Items& Final(CInifile::Sect* sect)
+    {
+        const auto parents = S.parents.find(sect->Name);
+        const auto ops = S.list_ops.find(sect->Name);
+        const bool has_parents = parents != S.parents.end() && !parents->second.empty();
+        const bool has_ops = ops != S.list_ops.end() && !ops->second.empty();
+        if (!has_parents && !has_ops)
+            return sect->Data;
+
+        const u8 st = state[sect];
+        if (st == 2)
+            return result[sect];
+        if (st == 1)
+        {
+            DltxWarnFormat("! [dltx] %s: [%s] inherits itself (through the patches) - the cycle is cut",
+                S.root_short, sect->Name.c_str());
+            return sect->Data;
+        }
+        state[sect] = 1;
+
+        CInifile::Items items;
+        if (has_parents)
+        {
+            for (const shared_str& name : parents->second)
+            {
+                auto parent = DltxFind(data, name.c_str());
+                if (parent == data.end())
+                {
+                    const bool deleted = S.deleted.count(name) != 0;
+                    if (deleted || S.parents_patched.count(sect->Name))
+                    {
+                        DltxWarnFormat("~ [dltx] %s: [%s] inherits [%s] that %s - the parent is skipped",
+                            S.root_short, sect->Name.c_str(), name.c_str(),
+                            deleted ? "a patch deleted" : "does not exist");
+                        continue;
+                    }
+                    // A parent the base names: as without patches
+                    if (strstr(Core.Params, "-skpsct"))
+                    {
+                        Msg("Can't find section '%s'.", name.c_str());
+                        continue;
+                    }
+                    xrDebug::Fatal(DEBUG_INFO, "Can't find section '%s'.", name.c_str());
+                    continue;
+                }
+                const CInifile::Items& inherited = Final(*parent);
+                for (const CInifile::Item& item : inherited)
+                    DltxInsertItem(items, item);
+            }
+        }
+        for (const CInifile::Item& item : sect->Data)
+            DltxInsertItem(items, item);
+        if (has_ops)
+        {
+            for (const DltxListOp& op : ops->second)
+                DltxApplyListOp(items, op);
+        }
+        state[sect] = 2;
+        CInifile::Items& stored = result[sect];
+        stored = std::move(items);
+        return stored;
+    }
+
+    void Run()
+    {
+        for (CInifile::Sect* sect : data)
+            Final(sect);
+        for (auto& [sect, items] : result)
+            sect->Data = std::move(items);
+    }
+};
+} // namespace
+
 CInifile::CInifile(IReader* F, pcstr path, allow_include_func_t allow_include_func)
 {
     m_file_name[0] = 0;
@@ -558,6 +1108,7 @@ CInifile::CInifile(IReader* F, pcstr path, allow_include_func_t allow_include_fu
     m_flags.set(eSaveAtEnd, false);
     m_flags.set(eReadOnly, true);
     m_flags.set(eOverrideNames, false);
+    DltxScope scope(nullptr); // a text is not a root of DLTX, nor a part of the tree being read on this thread
     tl_ini_load_name = nullptr; // from memory
     Load(F, path, allow_include_func);
 }
@@ -583,11 +1134,96 @@ CInifile::CInifile(pcstr fileName, bool readOnly, bool loadAtStart, bool saveAtE
             const xr_string path = EFS_Utils::ExtractFilePath(m_file_name);
             if (sect_count)
                 DATA.reserve(sect_count);
-            tl_ini_load_name = m_file_name;
-            Load(R, path.c_str(), allow_include_func);
+            // DLTX (see DltxState): the patch files of a root - a read-only file of $game_config$ opened by name - and
+            // of its #include. A writable file is saved back as it is read, a patch would get into it. While no
+            // mod_*.ltx lies under $game_config$ (one cached walk per set of layers) a root reads as before, unless
+            // -dltx_force (DltxForced).
+            if (readOnly && (DltxForced() || xray::content_patches::AnyModFiles("ltx")))
+            {
+                DltxState state;
+                state.root_short = xray::content_patches::ShortName(m_file_name);
+                state.AddPatchesOf(m_file_name);
+                {
+                    DltxScope scope(&state);
+                    tl_ini_load_name = m_file_name;
+                    Load(R, path.c_str(), allow_include_func);
+                    // The order of the layers, then the names (a patch of an #include among the patches of the root)
+                    std::stable_sort(state.patches.begin(), state.patches.end(),
+                        [](const xray::content_patches::ModFile& a, const xray::content_patches::ModFile& b)
+                        {
+                            if (a.layer != b.layer)
+                                return a.layer < b.layer;
+                            return a.name < b.name;
+                        });
+                    state.mode = DltxState::Mode::Patch;
+                    for (const xray::content_patches::ModFile& patch : state.patches)
+                    {
+                        if (allow_include_func && !allow_include_func(patch.name.c_str()))
+                            continue; // a patch is a file of the tree for the filter too (pSettingsAuth)
+                        state.patch = &patch;
+                        state.patch_short = xray::content_patches::ShortName(patch.name.c_str());
+                        IReader* P = xray::content_patches::OpenModFile(patch);
+                        if (!P)
+                        {
+                            Msg("! [addon:%s] %s: the patch file cannot be opened", patch.owner.c_str(),
+                                state.patch_short);
+                            continue;
+                        }
+                        // physical: the patches of one name of two addons are two patches
+                        const xr_string once =
+                            xr_string("dltx|") + state.root_short + "|" + patch.name + "|" + patch.physical;
+                        state.record_atoms = xray::content_patches::FirstTime(once.c_str());
+                        if (state.record_atoms)
+                        {
+                            Msg("* [addon:%s] %s patches %s", patch.owner.c_str(), state.patch_short,
+                                state.root_short);
+                        }
+                        const xr_string patch_path = EFS_Utils::ExtractFilePath(patch.name.c_str());
+                        tl_ini_load_name = patch.name.c_str();
+                        Load(P, patch_path.c_str(), allow_include_func);
+                        xray::content_patches::CloseModFile(patch, P);
+                        m_flags.set(eDltxPatched, true); // set_readonly(false) reads the file again without it
+                    }
+                }
+                DltxWarnForwardParents(state, DATA);
+                DltxEvaluator{state, DATA}.Run();
+            }
+            else
+            {
+                DltxScope scope(nullptr);
+                tl_ini_load_name = m_file_name;
+                Load(R, path.c_str(), allow_include_func);
+            }
             FS.r_close(R);
         }
     }
+}
+
+// A copy read with DLTX patches (eDltxPatched) becomes writable: the patches must not get into the file on save
+// (ini_file_ex(name, true) of the scripts: axr_options.ltx, *_custom.ltx, the options of the addons). The file is
+// read again as a writable one - without the patches, its inheritance at once (as before DLTX). Nothing is lost:
+// a read-only copy has no own changes (w_* assert eReadOnly off).
+void CInifile::set_readonly(bool b)
+{
+    if (!b && m_flags.test(eReadOnly) && m_flags.test(eDltxPatched) && m_file_name[0])
+    {
+        Msg("~ [dltx] %s: opened for writing - read again without its mod_*.ltx patches (they are never saved "
+            "into the file)", xray::content_patches::ShortName(m_file_name));
+        for (auto* sect : DATA)
+            xr_delete(sect);
+        DATA.clear();
+        m_flags.set(eDltxPatched, false);
+        // The file gone since (deleted by a script) - its own content is empty, as a new writable file
+        if (IReader* R = FS.r_open(m_file_name))
+        {
+            const xr_string path = EFS_Utils::ExtractFilePath(m_file_name);
+            DltxScope scope(nullptr);
+            tl_ini_load_name = m_file_name;
+            Load(R, path.c_str());
+            FS.r_close(R);
+        }
+    }
+    m_flags.set(eReadOnly, b);
 }
 
 CInifile::~CInifile()
@@ -671,6 +1307,24 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
     string4096 str;
     string4096 str2;
 
+    // DLTX: the tree of a root with patches (Base: the parents are recorded, not resolved) or a patch file (Patch:
+    // its sections change the tree), see DltxState. Null - an ordinary file, read as always.
+    DltxState* const dltx = tl_dltx;
+    const bool dltx_patch = dltx && dltx->mode == DltxState::Mode::Patch;
+    DltxHeader dltx_header; // the header of Current in a patch file
+    const auto storeCurrent = [&]()
+    {
+        if (dltx_patch)
+        {
+            DltxApplySection(*dltx, DATA, dltx_header, Current); // deletes Current
+            return;
+        }
+        auto I = std::lower_bound(DATA.begin(), DATA.end(), Current->Name.c_str(), sect_pred);
+        if (I != DATA.end() && (*I)->Name == Current->Name)
+            xrDebug::Fatal(DEBUG_INFO, "Duplicate section '%s' found.", Current->Name.c_str());
+        DATA.insert(I, Current);
+    };
+
     bool bInsideSTR = false;
     bool bFirstLine = true;
 
@@ -734,11 +1388,16 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
             {
                 string_path fn, inc_path, folder;
                 strconcat(sizeof(fn), fn, path, inc_name);
+                // "..\x.ltx": the name as the index spells it, else the layers are missed (the file of an addon
+                // is not found, the base one is read over its replacement). Out of the game data - not read
+                const bool inside = FS.collapse_game_data_dots(fn);
                 _splitpath(fn, inc_path, folder, 0, 0);
                 xr_strcat(inc_path, sizeof(inc_path), folder);
 
                 const auto loadFile = [&](const string_path _fn, const string_path name)
                 {
+                    // A cycle of #include (a patch among them) would end in a stack overflow with no word why
+                    IniCheckIncludeChain(_fn);
                     if (!allow_include_func || allow_include_func(_fn))
                     {
                         IReader* I = FS.r_open(_fn);
@@ -754,10 +1413,17 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
                         tl_ini_load_name = _fn;
                         Load(I, inc_path, allow_include_func);
                         FS.r_close(I);
+                        if (dltx && !dltx_patch)
+                            dltx->AddPatchesOf(_fn); // DLTX: mod_<include>_*.ltx patches the tree too (IXRay)
                     }
                 };
 
-                if (strstr(inc_name, "*.ltx"))
+                if (!inside)
+                {
+                    Msg("! %s: #include \"%s\" leaves the game data, skipped", load_name ? load_name : ini_text_name,
+                        inc_name);
+                }
+                else if (strstr(inc_name, "*.ltx"))
                 {
                     FS_FileSet fset;
                     FS.file_list(fset, inc_path, FS_ListFiles, inc_name);
@@ -767,6 +1433,9 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
                         LPCSTR _name = it->name.c_str();
                         string_path _fn;
                         strconcat(sizeof(_fn), _fn, inc_path, _name);
+                        // DLTX: a patch file of a root of this folder is applied with that root, not included here
+                        if (xray::content_patches::IsPatchFile(_fn))
+                            continue;
                         loadFile(_fn, _name);
                     }
                 }
@@ -774,23 +1443,44 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
                     loadFile(fn, inc_name);
             }
         }
+        else if (!dltx_patch && str[0] == '!' && DltxIsHeader(str))
+        {
+            // ![sec] / !![sec] outside a patch file: before, a key of the previous section; now the section is skipped
+            if (Current)
+                storeCurrent();
+            Current = nullptr;
+            DltxWarnFormat("~ [dltx] %s: '%s' - a patch section in a file that is not a patch (mod_<file>_*.ltx), "
+                "skipped", load_name ? load_name : ini_text_name, str);
+        }
+        else if (dltx_patch && DltxIsHeader(str)) // DLTX: [new], ![sec], !![sec] of a patch file
+        {
+            if (Current)
+                storeCurrent();
+            Current = xr_new<Sect>();
+            pcstr name = DltxParseHeader(str, dltx_header);
+            R_ASSERT3(name, "Bad ini section found: ", str);
+            Current->Name = name;
+        }
         else if (str[0] && str[0] == '[') // new section ?
         {
             // insert previous filled section
             if (Current)
             {
                 // store previous section
-                auto I = std::lower_bound(DATA.begin(), DATA.end(), Current->Name.c_str(), sect_pred);
-                if (I != DATA.end() && (*I)->Name == Current->Name)
-                    xrDebug::Fatal(DEBUG_INFO, "Duplicate section '%s' found.", Current->Name.c_str());
-                DATA.insert(I, Current);
+                storeCurrent();
             }
             Current = xr_new<Sect>();
             Current->Name = nullptr;
             // start new section
             R_ASSERT3(strchr(str, ']'), "Bad ini section found: ", str);
             pcstr inherited_names = strstr(str, "]:");
-            if (nullptr != inherited_names)
+            xr_vector<shared_str> dltx_parents;
+            if (nullptr != inherited_names && dltx)
+            {
+                // DLTX: the tree of a root with patches - the inheritance is evaluated after the patches
+                DltxReadParents(inherited_names + 2, dltx_parents);
+            }
+            else if (nullptr != inherited_names)
             {
                 VERIFY2(m_flags.test(eReadOnly), "Allow for readonly mode only.");
                 inherited_names += 2;
@@ -818,6 +1508,16 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
             }
             *strchr(str, ']') = 0;
             Current->Name = xr_strlwr(str + 1);
+            if (!dltx_parents.empty())
+            {
+                // Without DLTX a parent is taken here, from the sections read before (r_section)
+                for (const shared_str& parent : dltx_parents)
+                {
+                    if (parent != Current->Name && DltxFind(DATA, parent.c_str()) == DATA.end())
+                        dltx->forward_parents.emplace_back(Current->Name, parent);
+                }
+                dltx->parents[Current->Name] = std::move(dltx_parents);
+            }
         }
         else // name = value
         {
@@ -892,7 +1592,13 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
                 // I.comment = m_flags.test(eReadOnly)?0:comment;
                 //#endif
 
-                if (m_flags.test(eReadOnly))
+                if (dltx_patch)
+                {
+                    // In the order of the file: "!key", ">key", "<key" and a key set twice are operations
+                    if (I.first.c_str())
+                        Current->Data.push_back(I);
+                }
+                else if (m_flags.test(eReadOnly))
                 {
                     if (I.first.c_str())
                         insert_item(Current, I);
@@ -910,12 +1616,7 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
         }
     }
     if (Current)
-    {
-        auto I = std::lower_bound(DATA.begin(), DATA.end(), Current->Name.c_str(), sect_pred);
-        if (I != DATA.end() && (*I)->Name == Current->Name)
-            xrDebug::Fatal(DEBUG_INFO, "Duplicate section '%s' found.", Current->Name.c_str());
-        DATA.insert(I, Current);
-    }
+        storeCurrent();
 }
 
 void CInifile::save_as(IWriter& writer, bool bcheck) const
@@ -978,6 +1679,13 @@ bool CInifile::save_as(pcstr new_fname)
 
     if (!m_file_name[0])
         return false;
+
+    // A read-only copy with DLTX patches written as is (set_readonly(false) would have dropped them)
+    if (m_flags.test(eDltxPatched))
+    {
+        Msg("~ [dltx] %s: saved with its mod_*.ltx patches applied - open the file for writing "
+            "(set_readonly(false)) to save it without them", xray::content_patches::ShortName(m_file_name));
+    }
 
     convert_path_separators(m_file_name);
     IWriter* F = FS.w_open_ex(m_file_name);

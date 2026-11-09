@@ -1193,6 +1193,78 @@ void CKinematicsAnimated::Load(const char* N, LPCSTR suffix, IReader* data, u32 
     LoadMotions(N, data);
 }
 
+// plans/addons_api_support/14-addon-resource-scoping.md: the motion refs of a model of an addon (VisualOwnerScope) go
+// to its own omf first (meshes\@<owner>\), then to the ones of the same names of everybody
+namespace
+{
+// One ref "folder\name" (no extension): "@<owner>\folder\name" when the owner has that omf; the ref as is otherwise
+void motion_ref_name(pstr ref, size_t size)
+{
+    string_path own;
+    if (VisualOwnerName("$game_meshes$", ref, ".omf", own) && xr_strlen(own) < size)
+        xr_strcpy(ref, size, own);
+}
+
+// A set "folder\*.omf": the names of the omf of $game_meshes$ and $level$ matching it, as before, in the order of the
+// names; each one the owner has under its alias root is taken from there, the ones only the owner has are added
+xr_vector<xr_string> motion_set_names(pcstr mask)
+{
+    FS_FileSet fset;
+    FS.file_list(fset, "$game_meshes$", FS_ListFiles, mask);
+    FS.file_list(fset, "$level$", FS_ListFiles, mask);
+
+    const shared_str& owner = VisualOwnerScope::current();
+    if (!owner.size() || mask[0] == '@' || mask[0] == '$')
+    {
+        // a model of the base: the names of the set as they are (no pairs, no sort - the set is in order already)
+        xr_vector<xr_string> result;
+        result.reserve(fset.size());
+        for (const FS_File& file : fset)
+            result.emplace_back(file.name);
+        return result;
+    }
+
+    xr_vector<std::pair<xr_string, xr_string>> names; // the name of everybody -> the one to load
+    names.reserve(fset.size());
+    for (const FS_File& file : fset)
+        names.emplace_back(file.name, file.name);
+
+    {
+        string_path prefix, own_mask;
+        strconcat(sizeof prefix, prefix, "@", owner.c_str(), "\\");
+        strconcat(sizeof own_mask, own_mask, prefix, mask);
+        FS_FileSet own;
+        FS.file_list(own, "$game_meshes$", FS_ListFiles, own_mask);
+        const size_t prefix_length = xr_strlen(prefix);
+        for (const FS_File& file : own)
+        {
+            if (file.name.size() <= prefix_length)
+                continue;
+            const xr_string common = file.name.substr(prefix_length);
+            string_path aliased;
+            if (!VisualOwnerName("$game_meshes$", common.c_str(), "", aliased))
+                continue; // the name of everybody is this file already (VisualOwnerName)
+            const auto it = std::find_if(names.begin(), names.end(),
+                [&common](const std::pair<xr_string, xr_string>& name) { return name.first == common; });
+            if (it != names.end())
+                it->second = file.name;
+            else
+                names.emplace_back(common, file.name);
+        }
+        std::sort(names.begin(), names.end(),
+            [](const std::pair<xr_string, xr_string>& a, const std::pair<xr_string, xr_string>& b) {
+                return a.first < b.first;
+            });
+    }
+
+    xr_vector<xr_string> result;
+    result.reserve(names.size());
+    for (auto& name : names)
+        result.emplace_back(std::move(name.second));
+    return result;
+}
+} // namespace
+
 void CKinematicsAnimated::LoadMotions(const char* N, IReader* data)
 {
     const auto loadOMF = [&](LPCSTR _path)
@@ -1259,21 +1331,14 @@ void CKinematicsAnimated::LoadMotions(const char* N, IReader* data)
             _GetItem(items_nm, k, nm);
             if (strstr(nm, "\\*.omf"))
             {
-                FS_FileSet fset;
-                FS.file_list(fset, "$game_meshes$", FS_ListFiles, nm);
-                FS.file_list(fset, "$level$", FS_ListFiles, nm);
-
-                if (fset.size())
-                {
-                    m_Motions.reserve(fset.size() - 1);
-
-                    for (FS_FileSet::iterator it = fset.begin(); it != fset.end(); it++)
-                        loadOMF((*it).name.c_str());
-                }
-
+                const xr_vector<xr_string> names = motion_set_names(nm); // 14-addon-resource-scoping.md
+                m_Motions.reserve(m_Motions.size() + names.size());
+                for (const xr_string& name : names)
+                    loadOMF(name.c_str());
                 continue;
             }
 
+            motion_ref_name(nm, sizeof(nm)); // 14-addon-resource-scoping.md
             xr_strcat(nm, ".omf");
             loadOMF(nm);
         }
@@ -1288,20 +1353,13 @@ void CKinematicsAnimated::LoadMotions(const char* N, IReader* data)
             data->r_stringZ(nm, sizeof(nm));
             if (strstr(nm, "\\*.omf"))
             {
-                FS_FileSet fset;
-                FS.file_list(fset, "$game_meshes$", FS_ListFiles, nm);
-                FS.file_list(fset, "$level$", FS_ListFiles, nm);
-
-                if (fset.size())
-                {
-                    m_Motions.reserve(fset.size() - 1);
-
-                    for (FS_FileSet::iterator it = fset.begin(); it != fset.end(); it++)
-                        loadOMF((*it).name.c_str());
-                }
-
+                const xr_vector<xr_string> names = motion_set_names(nm); // 14-addon-resource-scoping.md
+                m_Motions.reserve(m_Motions.size() + names.size());
+                for (const xr_string& name : names)
+                    loadOMF(name.c_str());
                 continue;
             }
+            motion_ref_name(nm, sizeof(nm)); // 14-addon-resource-scoping.md
             xr_strcat(nm, ".omf");
             loadOMF(nm);
         }
@@ -1400,11 +1458,8 @@ u32 CKinematicsAnimated::PreloadMotions(const char* N, IReader* data)
             ++docked;
     };
     const auto preload_set = [&](pcstr nm) {
-        FS_FileSet fset;
-        FS.file_list(fset, "$game_meshes$", FS_ListFiles, nm);
-        FS.file_list(fset, "$level$", FS_ListFiles, nm);
-        for (const auto& file : fset)
-            preload(file.name.c_str());
+        for (const xr_string& name : motion_set_names(nm)) // 14-addon-resource-scoping.md: as LoadMotions
+            preload(name.c_str());
     };
     if (data->find_chunk(OGF_S_MOTION_REFS))
     {
@@ -1420,6 +1475,7 @@ u32 CKinematicsAnimated::PreloadMotions(const char* N, IReader* data)
                 preload_set(nm);
                 continue;
             }
+            motion_ref_name(nm, sizeof(nm)); // 14-addon-resource-scoping.md: as LoadMotions
             xr_strcat(nm, ".omf");
             preload(nm);
         }
@@ -1436,6 +1492,7 @@ u32 CKinematicsAnimated::PreloadMotions(const char* N, IReader* data)
                 preload_set(nm);
                 continue;
             }
+            motion_ref_name(nm, sizeof(nm)); // 14-addon-resource-scoping.md: as LoadMotions
             xr_strcat(nm, ".omf");
             preload(nm);
         }

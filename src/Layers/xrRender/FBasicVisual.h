@@ -83,4 +83,32 @@ public:
     dxRender_Visual();
     virtual ~dxRender_Visual();
 };
+
+// plans/addons_api_support/14-addon-resource-scoping.md: the addon the model being loaded on this thread belongs to -
+// the owner of the file system layer its ogf lies in (FS.layer_owner). CModelPool::Instance_Load sets it around the
+// load from a file: the children loaded from the chunks of that ogf inherit it, a LOD (its own ogf) gets its own, a
+// deferred motions part carries it (PrefetchMotionsPart::owner). The names a model of an addon takes go to the alias
+// roots of the addon first: textures\@<owner>\ (dxRender_Visual::Load), meshes\@<owner>\ (motions).
+class VisualOwnerScope
+{
+public:
+    explicit VisualOwnerScope(const shared_str& owner);
+    ~VisualOwnerScope();
+    VisualOwnerScope(const VisualOwnerScope&) = delete;
+    VisualOwnerScope& operator=(const VisualOwnerScope&) = delete;
+
+    static const shared_str& current(); // empty - a model of the base (or no load)
+    // The owner of the layer the file `fn` (a full name of the index) lies in; empty - the base, no owner
+    static shared_str of_file(pcstr fn);
+
+private:
+    shared_str m_owner;
+    const shared_str* m_previous;
+};
+
+// "@<owner>\<name>" into dest when the current owner (VisualOwnerScope) has the file <path>@<owner>\<name><ext> in its
+// alias root and <path><name><ext> is not that same file (a private one, or replaced by the base / another layer);
+// false - the name stays: no owner, no such file, the public name is the file of the owner, or not a plain name
+// ('@...', '$...')
+bool VisualOwnerName(pcstr path, pcstr name, pcstr ext, string_path& dest);
 } // namespace xray::render::RENDER_NAMESPACE

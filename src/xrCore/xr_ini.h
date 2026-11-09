@@ -27,6 +27,9 @@ public:
         eSaveAtEnd = 1 << 0,
         eReadOnly = 1 << 1,
         eOverrideNames = 1 << 2,
+        // DLTX: the file was read with mod_<file>_*.ltx patches applied. Such a copy is never written back:
+        // set_readonly(false) reads the file again without them (a patch must not get into a file the game saves).
+        eDltxPatched = 1 << 3,
     };
     Flags8 m_flags;
     struct XRCORE_API Item
@@ -84,7 +87,8 @@ public:
     bool save_as(pcstr new_fname = nullptr);
     void save_as(IWriter& writer, bool bcheck = false) const;
     void save_at_end(bool b) noexcept { m_flags.set(eSaveAtEnd, b); }
-    void set_readonly(bool b) noexcept { m_flags.set(eReadOnly, b); }
+    // false on a copy read with DLTX patches (eDltxPatched) reads the file again without them, see xr_ini.cpp
+    void set_readonly(bool b);
     void set_override_names(bool b) noexcept { m_flags.set(eOverrideNames, b); }
     pcstr fname() const noexcept { return m_file_name; }
     Sect& r_section(pcstr S) const;

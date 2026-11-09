@@ -38,8 +38,10 @@ class XRUICORE_API CUITextureMaster
 {
 public:
     static void ParseShTexInfo(pcstr xml_file);
-    static void ParseShTexInfo(pcstr path, pcstr xml_file);
-    static void ParseShTexInfo(CUIXml& xml, bool override);
+    // owner - the addon of the layer of the file ("base"; plans/addons_api_support/09-content-addons-vfs.md 5.2):
+    // an id two addons give is a conflict in the log (the later file wins as before)
+    static void ParseShTexInfo(pcstr path, pcstr xml_file, pcstr owner = nullptr);
+    static void ParseShTexInfo(CUIXml& xml, bool override, pcstr owner = nullptr);
     static void FreeTexInfo();
     static void FreeCachedShaders();
 

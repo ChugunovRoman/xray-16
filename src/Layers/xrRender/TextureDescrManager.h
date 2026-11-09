@@ -45,6 +45,7 @@ class CTextureDescrMngr
     void LoadTHM(pcstr initial, bool listTHM);
     void LoadLTX(pcstr initial, bool listTHM);
     void ApplyTHM(const xr_string& file_name, const texture_thm_record& rec, Lock& lock);
+    void LinkAliasTHM(); // plans/addons_api_support/14-addon-resource-scoping.md
 
 public:
     ~CTextureDescrMngr();

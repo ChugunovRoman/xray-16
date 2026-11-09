@@ -17,21 +17,24 @@
  *  - Objects are referenced by handles (u16 ids), never by engine pointers.
  *  - Every engine call is main-thread-only unless documented otherwise.
  *
- * Compatibility (MAJOR.MINOR.PATCH of GWP_API_VERSION):
- *  - A MINOR version only adds: functions at the end of GwpEngineApi (a plugin checks one with GWP_API_HAS, which
+ * Compatibility (MAJOR.MINOR.PATCH of GWP_API_VERSION, semver; the "major" below is the first number from 1.0 on
+ * and the pair 0.MINOR before 1.0):
+ *  - An additive step only adds: functions at the end of GwpEngineApi (a plugin checks one with GWP_API_HAS, which
  *    compares GwpEngineApi::size), fields at the end of a structure that starts with `uint32_t size`, constants,
- *    flags, values of GwpValueType, error codes, events and event arguments at the end. Each group of new functions
- *    is one MINOR step.
+ *    flags, values of GwpValueType, error codes, events and event arguments at the end. From 1.0 on it is a MINOR
+ *    step; before 1.0 it is a PATCH step (0.1.0 -> 0.1.1), because there the engine compares the pair 0.MINOR as
+ *    the major (a MINOR step 0.1 -> 0.2 refuses every plugin built for 0.1). Each group of new functions is one step.
  *  - Everything else - removing, reordering or changing a function, a field or the meaning of a value - is a new
- *    MAJOR: the engine refuses plugins of another MAJOR.
+ *    major: MAJOR from 1.0 on, MINOR before 1.0 (0.1 -> 0.2). The engine refuses plugins of another major, also by
+ *    the version of the header a plugin was built with (GwpPluginDesc::api_built).
  *  - A structure that crosses the boundary starts with `uint32_t size` (the side that reads or writes it uses
  *    min(size, its own sizeof)) or is frozen as it is. An array of structures comes with its stride.
  *  - `reserved` fields are 0 and unknown flag bits are 0: the engine refuses anything else, so they can get a
  *    meaning later. The code is GWP_ERROR_INVALID_ARGUMENT, or GWP_ERROR_NOT_SUPPORTED where the function says so
  *    (a flag or a value that a later version may add); register functions return their invalid id.
- *  - Deprecation: a slot of GwpEngineApi is never NULL and never removed inside a MAJOR. A deprecated function keeps
+ *  - Deprecation: a slot of GwpEngineApi is never NULL and never removed inside a major. A deprecated function keeps
  *    its slot, carries GWP_DEPRECATED in this header and returns GWP_ERROR_NOT_SUPPORTED (or its documented
- *    default) once it can no longer work; it goes away only with the next MAJOR.
+ *    default) once it can no longer work; it goes away only with the next major.
  *  - Compare results with GWP_OK: a later version may return error codes this header does not know yet.
  */
 #ifndef GWP_API_H
@@ -76,7 +79,8 @@ extern "C" {
 /* Versioning                                                                 */
 /* ------------------------------------------------------------------------- */
 
-/* Plugin API version. Checked against [plugin] api_min of the addon manifest and GwpPluginDesc::api_min. */
+/* Plugin API version. Checked against [plugin] api_min of the addon manifest (by default its [addon] api_min) and
+   GwpPluginDesc::api_min. */
 #define GWP_API_VERSION_MAJOR 0u
 #define GWP_API_VERSION_MINOR 1u
 #define GWP_API_VERSION_PATCH 0u
@@ -933,7 +937,9 @@ typedef uint32_t GwpParticles;
 
 typedef struct GwpEngineApi
 {
-    /* Header. Must stay first and never change layout. */
+    /* Header. Must stay first and never change layout. The header and `log` right after it keep their place and their
+       signature in every version, also across majors: a plugin of another version may still write why it refuses to
+       load (gwp::Plugin::init does). */
     uint32_t abi_major; /* == GWP_API_VERSION_MAJOR of the engine */
     uint32_t size;      /* sizeof(GwpEngineApi) as compiled into the engine */
     uint32_t api_version;
@@ -2477,9 +2483,11 @@ typedef struct GwpEngineApi
        community_set_goodwill / community_change_goodwill: set_community_goodwill / change_community_goodwill, clamped to
        community_goodwill_limits (values and deltas -1000000 .. 1000000). community_relation: relation_registry.community_relation(from, to) - one direction:
        (a, b) and (b, a) are two values; 0 for an unknown name. community_set_relation: set_community_relation. The
-       table of community relations is NOT saved by the engine: it is built from the configs once, when the game
-       starts, and lives until the game quits - a load neither saves nor restores it, so a change stays across loads
-       of other saves until reset_relations_to_default. The scripts of the mod keep their own changes and set them
+       table of community relations is NOT saved by the engine: it is built from the configs (those of the addons
+       included) each time the content of the game is applied - the first frame of the main menu, a switch of a slot
+       provider or a location pack in the menu, before a level started from the command line; never during a game -
+       and lives until the next apply: a load neither saves nor restores it, so a change stays across loads of other
+       saves until reset_relations_to_default or the next apply. Keep communities by name, not by an index. The scripts of the mod keep their own changes and set them
        again when the actor spawns; a plugin keeps its changes itself (save_write) and sets them again at
        actor_on_spawn. Every real change is the event relation_on_changed. GWP_ERROR_INVALID_ARGUMENT: an unknown
        community, not a character; GWP_ERROR_INVALID_STATE: no game (the goodwill functions; the relation table works
@@ -2645,9 +2653,18 @@ typedef struct GwpEngineApi
         uint32_t stride, uint32_t fields);
 } GwpEngineApi;
 
-/* True when the engine table provides the member `field` (minor compatibility check). */
+/* True when the engine table provides the member `field` (the check of an additive step, see "Compatibility"). */
 #define GWP_API_HAS(api, field) \
     ((api) != NULL && (api)->size >= (uint32_t)(offsetof(GwpEngineApi, field) + sizeof(((GwpEngineApi*)0)->field)))
+
+/* True when the engine table `api` fits a plugin built with this header that needs at least `api_min`
+   (GWP_MAKE_VERSION): the same major - MAJOR from 1.0 on, the pair 0.MINOR before 1.0 (abi_major alone does not tell
+   0.1 from 0.2) - and an engine not older than api_min. The check of gwp_plugin_init before any other call (see
+   "Plugin entry point"); gwp::Plugin::init makes it. */
+#define GWP_API_FITS(api, api_min) \
+    ((api) != NULL && (api)->abi_major == GWP_API_VERSION_MAJOR && \
+     (GWP_API_VERSION_MAJOR != 0u || (((api)->api_version >> 12) & 0x3FFu) == GWP_API_VERSION_MINOR) && \
+     (api)->api_version >= (uint32_t)(api_min))
 
 /* ------------------------------------------------------------------------- */
 /* Plugin description (plugin -> engine)                                      */
@@ -2655,7 +2672,8 @@ typedef struct GwpEngineApi
 
 /*
  * Upper bound of sizeof(GwpPluginDesc) in ANY version of the API. The engine passes `out` as a buffer of this
- * size, so a plugin built against a newer minor version (longer struct) never writes past the engine's memory.
+ * size, so a plugin built against a newer version of the same major (longer struct) never writes past the engine's
+ * memory.
  * The engine reads only the fields it knows; the plugin reports its own sizeof in `size`.
  */
 #define GWP_PLUGIN_DESC_MAX_SIZE 4096u
@@ -2718,22 +2736,40 @@ GWP_STATIC_ASSERT(sizeof(GwpSubscribeOptions) == 32, "GwpSubscribeOptions: no ta
  * Return GWP_OK to stay loaded. Any other value makes the engine unload the library;
  * the addon then works without its plugin, or fails if the manifest says [plugin] required = true.
  * on_unload is NOT called when init fails or when the header in `out` is rejected (abi_major mismatch,
- * api_min above the engine version): release nothing before the header is filled, check api->abi_major first.
+ * api_min above the engine version): release nothing before the header is filled, check GWP_API_FITS(api, ...)
+ * first (abi_major alone does not tell 0.1 from 0.2). A refusal returns GWP_ERROR_VERSION_MISMATCH; api->log may
+ * still be called to say why (the header and `log` never move, see GwpEngineApi).
  */
 typedef GwpResult(GWP_CALL* GwpPluginInitFn)(const GwpEngineApi* api, const GwpPlugin* self, GwpPluginDesc* out);
 
 #define GWP_PLUGIN_ENTRY_NAME "gwp_plugin_init"
 
+/*
+ * Exported next to the entry point by GWP_PLUGIN_INIT: `const uint32_t gwp_plugin_api_built = GWP_API_VERSION`, the
+ * version of the header the plugin is built with. The engine reads it after loading the library and BEFORE it calls
+ * gwp_plugin_init: a plugin of another major (MAJOR, or 0.MINOR before 1.0) is refused without a call into a
+ * table of another layout. The loader of the OS still runs the code the library runs by itself when it is loaded -
+ * DllMain, the constructors of its static objects (also a refused library is loaded once): keep them free of anything
+ * that needs the engine (they get no table) or the game state, do the work in gwp_plugin_init. A library without it
+ * (gwp_plugin_init written without GWP_PLUGIN_INIT, a header older than this symbol) is run only when addon.ltx
+ * gives [plugin] api_min, or [addon] api_min that it defaults to (checked against the engine before the load);
+ * without both the engine refuses it: nothing tells which layouts it was built for.
+ */
+#define GWP_PLUGIN_API_BUILT_NAME "gwp_plugin_api_built"
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
 
-/* Convenience macro for plugin sources: defines the exported entry point. */
+/* Convenience macro for plugin sources: defines the exported entry point (and gwp_plugin_api_built, see above). Use
+   it once per library, as the head of the definition: GWP_PLUGIN_INIT { ... } */
 #ifdef __cplusplus
 #   define GWP_PLUGIN_INIT \
+        extern "C" GWP_EXPORT const uint32_t gwp_plugin_api_built = GWP_API_VERSION; \
         extern "C" GWP_EXPORT GwpResult GWP_CALL gwp_plugin_init(const GwpEngineApi* api, const GwpPlugin* self, GwpPluginDesc* out)
 #else
 #   define GWP_PLUGIN_INIT \
+        GWP_EXPORT const uint32_t gwp_plugin_api_built = GWP_API_VERSION; \
         GWP_EXPORT GwpResult GWP_CALL gwp_plugin_init(const GwpEngineApi* api, const GwpPlugin* self, GwpPluginDesc* out)
 #endif
 

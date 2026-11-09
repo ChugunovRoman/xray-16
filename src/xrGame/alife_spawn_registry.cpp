@@ -172,6 +172,9 @@ void CALifeSpawnRegistry::load(IReader& file_stream, xrGUID* save_guid)
 
 void CALifeSpawnRegistry::load_spawn_position_from_smart()
 {
+    if (g_start_position_smart.c_str() == nullptr)
+        return;
+
     SPAWN_GRAPH::vertex_iterator I = m_spawns.vertices().begin();
     SPAWN_GRAPH::vertex_iterator E = m_spawns.vertices().end();
     for (; I != E; ++I)
@@ -188,6 +191,15 @@ void CALifeSpawnRegistry::load_spawn_position_from_smart()
             g_start_position = smart->o_Position;
             g_start_position_smart = nullptr;
         }
+    }
+
+    // The smart is not in this all.spawn (a start list of another location pack, a removed smart): the actor starts
+    // where the spawn puts him. The name goes, else the next load (a save among them) would look for it again
+    if (g_start_position_smart.c_str() != nullptr)
+    {
+        Msg("! [ALife] the start smart terrain '%s' is not in [%s.spawn]: the actor starts at the position of the spawn",
+            g_start_position_smart.c_str(), m_spawn_name.c_str());
+        g_start_position_smart = nullptr;
     }
 }
 void CALifeSpawnRegistry::save_updates(IWriter& stream)

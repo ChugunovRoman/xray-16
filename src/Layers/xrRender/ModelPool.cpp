@@ -1081,6 +1081,7 @@ struct PrefetchMotionsPart
     xr_string name;
     xr_vector<u8> copy;
     bool copied{};
+    shared_str owner; // 14-addon-resource-scoping.md: VisualOwnerScope of the load that deferred it
 };
 
 // The load of the parallel prefetch running on this thread: the ogf readers of the Instance_Load(name) calls active on
@@ -1207,6 +1208,7 @@ struct ParallelPrefetch
             ZoneScopedN("model_prefetch_motions");
             ZoneText(part.name.c_str(), part.name.size());
             ModelColdLoadScope cold_scope; // modelpool/load/motions and its parts
+            const VisualOwnerScope owner_scope(part.owner); // 14-addon-resource-scoping.md
             const u64 t0 = prefetch_now_us();
             part.model->LoadMotions(part.name.c_str(), part.data); // tl_prefetch_load is -1 here: no wait_turn
             motions_us.fetch_add(prefetch_now_us() - t0, std::memory_order_relaxed);
@@ -1445,6 +1447,7 @@ dxRender_Visual* bgload_complete(CModelPool& pool, BgLoadReady& entry)
         PERF_SCOPE(mbg_finish);
         for (PrefetchMotionsPart& part : entry.motions)
         {
+            const VisualOwnerScope owner_scope(part.owner); // 14-addon-resource-scoping.md
             part.model->LoadMotions(part.name.c_str(), part.data); // ModelMotionsScope inside: pool lock -> motions lock
             bgload_close_part(part);
         }
@@ -1641,7 +1644,10 @@ void bgload_one(ModelBgLoad& B, const xr_string& name, BgLoadReady& out)
     if (!V)
         return; // the ogf could not be opened (no motions part deferred then)
     for (PrefetchMotionsPart& part : out.motions)
+    {
+        const VisualOwnerScope owner_scope(part.owner); // 14-addon-resource-scoping.md: the omf LoadMotions takes
         part.model->PreloadMotions(part.name.c_str(), part.data);
+    }
     PERF_INC(mbg_loaded);
 }
 
@@ -1740,6 +1746,7 @@ bool ModelMotionsDefer(CKinematicsAnimated* K, pcstr N, IReader* data)
     PrefetchMotionsPart part;
     part.model = K;
     part.name = N;
+    part.owner = VisualOwnerScope::current(); // 14-addon-resource-scoping.md: the part runs outside the load
     if (!top->readers.empty() && top->readers.back().data == data && !top->readers.back().deferred)
     {
         top->readers.back().deferred = true;
@@ -1879,6 +1886,9 @@ dxRender_Visual* CModelPool::Instance_Load(const char* N, LPCSTR suffix, BOOL al
     ogf_header H;
     data->r_chunk_safe(OGF_HEADER, &H, sizeof(H));
     dxRender_Visual* V = Instance_Create(H.type);
+    // 14-addon-resource-scoping.md (plans/addons_api_support): the addon whose layer the ogf lies in - its textures and
+    // motions first. Its own scope for each ogf (a LOD too); the children from the chunks of the ogf inherit it.
+    const VisualOwnerScope owner_scope(VisualOwnerScope::of_file(fn));
     bool deferred = false;
     if (top)
     {

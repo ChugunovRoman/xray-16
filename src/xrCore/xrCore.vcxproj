@@ -136,6 +136,43 @@ call .GitInfo.cmd</Command>
     <ClCompile Include="xrsharedmem.cpp" />
     <ClCompile Include="xrstring.cpp" />
     <ClCompile Include="xr_ini.cpp" />
+    <ClCompile Include="ContentPatches.cpp" />
+    <ClCompile Include="ContentMerge\AtomMerge.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\ContentMerge.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Delta.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\DeltaJson.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Diff.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\LtxSegments.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\LuaSegments.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Segments.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Sha256.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\TextNorm.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\XmlSegments.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Plan.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="xr_shared.cpp" />
     <ClCompile Include="xr_token.cpp" />
     <ClCompile Include="xr_trims.cpp" />
@@ -259,6 +296,14 @@ call .GitInfo.cmd</Command>
     <ClInclude Include="xrsharedmem.h" />
     <ClInclude Include="xrstring.h" />
     <ClInclude Include="xr_ini.h" />
+    <ClInclude Include="ContentPatches.h" />
+    <ClInclude Include="ContentMerge\AtomMerge.h" />
+    <ClInclude Include="ContentMerge\ContentMerge.h" />
+    <ClInclude Include="ContentMerge\DeltaJson.h" />
+    <ClInclude Include="ContentMerge\Diff.h" />
+    <ClInclude Include="ContentMerge\Segments.h" />
+    <ClInclude Include="ContentMerge\TextNorm.h" />
+    <ClInclude Include="ContentMerge\Plan.h" />
     <ClInclude Include="xr_resource.h" />
     <ClInclude Include="xr_shared.h" />
     <ClInclude Include="xr_shortcut.h" />

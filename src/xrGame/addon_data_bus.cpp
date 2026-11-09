@@ -358,6 +358,13 @@ void FillEngineApi(GwpEngineApi& api)
     api.data_get = &ApiDataGet;
 }
 
+void SetPersistentFromEngine(pcstr key, const GwpValue& value)
+{
+    if (!IsValidKey(key) || !CheckStorable(value, key, "the engine"))
+        return;
+    Set(key, value, true);
+}
+
 void ResetPersistent()
 {
     if (!g_store)

@@ -33,9 +33,18 @@ public:
     static bool saved_game_exist(LPCSTR saved_game_name);
     static bool valid_saved_game(IReader& stream);
     static bool valid_saved_game(LPCSTR saved_game_name);
+    // The spawn the save was made on (SPAWN_CHUNK_DATA, CALifeSpawnRegistry::save): its name and the GUID of its
+    // header. valid - both were read
+    struct SavedSpawn
+    {
+        xr_string name;
+        xrGUID guid{};
+        bool valid = false;
+    };
     // Only the persistent values of the data bus of a save (what data() gives), without the actor and the level:
     // for the check before a load (gw::CanLoadSaveLevelPack). false for a missing or invalid save (`out` empty).
-    static bool saved_game_data(pcstr saved_game_name, gw::addons::data::SaveValues& out);
+    // spawn: also the spawn of the save (gw::ReadSaveContent compares its GUID with all.spawn of the active pack)
+    static bool saved_game_data(pcstr saved_game_name, gw::addons::data::SaveValues& out, SavedSpawn* spawn = nullptr);
     inline const _TIME_ID& game_time() const;
     inline const _LEVEL_ID& level_id() const;
     inline LPCSTR level_name() const;

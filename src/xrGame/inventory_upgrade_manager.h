@@ -63,6 +63,9 @@ public:
     bool can_install_upgrade(CInventoryItem& item, shared_str const& upgrade_id);
     bool can_add_upgrade(CInventoryItem& item, shared_str const& upgrade_id);
     bool upgrade_install(CInventoryItem& item, shared_str const& upgrade_id, bool loading);
+    // The upgrade exists and belongs to the tree of the item (what upgrade_verify only VERIFYs): a save of an addon
+    // that is gone may name another one
+    bool upgrade_exists(shared_str const& item_section, shared_str const& upgrade_id);
     bool upgrade_add(CInventoryItem& item, shared_str const& upgrade_id);
     void init_install(CInventoryItem& item);
 

@@ -2,7 +2,9 @@
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrCore/Profiling/SysDiag.hpp"
 #include "xrCore/Platform/HwProfile.h"
+#include "xrCore/ContentPatches.h"
 #include "IGame_Level.h"
+#include "IGame_Persistent.h"
 
 #include "XR_IOConsole.h"
 #include "xr_ioc_cmd.h"
@@ -173,6 +175,21 @@ public:
 };
 
 //-----------------------------------------------------------------------
+// plans/addons_api_support/13-extension-model.md 4.2: the atoms the patches of the configs changed - DLTX (ltx keys
+// and sections), XMLOverride (xml nodes), the ids of the string table and of ui textures_descr given by several owners.
+// dltx_conflicts - the conflicts (two addons on one atom, the last applied wins); dltx_conflicts all - every atom.
+class CCC_DltxConflicts : public IConsole_Command
+{
+public:
+    CCC_DltxConflicts(pcstr N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+    void Execute(pcstr args) override { xray::content_patches::PrintAtoms(args && 0 == xr_strcmp(args, "all")); }
+    void Info(TInfo& I) override
+    {
+        xr_strcpy(I, "[all] - the conflicts of the config patches (all: every patched atom)");
+    }
+};
+
+//-----------------------------------------------------------------------
 class CCC_SaveCFG : public IConsole_Command
 {
 public:
@@ -293,6 +310,21 @@ class CCC_Start : public IConsole_Command
         }
     }
 
+#if !defined(XR_PLATFORM_WINDOWS)
+    // A case-sensitive file system: the save of a load ("<save>/single/alife/load", the first part of server(...)) is
+    // found by its name as written - only the options are put in lower case. Windows: all of it, as before
+    static void keep_save_name_case(pstr lowered, pcstr original)
+    {
+        IGame_Persistent::params params;
+        params.parse_cmd_line(lowered);
+        if (xr_strcmp(params.m_new_or_load, "load"))
+            return;
+        pcstr const slash = strchr(lowered, '/');
+        if (slash)
+            std::memcpy(lowered, original, size_t(slash - lowered));
+    }
+#endif
+
 public:
     CCC_Start(pcstr N) : IConsole_Command(N) { bLowerCaseArgs = false; };
     virtual void Execute(pcstr args)
@@ -310,7 +342,14 @@ public:
         parse(op_client, args, "client"); // 2. client
         parse(op_demo, args, "demo"); // 3. demo
 
+#if !defined(XR_PLATFORM_WINDOWS)
+        string4096 op_server_case;
+        xr_strcpy(op_server_case, op_server);
+#endif
         xr_strlwr(op_server);
+#if !defined(XR_PLATFORM_WINDOWS)
+        keep_save_name_case(op_server, op_server_case);
+#endif
         protect_Name_strlwr(op_client);
 
         if (!op_client[0] && strstr(op_server, "single"))
@@ -1052,6 +1091,8 @@ void CCC_Register()
 #ifdef DEBUG
     CMD1(CCC_DumpOpenFiles, "dump_open_files");
 #endif
+
+    CMD1(CCC_DltxConflicts, "dltx_conflicts");
 
     CMD1(CCC_ExclusiveMode, "input_exclusive_mode");
 #if defined(XR_PLATFORM_WINDOWS) // XXX: enable (remove ifdef) when text console will be available on Linux

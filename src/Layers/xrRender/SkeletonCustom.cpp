@@ -271,7 +271,11 @@ void CKinematics::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
                     // 36-spawn-model-load.md: the LOD is a whole load of its own (Tracy only: its parts count in
                     // modelpool/load/*)
                     ZoneNamedN(lod_zone, "model_load/lod", ModelPoolColdLoad());
-                    m_lod = (dxRender_Visual*)RImplementation.model_CreateChild(lod_name, nullptr);
+                    // 14-addon-resource-scoping.md (plans/addons_api_support): the LOD of a model of an addon - the
+                    // ogf of that addon first (meshes\@<id>\); it loads in the scope of its own file
+                    string_path own_lod;
+                    const bool own = VisualOwnerName("$game_meshes$", lod_name, strext(lod_name) ? "" : ".ogf", own_lod);
+                    m_lod = (dxRender_Visual*)RImplementation.model_CreateChild(own ? own_lod : lod_name, nullptr);
                 }
                 --s_skeleton_lod_load_depth;
 

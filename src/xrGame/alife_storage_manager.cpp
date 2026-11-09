@@ -17,6 +17,8 @@
 #include "alife_graph_registry.h"
 #include "alife_group_registry.h"
 #include "alife_registry_container.h"
+#include "relation_registry.h"
+#include "xrServer_Objects_ALife_Monsters.h"
 #include "xrServer.h"
 #include "Level.h"
 #include "saved_game_wrapper.h"
@@ -24,15 +26,58 @@
 #include "autosave_manager.h"
 #include "addon_host.h"
 #include "addon_api_alife_ext.h"
+#include "addon_binders.h"
 #include "addon_event_bus.h"
+#include "addon_lua_entry.h"
 #include "addon_timers.h"
+#include "level_pack.h"
+#include "map_manager.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include <algorithm>
 
 using namespace ALife;
 
 extern string_path g_last_saved_game;
 // 53-create-squad-engine.md section 9 (xrServer_Objects_ALife_Monsters.cpp)
 void gw_rebuild_specific_character_registry(CALifeObjectRegistry& objects, CSpecificCharacterRegistry& registry);
+
+namespace
+{
+// 09-content-addons-vfs.md section 8 (C8): the event alife_objects_skipped (save name, ids, sections) - the saved
+// objects load() could not create (a section of a switched off addon) and the objects inside them, by the index of
+// the arrays. An array holds at most kMaxArrayItems values: a longer list comes in several events, in order
+void EmitObjectsSkipped(pcstr save_name, const xr_vector<ALife::_OBJECT_ID>& ids, const xr_vector<shared_str>& sections)
+{
+    namespace events = gw::addons::events;
+    if (ids.empty() || !events::HasSubscribers(events::EBuiltin::AlifeObjectsSkipped))
+        return;
+    VERIFY(ids.size() == sections.size());
+    const size_t count = std::min(ids.size(), sections.size());
+    xr_vector<GwpValue> id_items;
+    xr_vector<GwpValue> section_items;
+    for (size_t first = 0; first < count; first += events::kMaxArrayItems)
+    {
+        const size_t last = std::min(count, first + events::kMaxArrayItems);
+        id_items.clear();
+        section_items.clear();
+        for (size_t i = first; i < last; ++i)
+        {
+            id_items.push_back(events::Int(ids[i]));
+            section_items.push_back(events::String(sections[i].c_str())); // the shared_str outlives the emit
+        }
+        GwpValue id_array = events::Nil();
+        id_array.type = GWP_T_ARRAY;
+        id_array.u.a.items = id_items.data();
+        id_array.u.a.count = static_cast<uint32_t>(id_items.size());
+        GwpValue section_array = events::Nil();
+        section_array.type = GWP_T_ARRAY;
+        section_array.u.a.items = section_items.data();
+        section_array.u.a.count = static_cast<uint32_t>(section_items.size());
+        const GwpValue args[] = { events::String(save_name), id_array, section_array };
+        events::Emit(events::EBuiltin::AlifeObjectsSkipped, args, static_cast<u32>(std::size(args)));
+    }
+}
+} // namespace
 
 CALifeStorageManager::~CALifeStorageManager() {}
 void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
@@ -82,6 +127,9 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
         const GwpValue args[] = { gw::addons::events::String(m_save_name) };
         gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnBeforeSave, args, 1);
     }
+    // The keys of the content the save needs (gw/game/level_pack*, gw/slots/*): from the registry of the engine, over
+    // what Lua and the plugins wrote (plan 10 section 4, P4)
+    gw::WriteSaveContentKeys();
 
     u32 source_count;
     u32 dest_count;
@@ -174,6 +222,32 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
     spawns().load(source, file_name);
     graph().on_load();
     objects().load(source);
+    // 09-content-addons-vfs.md section 8 (C8): objects of a switched off addon were skipped - their ids must not stay in
+    // the saved references of the loaded objects: the member lists of the squads (on_after_game_load ->
+    // register_member asserts on them) and the smart terrain of a monster (its brain asks the smart terrain registry)
+    if (!objects().skipped_on_load().empty())
+    {
+        const auto& skipped = objects().skipped_on_load();
+        u32 dropped_members = 0;
+        u32 dropped_smarts = 0;
+        for (auto& object : objects().objects())
+        {
+            if (CSE_ALifeOnlineOfflineGroup* squad = object.second->cast_online_offline_group())
+                dropped_members += squad->drop_unloaded_members();
+
+            CSE_ALifeMonsterAbstract* monster = smart_cast<CSE_ALifeMonsterAbstract*>(object.second);
+            if (monster && monster->m_smart_terrain_id != ALife::_OBJECT_ID(-1) &&
+                std::find(skipped.begin(), skipped.end(), monster->m_smart_terrain_id) != skipped.end())
+            {
+                Msg("~ [save] object %u '%s': its smart terrain %u is skipped, the smart terrain is cleared",
+                    u32(monster->ID), monster->name_replace(), u32(monster->m_smart_terrain_id));
+                monster->m_smart_terrain_id = ALife::_OBJECT_ID(-1);
+                ++dropped_smarts;
+            }
+        }
+        Msg("~ [save] references to the skipped objects cleared: %u squad members, %u smart terrains", dropped_members,
+            dropped_smarts);
+    }
 
     VERIFY(can_register_objects());
     can_register_objects(false);
@@ -187,6 +261,33 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
     }
 
     registry().load(source);
+    // C8: the saved state of a skipped object would pass to a new object that gets its id: its relations - its own
+    // ones (as on_unregister of a monster clears them on a release) and the personal relations of the others to it -
+    // and the kept binder state of the plugins (read by ReadSaveData above; as unregister_object drops it on a release)
+    RELATION_REGISTRY().ClearRelationsOfRemoved(objects().skipped_on_load());
+    for (const ALife::_OBJECT_ID id : objects().skipped_on_load())
+        gw::addons::binders::OnServerObjectRelease(id);
+    // C8: the same for the per-id tables of the scripts. Their load_state (CALifeStorageManager_load above) is done,
+    // on_register of the objects (below) is not: the scripts drop the state of the skipped ids before a new object can
+    // get one of them. The list: Lua alife_save.skipped_objects(). Under lua_pcall: the event reaches the addons
+    if (!objects().skipped_on_load().empty())
+    {
+        // C8: the PDA map first - the saved map locations of the skipped ids would go only at the first update of the
+        // map (no owner), till then a new object that gets such an id would find a location of the old one
+        // (map_has_object_spot, the objectives of the tasks). Before the Lua callback and the event: both see the map
+        // without them (events_meta.json, alife_objects_skipped)
+        if (g_pGameLevel && !GEnv.isDedicatedServer) // a dedicated server has no map manager
+        {
+            const u32 locations = Level().MapManager().RemoveMapLocationsOfObjects(objects().skipped_on_load());
+            if (locations)
+                Msg("~ [save] %u map location(s) of the skipped objects removed", locations);
+        }
+        constexpr pcstr skipped_function = "alife_storage_manager.CALifeStorageManager_on_objects_skipped";
+        if (gw::addons::CallLuaProtected(skipped_function, { file_name }) == gw::addons::ELuaCall::NotFound)
+            Msg("! [save] Lua function %s not found: the script states of the skipped objects stay", skipped_function);
+        // C8: the same for the plugins - the event alife_objects_skipped
+        EmitObjectsSkipped(m_save_name, objects().skipped_on_load(), objects().skipped_sections_on_load());
+    }
     // 53-create-squad-engine.md section 9: the saved registry of the specific characters holds the leaked ids of the
     // old engine; it is made again from the objects, before on_register below can select a character
     gw_rebuild_specific_character_registry(objects(), registry(specific_characters));

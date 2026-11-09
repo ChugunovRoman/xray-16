@@ -202,9 +202,10 @@ void CUIActorMenu::script_register(lua_State* luaState)
 
     module(luaState, "ActorMenu")
     [
-        def("get_pda_menu", +[](){ return &CurrentGameUI()->GetPdaMenu(); }),
-        def("get_actor_menu", +[](){ return &CurrentGameUI()->GetActorMenu(); }),
-        def("get_menu_mode", +[](){ return CurrentGameUI()->GetActorMenu().GetMenuMode(); }),
-        def("get_maingame", +[](){ return CurrentGameUI()->UIMainIngameWnd; })
+        // Without a game (main menu) there is no game UI: nil / mmUndefined instead of a null dereference
+        def("get_pda_menu", +[]() -> CUIPdaWnd* { return CurrentGameUI() ? &CurrentGameUI()->GetPdaMenu() : nullptr; }),
+        def("get_actor_menu", +[]() -> CUIActorMenu* { return CurrentGameUI() ? &CurrentGameUI()->GetActorMenu() : nullptr; }),
+        def("get_menu_mode", +[]() { return CurrentGameUI() ? CurrentGameUI()->GetActorMenu().GetMenuMode() : mmUndefined; }),
+        def("get_maingame", +[]() -> CUIMainIngameWnd* { return CurrentGameUI() ? CurrentGameUI()->UIMainIngameWnd : nullptr; })
     ];
 }

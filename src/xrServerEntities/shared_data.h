@@ -27,6 +27,8 @@ public:
         VERIFY(_refcount == 0);
         xr_delete(_self);
     };
+    // The live users of the singleton (Instance without FreeInst yet)
+    static int RefCount() { return _refcount; }
 
 public:
     static T* Instance()
@@ -115,6 +117,8 @@ public:
     }
     virtual ~CSharedClass() { pSharedObj->FreeInst(); }
     static void DeleteSharedData() { CSharedObj<SHARED_TYPE, KEY_TYPE>::DestroySingleton(); }
+    // The live objects of the class: they keep pointers into the shared data, DeleteSharedData must wait for them
+    static int SharedDataUsers() { return CSharedObj<SHARED_TYPE, KEY_TYPE>::RefCount(); }
     void load_shared(KEY_TYPE key, LPCSTR section)
     {
         _sd = pSharedObj->get_shared(key);

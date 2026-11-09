@@ -93,6 +93,44 @@ TiXmlNode* TiXmlNode::LinkEndChild(TiXmlNode* node)
     return node;
 }
 
+TiXmlNode* TiXmlNode::UnlinkChild(TiXmlNode* child)
+{
+    if (!child || child->parent != this)
+        return 0;
+
+    if (child->prev)
+        child->prev->next = child->next;
+    else
+        firstChild = child->next;
+    if (child->next)
+        child->next->prev = child->prev;
+    else
+        lastChild = child->prev;
+
+    child->parent = 0;
+    child->prev = 0;
+    child->next = 0;
+    return child;
+}
+
+TiXmlNode* TiXmlNode::LinkBeforeChild(TiXmlNode* before, TiXmlNode* node)
+{
+    if (!before)
+        return LinkEndChild(node);
+    if (before->parent != this || node->parent != 0 || node->Type() == TiXmlNode::DOCUMENT)
+        return 0;
+
+    node->parent = this;
+    node->next = before;
+    node->prev = before->prev;
+    if (before->prev)
+        before->prev->next = node;
+    else
+        firstChild = node;
+    before->prev = node;
+    return node;
+}
+
 const TiXmlNode* TiXmlNode::FirstChild(const char* _value) const
 {
     const TiXmlNode* node;
@@ -239,6 +277,25 @@ void TiXmlElement::ClearThis()
         attributeSet.Remove(node);
         xr_delete(node);
     }
+}
+
+void TiXmlElement::RemoveAttribute(const char* name)
+{
+    TiXmlAttribute* node = attributeSet.Find(name);
+    if (!node)
+        return;
+    attributeSet.Remove(node);
+    xr_delete(node);
+}
+
+void TiXmlElement::SetAttribute(const char* name, const char* value)
+{
+    if (TiXmlAttribute* node = attributeSet.Find(name))
+    {
+        node->SetValue(value);
+        return;
+    }
+    attributeSet.Add(xr_new<TiXmlAttribute>(name, value));
 }
 
 const char* TiXmlElement::Attribute(const char* name) const

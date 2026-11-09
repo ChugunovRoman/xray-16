@@ -52,24 +52,25 @@ Per-event descriptions (when / arguments / notes) live in events_meta.json.
 **Загрузка сейва** из главного меню (уровень не загружен) или загрузка сейва другого уровня:
 
 1. `level_on_stop`, `actor_on_destroy`, `alife_on_end` — если до этого был загружен уровень.
-2. `engine_on_script_start` — Lua перезапущен (без ключа `-keep_lua`).
+2. `engine_on_script_start` — Lua перезапущен (без ключа `-keep_lua`); сразу за ним — `on_load` Lua-частей аддонов и `on_slot_active` провайдеров слотов.
 3. Lua-`on_game_start` всех скриптов: Lua-скрипты подписываются на события.
 4. `alife_on_start` с причиной `"load"`. Данные плагинов, persistent-значения шины данных и таймеры уже очищены, из сейва ещё ничего не прочитано.
 5. Движок читает из сейва данные плагинов, persistent-значения шины данных и таймеры (без `data_on_changed`).
 6. Lua-событие `load_state` (если у сейва есть файл `.scoc`): persistent-значения шины данных уже видны через `data_bus.get`.
-7. `alife_on_load` — данные плагина доступны через `save_read`, persistent-значения — через `data_get` / `data_bus.get`.
-8. Lua-события регистрации объектов: `se_actor_on_register`, `squad_on_register` и т.п.
-9. `alife_on_after_load`.
-10. Спавн объектов уровня, среди них `actor_on_spawn` (Lua-событие `on_game_load` отправляет биндер актора при его спавне, раньше `actor_on_spawn`).
-11. `level_on_start`.
-12. `level_on_frame` каждый кадр.
+7. Только если движок пропустил объекты сейва (секция или класс выключенного аддона): Lua-событие `on_save_objects_skipped`, затем `alife_objects_skipped` (массивы id и секций). Ссылки на эти id и их метки ПДА движок уже снял.
+8. `alife_on_load` — данные плагина доступны через `save_read`, persistent-значения — через `data_get` / `data_bus.get`.
+9. Lua-события регистрации объектов: `se_actor_on_register`, `squad_on_register` и т.п.
+10. `alife_on_after_load`.
+11. Спавн объектов уровня, среди них `actor_on_spawn` (Lua-событие `on_game_load` отправляет биндер актора при его спавне, раньше `actor_on_spawn`).
+12. `level_on_start`.
+13. `level_on_frame` каждый кадр.
 
 **Загрузка сейва того же уровня** (из игры, уровень сейва совпадает с текущим): уровень не перезагружается, пересоздаётся только ALife.
 
 1. Доставка пачек подписок `GWP_SUBSCRIBE_BATCH` без учёта `throttle_ms`, пока id объектов ещё действительны.
 2. `actor_on_destroy` — клиентские объекты уровня удаляются.
 3. `alife_on_end` — ALife пересоздаётся.
-4. Шаги 2–10 «загрузки сейва»: `engine_on_script_start`, Lua-`on_game_start`, `alife_on_start` с причиной `"load"`, чтение данных сейва, `load_state`, `alife_on_load`, регистрация объектов, `alife_on_after_load`, спавн объектов и `actor_on_spawn`.
+4. Шаги 2–11 «загрузки сейва»: `engine_on_script_start`, Lua-`on_game_start`, `alife_on_start` с причиной `"load"`, чтение данных сейва, `load_state`, пропущенные объекты (`alife_objects_skipped`), `alife_on_load`, регистрация объектов, `alife_on_after_load`, спавн объектов и `actor_on_spawn`.
 5. `level_on_frame` каждый кадр.
 
 `level_on_stop` и `level_on_start` здесь **не приходят**: уровень не останавливается. Действия «после каждой загрузки», которым нужен актор или игровое время сейва (например, запуск таймеров игрового времени), делайте в `actor_on_spawn`: оно приходит и здесь.
@@ -98,9 +99,21 @@ Per-event descriptions (when / arguments / notes) live in events_meta.json.
 
 1. Автосейв по схеме «сохранение»: `save_state`, `alife_on_before_save`, `alife_on_after_save` с именем `<пользователь> - autosave.scop`.
 2. `level_on_stop`, `actor_on_destroy`, `alife_on_end`.
-3. Шаги 2–12 «загрузки сейва», но `alife_on_start` приходит с причиной `"level_change"`.
+3. Шаги 2–13 «загрузки сейва», но `alife_on_start` приходит с причиной `"level_change"`.
 
 Поэтому данные, записанные через `save_write`, persistent-значения шины данных и persistent-таймеры переходят на новый уровень.
+
+**Смена контента аддонов** — выбор провайдера слота, пака локаций или правила `[conflicts]` в главном меню, а также первое монтирование контента на первом кадре меню (`addons_content_applied` с `"startup"`). Уровня и ALife нет:
+
+1. Движок меняет слои файловой системы, перечитывает конфиги, данные игры (диалоги, группировки и т.п.) и таблицу строк; выгружает плагины уходящих провайдеров и загружает плагины новых (их `on_init`).
+2. Lua перезапускается: классы аддонов (`on_register_classes`), затем `engine_on_script_start`.
+3. `on_load` Lua-частей аддонов, затем `on_slot_active` провайдеров слотов.
+4. Главное меню строится заново.
+5. Lua-колбэки `gw_slots.on_slots_applied` и `gw_slots.on_merge_report`.
+6. `addons_content_applied` — плагин перечитывает свой кэш данных контента.
+7. Если смену начала смена пака или загрузка сейва: колбэк меню `ui_main_menu.on_level_pack_applied`. Он может сразу начать загрузку сейва — дальше по схеме «загрузки сейва».
+
+Повторный выбор того же набора процедуру не запускает: этих событий нет.
 
 **Выход в главное меню** (завершение текущей игры, а не открытие меню поверх игры): `level_on_stop`, `actor_on_destroy`, `alife_on_end`.
 

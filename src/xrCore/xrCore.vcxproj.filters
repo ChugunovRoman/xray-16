@@ -19,6 +19,9 @@
     <Filter Include="FS">
       <UniqueIdentifier>{fbb5a226-8454-4405-aaf5-aee45b8090a4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FS\ContentMerge">
+      <UniqueIdentifier>{6d1f3c2a-9b47-4e15-8c0e-3a5f2b7d9e41}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FS\stream_reader">
       <UniqueIdentifier>{b599a5b8-d4a9-45f3-af7e-3d2b8efd5ac3}</UniqueIdentifier>
     </Filter>
@@ -197,6 +200,45 @@
     </ClCompile>
     <ClCompile Include="xr_ini.cpp">
       <Filter>FS</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentPatches.cpp">
+      <Filter>FS</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\AtomMerge.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\ContentMerge.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Delta.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\DeltaJson.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Diff.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\LtxSegments.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\LuaSegments.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Segments.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Sha256.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\TextNorm.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\Plan.cpp">
+      <Filter>FS\ContentMerge</Filter>
+    </ClCompile>
+    <ClCompile Include="ContentMerge\XmlSegments.cpp">
+      <Filter>FS\ContentMerge</Filter>
     </ClCompile>
     <ClCompile Include="stream_reader.cpp">
       <Filter>FS\stream_reader</Filter>
@@ -529,6 +571,30 @@
     </ClInclude>
     <ClInclude Include="xr_ini.h">
       <Filter>FS</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentPatches.h">
+      <Filter>FS</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentMerge\AtomMerge.h">
+      <Filter>FS\ContentMerge</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentMerge\ContentMerge.h">
+      <Filter>FS\ContentMerge</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentMerge\DeltaJson.h">
+      <Filter>FS\ContentMerge</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentMerge\Diff.h">
+      <Filter>FS\ContentMerge</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentMerge\Segments.h">
+      <Filter>FS\ContentMerge</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentMerge\Plan.h">
+      <Filter>FS\ContentMerge</Filter>
+    </ClInclude>
+    <ClInclude Include="ContentMerge\TextNorm.h">
+      <Filter>FS\ContentMerge</Filter>
     </ClInclude>
     <ClInclude Include="stream_reader.h">
       <Filter>FS\stream_reader</Filter>

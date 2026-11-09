@@ -16,24 +16,55 @@
 #include "Include/xrRender/UIShader.h"
 #include "xrCore/Threading/Lock.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
+#include "xrCore/ContentPatches.h"
 #include <iostream>
 
 xr_map<xr_string, TEX_INFO> CUITextureMaster::m_textures;
 xr_map<sh_pair, ui_shader> CUITextureMaster::m_shaders;
 
+namespace
+{
+// id -> the owner of the file that gave it (ParseShTexInfo with an owner: ui\textures_descr\ by UICore)
+xr_map<xr_string, xr_string> ui_texture_descr_owners;
+
+void UITextureDescrOwner(const xr_string& id, pcstr owner)
+{
+    if (!owner)
+    {
+        ui_texture_descr_owners.erase(id); // given by a file of no known owner (texture_desc, a script) now
+        return;
+    }
+    xr_string& previous = ui_texture_descr_owners[id];
+    if (!previous.empty() && previous != owner)
+    {
+        using namespace xray::content_patches;
+        constexpr pcstr file = "ui\\textures_descr";
+        RecordAtom(AtomKind::Texture, file, id.c_str(), previous.c_str());
+        xr_string previous_owner;
+        if (RecordAtom(AtomKind::Texture, file, id.c_str(), owner, &previous_owner))
+        {
+            Msg("~ [addon:%s] ui texture [%s] is given by addon '%s' too - '%s' wins (the order of the addons), "
+                "console dltx_conflicts", owner, id.c_str(), previous_owner.c_str(), owner);
+        }
+    }
+    previous = owner;
+}
+} // namespace
+
 void CUITextureMaster::FreeTexInfo()
 {
     m_textures.clear();
+    ui_texture_descr_owners.clear();
     FreeCachedShaders();
 }
 
 void CUITextureMaster::FreeCachedShaders() { m_shaders.clear(); }
-void CUITextureMaster::ParseShTexInfo(pcstr path, pcstr xml_file)
+void CUITextureMaster::ParseShTexInfo(pcstr path, pcstr xml_file, pcstr owner)
 {
     CUIXml xml;
     xml.Load(CONFIG_PATH, path, xml_file);
 
-    ParseShTexInfo(xml, true);
+    ParseShTexInfo(xml, true, owner);
 }
 
 void CUITextureMaster::ParseShTexInfo(pcstr xml_file)
@@ -60,10 +91,11 @@ void CUITextureMaster::ParseShTexInfo(pcstr xml_file)
             m_textures.emplace(id, info);
         else
             m_textures[id] = info;
+        UITextureDescrOwner(id, nullptr);
     }
 }
 
-void CUITextureMaster::ParseShTexInfo(CUIXml& xml, bool override)
+void CUITextureMaster::ParseShTexInfo(CUIXml& xml, bool override, pcstr owner)
 {
     const int files_num = xml.GetNodesNum("", 0, "file");
 
@@ -88,9 +120,15 @@ void CUITextureMaster::ParseShTexInfo(CUIXml& xml, bool override)
             xr_string id = xml.ReadAttrib(node, "texture", i, "id");
 
             if (m_textures.find(id) == m_textures.end())
+            {
                 m_textures.emplace(id, info);
+                UITextureDescrOwner(id, owner);
+            }
             else if (override)
+            {
                 m_textures[id] = info;
+                UITextureDescrOwner(id, owner);
+            }
         }
 
         xml.SetLocalRoot(root_node);

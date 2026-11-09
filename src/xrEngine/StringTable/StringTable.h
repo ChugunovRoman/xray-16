@@ -5,10 +5,13 @@
 #pragma once
 
 #include "xrCommon/xr_map.h"
+#include "xrCommon/xr_string.h"
+#include "xrCommon/xr_vector.h"
 #include "xrCore/xrstring.h"
 #include "xrCore/xr_token.h"
 
 #include <mutex>
+#include <utility>
 
 using STRING_ID = shared_str;
 using STRING_VALUE = shared_str;
@@ -63,7 +66,27 @@ public:
     static string32 LanguageIDInLTX;
 
 private:
-    void Load(LPCSTR xml_file);
+    struct StringTableEntry
+    {
+        STRING_ID id;
+        STRING_VALUE value;
+        // A string a patch of the file set (XMLOverride, XMLDocument::kPatchOwnerAttr): the owner and the layer of the
+        // patch, and the owners of the strings of the id it replaced in the file, in order (a list). Empty - the file's.
+        xr_string owner;
+        u16 layer{};
+        xr_string over;
+    };
+    // A file of text\<lang>\ (plans/addons_api_support/09-content-addons-vfs.md 5.2): parsed in parallel, merged in
+    // the order of the file system layers
+    struct StringTableFile
+    {
+        xr_string name; // relative to text\<lang>\ (subfolders included)
+        xr_string owner; // the addon of its layer, "base"
+        u16 layer{};
+        xr_vector<StringTableEntry> strings; // in the order of the file
+    };
+    void Load(StringTableFile& file) const;
+    void Merge(const xr_vector<StringTableFile>& files);
     void FillLanguageToken();
     void SetLanguage();
     static STRING_VALUE ParseLine(pcstr str);

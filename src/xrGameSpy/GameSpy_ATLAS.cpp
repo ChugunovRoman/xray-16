@@ -17,6 +17,10 @@ CGameSpy_ATLAS::~CGameSpy_ATLAS()
 
 void CGameSpy_ATLAS::Init()
 {
+    // online services are disabled (CGameSpy_Full without -gamespy): scInitialize would return
+    // SCResult_NO_AVAILABILITY_CHECK, do not trigger the VERIFY; m_interface stays NULL
+    if (__GSIACResult != GSIACAvailable)
+        return;
     SCResult init_res = scInitialize(GAMESPY_GAMEID, &m_interface);
     VERIFY(init_res == SCResult_NO_ERROR);
     if (init_res != SCResult_NO_ERROR)

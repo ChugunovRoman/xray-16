@@ -22,6 +22,12 @@ class XRCORE_API XMLDocument : public Noncopyable
 {
 
 public:
+    // XMLOverride (XMLDocument.cpp): the marks of a string of a string table a patch set - the owner of the patch, its
+    // layer of the file system and the owners of the strings it replaced (a list, the first one replaced first)
+    static constexpr pcstr kPatchOwnerAttr = "xr_patch_owner";
+    static constexpr pcstr kPatchLayerAttr = "xr_patch_layer";
+    static constexpr pcstr kPatchOverAttr = "xr_patch_over";
+
     string_path m_xml_file_name;
     XMLDocument();
     virtual ~XMLDocument();

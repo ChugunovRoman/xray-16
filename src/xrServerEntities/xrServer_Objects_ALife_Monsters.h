@@ -770,6 +770,10 @@ public:
     // a member is destroyed without reaching unregister_member. Every consumer below dereferences
     // it behind a VERIFY that release builds compile out, so the list is validated before use.
     u32 sanitize_members(const char* where);
+    // 09-content-addons-vfs.md section 8 (C8): on a load, before the registration - drops the saved member ids the
+    // object registry has no object for (a member of a switched off addon skipped by CALifeObjectRegistry::load);
+    // returns their number. The stored pointers are not touched (null until on_after_game_load)
+    u32 drop_unloaded_members();
     void notify_on_member_death(MEMBER* member);
     MEMBER* member(ALife::_OBJECT_ID member_id, bool no_assert = false);
     virtual void on_before_register();

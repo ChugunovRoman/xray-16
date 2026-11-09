@@ -46,6 +46,10 @@ enum class EBuiltin : GwpEventId
     AlifeOnTimeSkipEnd,   // (total_ms, steps) after the last step, the cursor is gone
     // plans/friendly_fire/plan.md: RELATION_REGISTRY::Action is about to change goodwill
     RelationOnBeforeAction, // (action, from, to, relation, delta, danger, hit type, health lost) -> delta / false
+    // plans/addons_api_support/13-extension-model.md: the content of the addons changed (addon_slots.cpp)
+    AddonsContentApplied, // (when, ok, world, providers) the procedure of the content is done, Lua restarted
+    // 09-content-addons-vfs.md section 8 (C8): a save is loaded without some of its objects (alife_storage_manager.cpp)
+    AlifeObjectsSkipped, // (save_name, ids, sections) the saved objects ALife could not create, before alife_on_load
     Count_
 };
 

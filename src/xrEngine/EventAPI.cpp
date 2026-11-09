@@ -181,7 +181,9 @@ void CEventAPI::OnFrame()
     CS.Leave();
 }
 
-bool CEventAPI::Peek(pcstr EName)
+bool CEventAPI::Peek(pcstr EName) { return Peek(EName, nullptr, nullptr); }
+
+bool CEventAPI::Peek(pcstr EName, u64* P1, u64* P2)
 {
     CS.Enter();
     if (Events_Deferred.empty())
@@ -194,6 +196,10 @@ bool CEventAPI::Peek(pcstr EName)
         Deferred& DEF = Events_Deferred[I];
         if (xr_stricmp(DEF.E->GetFull(), EName) == 0)
         {
+            if (P1)
+                *P1 = DEF.P1;
+            if (P2)
+                *P2 = DEF.P2;
             CS.Leave();
             return true;
         }

@@ -17,7 +17,10 @@ class CSeniorityHierarchyHolder
 private:
     enum
     {
-        max_team_count = 128
+        // Every value of the u8 team (game_relations.ltx: communities and [monster_communities]; change_team of the
+        // scripts): team() indexes m_teams with only a VERIFY, so in release a team of 128..255 wrote past the array
+        // (was 128)
+        max_team_count = 256
     };
 
 private:
