@@ -197,6 +197,11 @@ public:
     virtual void Update();
     void DrawHint();
 
+    /** The block of the map buttons (btn_nav_parent of pda_map.xml: the layer switcher and btn_nav_*), nullptr when
+        the XML has none (the SOC tool bar). Its position is the XML one unless a script moves it (CUIPdaWnd
+        GetMapNavWnd): the shell of the special modes puts it inside the map. */
+    CUIStatic* GetNavParent() const { return m_btn_nav_parent; }
+
     void MoveMap(Fvector2 const& pos_delta);
     float GetZoom() { return m_currentZoom; }
     void SetZoom(float value);

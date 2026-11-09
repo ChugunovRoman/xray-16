@@ -226,6 +226,9 @@ game_action actions[] =
     { "talk_log_scroll_up",     kTALK_LOG_SCROLL_UP,        _sp,    EKeyContext::Talk },
     { "talk_log_scroll_down",   kTALK_LOG_SCROLL_DOWN,      _sp,    EKeyContext::Talk },
 
+    // GW (appended, see EGameActions):
+    { "bodycam_sms",            kBODYCAM_SMS,               _sp },
+
     { nullptr,                  kLASTACTION,                _both }
 };
 
@@ -1071,6 +1074,9 @@ class CCC_DefControls : public CCC_UnBindAll
         { kTALK_LOG_SCROLL_DOWN,    { SDL_SCANCODE_E,       SDL_SCANCODE_PAGEDOWN,      SDL_SCANCODE_UNKNOWN } },
 
         { kEDITOR,                  { SDL_SCANCODE_F10,     SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_BUTTON_INVALID } },
+
+        // GW:
+        { kBODYCAM_SMS,             { SDL_SCANCODE_F11,     SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_BUTTON_INVALID } },
     };
     // clang-format on
 

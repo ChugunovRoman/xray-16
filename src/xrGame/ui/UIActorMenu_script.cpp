@@ -8,6 +8,8 @@
 #include "pch_script.h"
 #include "UIActorMenu.h"
 #include "UIPdaWnd.h"
+#include "UIMapWnd.h"
+#include "xrUICore/Static/UIStatic.h"
 #include "Actor.h"
 #include "inventory_item.h"
 #include "UICellItem.h"
@@ -198,6 +200,12 @@ void CUIActorMenu::script_register(lua_State* luaState)
             .def("GetActiveDialog", &CUIPdaWnd::GetActiveDialog)
             .def("GetActiveSection", &CUIPdaWnd::GetActiveSection)
             .def("GetTabControl", &CUIPdaWnd::GetTabControl)
+            // The block of the map buttons (btn_nav_parent of pda_map.xml), nil without the map or the block: the shell of
+            // the special modes (gw_meat_pda.script) moves it, its frame covers the PDA bezel the block stands on
+            .def("GetMapNavWnd", +[](CUIPdaWnd* self) -> CUIWindow*
+            {
+                return self->pUIMapWnd ? self->pUIMapWnd->GetNavParent() : nullptr;
+            })
     ];
 
     module(luaState, "ActorMenu")

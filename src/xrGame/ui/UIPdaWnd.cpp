@@ -490,7 +490,14 @@ bool CUIPdaWnd::OnKeyboardAction(int dik, EUIMessages keyboard_action)
     if (inherited::OnKeyboardAction(dik, keyboard_action))
         return true;
     if (!UITabControl->IsShown())
+    {
+        // The tabs are hidden by the shell of the special modes (gw_meat_pda.script), the PDA keeps every key then.
+        // So the key of the PDA does not reach CUIGameSP::IR_UIOnKeyboardPress, which closes the normal PDA
+        // (kACTIVE_JOBS -> ShowPdaMenu): close it here, as the close button of the shell does.
+        if (WINDOW_KEY_PRESSED == keyboard_action && IsBinded(kACTIVE_JOBS, dik))
+            HideDialog();
         return true;
+    }
 
     return false;
 }

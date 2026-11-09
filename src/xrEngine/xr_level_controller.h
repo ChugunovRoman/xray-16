@@ -219,6 +219,10 @@ enum EGameActions : u32
     kTALK_LOG_SCROLL_UP,
     kTALK_LOG_SCROLL_DOWN,
 
+    // GW. Appended after the contextual actions: the ids of the actions before it go to Lua and to the plugins
+    // (key_bindings, the event level_input_on_key_press) and must stay the same.
+    kBODYCAM_SMS, // bodycam HUD: show / hide the SMS feed (g_bodycam_sms), F11 by default
+
     kLASTACTION,
     kNOTBINDED
 };

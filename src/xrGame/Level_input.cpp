@@ -249,8 +249,10 @@ void CLevel::IR_OnKeyboardPress(int key)
         }
     }
 
-    // API and Lua input subscribers above may consume even an unbound key.
-    if(key==SDL_SCANCODE_F11 && _curr==kNOTBINDED && IsGameTypeSingle() &&
+    // The SMS feed of the bodycam HUD: the action bodycam_sms (F11 by default, Options > Controls). It is the last
+    // action, so a key bound to another action too stays with that one. API and Lua input subscribers above may
+    // consume the key first.
+    if(_curr==kBODYCAM_SMS && IsGameTypeSingle() &&
         gw_bodycam_motion::hud_active() && g_actor && g_actor->g_Alive() &&
         b_ui_exist && !CurrentGameUI()->TopInputReceiver() && !Device.Paused())
     {

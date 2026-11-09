@@ -240,7 +240,10 @@ void key_binding_registrator::script_register(lua_State* luaState)
                 value("kTALK_SWITCH_TO_TRADE",      int(kTALK_SWITCH_TO_TRADE)),
                 value("kTALK_LOG_SCROLL",           int(kTALK_LOG_SCROLL)),
                 value("kTALK_LOG_SCROLL_UP",        int(kTALK_LOG_SCROLL_UP)),
-                value("kTALK_LOG_SCROLL_DOWN",      int(kTALK_LOG_SCROLL_DOWN))
+                value("kTALK_LOG_SCROLL_DOWN",      int(kTALK_LOG_SCROLL_DOWN)),
+
+                // GW:
+                value("kBODYCAM_SMS",               int(kBODYCAM_SMS))
             ],
 
         class_<KeyBindingRegistrator>("DIK_keys")
