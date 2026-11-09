@@ -12,7 +12,7 @@ Usage (from the GW folder):
     --check     do not write; exit 1 when the page is out of date (for CI)
 
 Runs automatically from build_plugins.cmd (same folder) before every plugins build.
-The wiki navigation block is built by <GW>/tools/wiki_plugins_toc.py; without the wiki, that script or axr_main.script
+The wiki navigation block is built by <GW>/GlobalWar/utils/wiki_plugins_toc.py; without the wiki, that script or axr_main.script
 the page is skipped (engine-only checkouts such as the engine CI).
 
 Where the data comes from:
@@ -40,13 +40,13 @@ import re
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # xray-16/src/gw_plugins
-ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", ".."))  # GW: xray-16, wiki, tools, GlobalWar side by side
+ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", ".."))  # GW: xray-16, wiki, GlobalWar (with utils/) side by side
 DEFAULT_XRGAME = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "xrGame"))
 DEFAULT_AXR_MAIN = os.path.join(ROOT, "GlobalWar", "gamedata", "scripts", "axr_main.script")
 DEFAULT_META = os.path.join(SCRIPT_DIR, "events_meta.json")
 DEFAULT_MANUAL = os.path.join(SCRIPT_DIR, "events_list_manual.md")
 DEFAULT_OUT = os.path.join(ROOT, "wiki", "doc", "plugins", "api", "events_list.md")
-TOC_SCRIPT_DIR = os.path.join(ROOT, "tools")  # wiki_plugins_toc.py: navigation block of wiki pages
+TOC_SCRIPT_DIR = os.path.join(ROOT, "GlobalWar", "utils")  # wiki_plugins_toc.py: navigation block of wiki pages
 PAGE_REL = "api/events_list.md"  # path of the page inside doc/plugins, for the TOC generator
 BASE = "https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/"
 
@@ -627,11 +627,11 @@ def render(events, objects, meta, manual):
 
 
 def load_toc_module():
-    """<GW>/tools/wiki_plugins_toc.py, or None when it is not there."""
+    """<GW>/GlobalWar/utils/wiki_plugins_toc.py, or None when it is not there."""
     if not os.path.isfile(os.path.join(TOC_SCRIPT_DIR, "wiki_plugins_toc.py")):
         return None
     sys.path.insert(0, TOC_SCRIPT_DIR)
-    sys.dont_write_bytecode = True  # do not leave __pycache__ in tools/
+    sys.dont_write_bytecode = True  # do not leave __pycache__ in GlobalWar/utils/
     import wiki_plugins_toc  # noqa: E402
     return wiki_plugins_toc
 

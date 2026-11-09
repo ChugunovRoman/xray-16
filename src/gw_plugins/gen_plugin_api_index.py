@@ -8,7 +8,7 @@ Usage (from the GW folder):
     --check    do not write; exit 1 when the page is out of date (for CI)
 
 Runs automatically from build_plugins.cmd (same folder) before every plugins build.
-The wiki navigation block is built by <GW>/tools/wiki_plugins_toc.py; without the wiki or that
+The wiki navigation block is built by <GW>/GlobalWar/utils/wiki_plugins_toc.py; without the wiki or that
 script the page is skipped (engine-only checkouts such as the engine CI).
 
 What is listed: GwpEngineApi functions and header fields, the entry point, GwpPluginDesc fields,
@@ -22,7 +22,7 @@ Errors are printed as "file(line): error GWPDOC: ..." so Visual Studio shows the
 exit code 2. Unknown declarations inside the parsed structs/classes are errors too, so nothing is
 silently missing from the page.
 
-Adding a group: add it to GROUPS, create the wiki page, add the page to tools/wiki_plugins_toc.py.
+Adding a group: add it to GROUPS, create the wiki page, add the page to GlobalWar/utils/wiki_plugins_toc.py.
 """
 
 import argparse
@@ -31,10 +31,10 @@ import re
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # xray-16/src/gw_plugins
-ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", ".."))  # GW: xray-16, wiki, tools side by side
+ROOT = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", ".."))  # GW: xray-16, wiki, GlobalWar (with utils/) side by side
 DEFAULT_HEADERS = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "xrAddonHost", "include", "gwp"))
 DEFAULT_OUT = os.path.join(ROOT, "wiki", "doc", "plugins", "api", "all.md")
-TOC_SCRIPT_DIR = os.path.join(ROOT, "tools")  # wiki_plugins_toc.py: navigation block of wiki pages
+TOC_SCRIPT_DIR = os.path.join(ROOT, "GlobalWar", "utils")  # wiki_plugins_toc.py: navigation block of wiki pages
 PAGE_REL = "api/all.md"  # path of the page inside doc/plugins, for the TOC generator
 BASE = "https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/"
 
@@ -539,11 +539,11 @@ def render(api, classes):
 
 
 def load_toc_module():
-    """<GW>/tools/wiki_plugins_toc.py, or None when it is not there."""
+    """<GW>/GlobalWar/utils/wiki_plugins_toc.py, or None when it is not there."""
     if not os.path.isfile(os.path.join(TOC_SCRIPT_DIR, "wiki_plugins_toc.py")):
         return None
     sys.path.insert(0, TOC_SCRIPT_DIR)
-    sys.dont_write_bytecode = True  # do not leave __pycache__ in tools/
+    sys.dont_write_bytecode = True  # do not leave __pycache__ in GlobalWar/utils/
     import wiki_plugins_toc  # noqa: E402
     return wiki_plugins_toc
 

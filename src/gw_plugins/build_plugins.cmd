@@ -157,7 +157,7 @@ if not exist "%GW_BUILD%\build.ninja" exit /b 0
 exit /b %errorlevel%
 
 rem Generates the Plugin API reference page with gen_plugin_api_index.py (this folder). Skipped (not an error)
-rem without Python; the script itself skips when the wiki or tools\wiki_plugins_toc.py is not next to xray-16,
+rem without Python; the script itself skips when the wiki or GlobalWar\utils\wiki_plugins_toc.py is not next to xray-16,
 rem e.g. on the engine CI where only xray-16 is checked out.
 :gen_api_index
 set "GW_API_INDEX=%~dp0gen_plugin_api_index.py"
@@ -176,7 +176,7 @@ if errorlevel 1 (
 exit /b 0
 
 rem Generates the event list page with gen_events_list.py (this folder). Skipped (not an error) without Python; the
-rem script itself skips when the wiki, tools\wiki_plugins_toc.py or GlobalWar\gamedata\scripts\axr_main.script is missing.
+rem script itself skips when the wiki, GlobalWar\utils\wiki_plugins_toc.py or GlobalWar\gamedata\scripts\axr_main.script is missing.
 :gen_events_list
 set "GW_EVENTS_LIST=%~dp0gen_events_list.py"
 set "GW_PYTHON="
