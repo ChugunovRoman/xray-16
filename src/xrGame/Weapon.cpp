@@ -298,7 +298,18 @@ void CWeapon::UpdateAltScope()
 
     if (vis != cNameVisual())
     {
+        // A weapon on the ground already has its physics shell here (CPhysicItem::net_Spawn builds it before the
+        // net_Spawn of the weapon calls this), built on the bones of the model it has now: CPHShell::m_pKinematics and
+        // the bone callbacks. cNameVisual_set gives that model back to the model pool and the shell would keep it: a
+        // preview (PreviewSceneRenderer of the UI, level.preview_model_*) may take it from the pool and discard it, and
+        // ZeroCallbacks of the shell then reads freed memory at net_Destroy (plans/addon_base_building/plan.md 17.25).
+        // The shell goes while its model is alive and is built again on the new one.
+        const bool rebuild_shell = PPhysicsShell() && !H_Parent();
+        if (rebuild_shell)
+            deactivate_physics_shell();
         cNameVisual_set(vis);
+        if (rebuild_shell && smart_cast<IKinematics*>(Visual()))
+            setup_physic_shell();
     }
 
     shared_str new_hud = pSettings->r_string(sectionNeedLoad, "hud");

@@ -596,8 +596,10 @@ jobs:
   # gw_merge for the CI of the catalog of the addons (Global-War-Addons/index, variable GW_MERGE_URL): the tool alone,
   # without the engine and its dependencies (src/utils/gw_merge/CMakeLists.txt, standalone mode), libstdc++/libgcc linked
   # statically, plus LuaJIT of the engine for --check-lua (gw_merge finds libluajit-5.1.so.2 next to itself).
-  # Asset gw_merge-linux-x86_64.tar.gz (gw_merge in the root of the archive): an artifact of every run, on a version tag
-  # also an asset of the release (job release), so a stable URL is
+  # Asset gw_merge-linux-x86_64.tar.gz (gw_merge in the root of the archive) and its hash
+  # gw_merge-linux-x86_64.tar.gz.sha256 (sha256sum format, the catalog CI checks the archive with it): an artifact of
+  # every run, on a version tag also assets of the release (job release). The catalog takes by default
+  # https://github.com/<owner>/<repo>/releases/latest/download/gw_merge-linux-x86_64.tar.gz (+ .sha256), a pinned tag is
   # https://github.com/<owner>/<repo>/releases/download/<tag>/gw_merge-linux-x86_64.tar.gz
   gw_merge:
     name: gw_merge Linux x86_64
@@ -634,6 +636,9 @@ jobs:
         cp Externals/LuaJIT/COPYRIGHT "$pkg/LuaJIT-COPYRIGHT"
         tar -C "$pkg" -czf dist/gw_merge-linux-x86_64.tar.gz gw_merge libluajit-5.1.so.2 LuaJIT-COPYRIGHT
         tar -tzvf dist/gw_merge-linux-x86_64.tar.gz
+        # "<sha256>  gw_merge-linux-x86_64.tar.gz": the catalog CI (ci/fetch_gw_merge.sh) takes the hash from here
+        (cd dist && sha256sum gw_merge-linux-x86_64.tar.gz > gw_merge-linux-x86_64.tar.gz.sha256)
+        cat dist/gw_merge-linux-x86_64.tar.gz.sha256
         file "$pkg/gw_merge"
         # No libstdc++ / libgcc_s: linked statically
         ldd "$pkg/gw_merge"
@@ -645,6 +650,7 @@ jobs:
     # On the packed files, unpacked as the catalog CI does it
     - name: Smoke test gw_merge
       run: |
+        (cd dist && sha256sum -c gw_merge-linux-x86_64.tar.gz.sha256)
         mkdir -p smoke
         tar -xzf dist/gw_merge-linux-x86_64.tar.gz -C smoke
         bash misc/ci/gw_merge_smoke.sh smoke/gw_merge smoke/libluajit-5.1.so.2
@@ -653,7 +659,9 @@ jobs:
       uses: actions/upload-artifact@main
       with:
         name: gw_merge Linux x86_64 (github-${{ github.run_number }})
-        path: dist/gw_merge-linux-x86_64.tar.gz
+        path: |
+          dist/gw_merge-linux-x86_64.tar.gz
+          dist/gw_merge-linux-x86_64.tar.gz.sha256
 
   release:
     name: Publish GitHub Release
@@ -687,6 +695,11 @@ jobs:
           cp "$f" "dist/$base"
         done < <(find release-assets -type f -print0)
         if [ "$dup" -ne 0 ]; then
+          exit 1
+        fi
+        # gw_merge for the catalog CI goes out only with its matching hash (it takes .../latest/download/<asset>.sha256)
+        if ! (cd dist && sha256sum -c gw_merge-linux-x86_64.tar.gz.sha256); then
+          echo "::error::gw_merge-linux-x86_64.tar.gz and its .sha256 are missing or do not match"
           exit 1
         fi
         ls -l dist

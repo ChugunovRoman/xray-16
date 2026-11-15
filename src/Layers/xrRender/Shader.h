@@ -121,6 +121,11 @@ struct ECORE_API SPass : public xr_resource_flagged
     ref_constant_list C;
     ref_matrix_list M;
 
+    // GPU instancing (plans/render_instancing/plan.md): the same pass (state, pixel shader, textures) with the INSTANCED
+    // variant of the vertex shader, which draws N copies of one rigid mesh in one draw (render_matrix_items in
+    // r__dsgraph_render.cpp). Created by CBlender_Compile::r_Pass for the model vertex shaders only, else null.
+    resptr_core<SPass, resptr_base<SPass>> inst;
+
     SPass() = default;
     ~SPass();
 

@@ -73,6 +73,7 @@ GROUPS = {
     "object_ext": ("Зоны, физика и модели объектов", "api/object_ext.md"),
     "threads": ("Рабочие потоки", "api/threads.md"),
     "services": ("Сервисы плагинов", "api/services.md"),
+    "user_data": ("Файлы в профиле пользователя", "api/user_data.md"),
     "plugin": ("Класс gwp::Plugin", "api/plugin.md"),
 }
 

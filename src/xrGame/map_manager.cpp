@@ -12,6 +12,7 @@
 #include "game_object_space.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "addon_object_events.h"
 
 struct FindLocationBySpotID
 {
@@ -150,10 +151,12 @@ CMapLocation* CMapManager::AddRelationLocation(CInventoryOwner* pInvOwner)
 
 // Deleted in the next Update: a caller up the stack (a hint provider removed its own spot, CMapLocation::GetHint) may
 // still touch the location this frame; Released() tells it not to keep the location or its spots
-void CMapManager::Destroy(CMapLocation* ml)
+void CMapManager::Destroy(CMapLocation* ml, const shared_str& spot_type)
 {
     ml->MarkReleased();
     m_deffered_destroy_queue.push_back(ml);
+    if (gw::addons::objevents::WantsMapSpotRemoved())
+        m_removed_spots.emplace_back(ml->ObjectID(), spot_type);
 }
 
 void CMapManager::OnUIReset()
@@ -179,7 +182,7 @@ void CMapManager::RemoveMapLocation(const shared_str& spot_type, u16 id)
         if (IsGameTypeSingle())
             Level().GameTaskManager().MapLocationRelcase((*it).location);
 
-        Destroy((*it).location);
+        Destroy((*it).location, (*it).spot_type);
         Locations().erase(it);
     }
 }
@@ -193,7 +196,7 @@ void CMapManager::RemoveMapLocationByObjectID(u16 id) // call on destroy object
         if (IsGameTypeSingle())
             Level().GameTaskManager().MapLocationRelcase((*it).location);
 
-        Destroy((*it).location);
+        Destroy((*it).location, (*it).spot_type);
         Locations().erase(it);
 
         it = std::find_if(Locations().begin(), Locations().end(), key);
@@ -218,7 +221,7 @@ u32 CMapManager::RemoveMapLocationsOfObjects(const xr_vector<u16>& ids)
             continue;
         if (IsGameTypeSingle())
             Level().GameTaskManager().MapLocationRelcase(key.location);
-        Destroy(key.location);
+        Destroy(key.location, key.spot_type);
         ++removed;
     }
     if (removed)
@@ -236,7 +239,7 @@ void CMapManager::RemoveMapLocation(CMapLocation* ml)
         if (IsGameTypeSingle())
             Level().GameTaskManager().MapLocationRelcase((*it).location);
 
-        Destroy((*it).location);
+        Destroy((*it).location, (*it).spot_type);
         Locations().erase(it);
     }
 }
@@ -332,6 +335,15 @@ void CMapManager::Update()
         PERF_SCOPE(map_tail); // 26-framemove-game-next.md, M7: map/*
         delete_data(m_deffered_destroy_queue); // from prev frame
     }
+    if (!m_removed_spots.empty())
+    {
+        // P38: map_spot_on_removed of the locations removed since the last Update. Swapped out first: a handler may
+        // remove more spots (they come with the next Update)
+        xr_vector<std::pair<u16, shared_str>> removed;
+        removed.swap(m_removed_spots);
+        for (const auto& [id, spot_type] : removed)
+            gw::addons::objevents::MapSpotRemoved(id, spot_type.c_str());
+    }
 
     // CMapLocation::Update computes the position only for the current level (and ePosToActor): the PDA maps compute
     // the others on demand. The old extra CalcPosition of every third location here repeated the one in Update.
@@ -380,7 +392,7 @@ void CMapManager::Update()
         if (IsGameTypeSingle())
             Level().GameTaskManager().MapLocationRelcase(Locations().back().location);
 
-        Destroy(Locations().back().location);
+        Destroy(Locations().back().location, Locations().back().spot_type);
         Locations().pop_back();
     }
 }

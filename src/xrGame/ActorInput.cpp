@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 // #include <dinput.h>
 #include "Actor.h"
+#include "addon_object_events.h"
 #include "Torch.h"
 #include "trade.h"
 #include "xrEngine/CameraBase.h"
@@ -304,7 +305,11 @@ void CActor::IR_OnKeyboardRelease(int cmd)
         {
         case kJUMP: mstate_wishful &= ~mcJump; break;
         case kDROP:
-            if (GAME_PHASE_INPROGRESS == Game().Phase())
+            // actor_on_before_item_drop (engine gaps P30): the drop key throws the active item - a subscriber may keep
+            // it (the drops of the burer and the controller go to g_PerformDrop directly and are not asked)
+            if (GAME_PHASE_INPROGRESS == Game().Phase() &&
+                (!inventory().ActiveItem() ||
+                    gw::addons::objevents::ActorBeforeItemDrop(&inventory().ActiveItem()->object())))
                 g_PerformDrop();
             break;
         case kCROUCH:

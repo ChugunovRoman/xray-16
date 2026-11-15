@@ -27,4 +27,9 @@ void PrintCvarList(); // plugin_cvar_list
 void FlushProfile();  // prints the stages of plugins (npc_cpp_profile.cpp, inside its own report)
 void RemovePluginCvars(const GwpPlugin* plugin); // the plugin is unloaded: its commands leave the console
 void Shutdown();
+// plans/addon_api_ideas (group plugin): a command for the start of the next frame (the queue of
+// console_execute_deferred; game_save uses it)
+void QueueCommand(pcstr command);
+// The plugin stopped (a crash): its console commands stay until the unload (RemovePluginCvars) but call nothing
+void DisablePluginCommands(const GwpPlugin* plugin);
 } // namespace gw::addons::console

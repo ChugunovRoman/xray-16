@@ -629,9 +629,11 @@ GwpResult GWP_CALL ApiCreatureChangeCondition(const GwpPlugin* self, GwpObjectId
 // Events of the engine
 // ---------------------------------------------------------------------------------------------
 
-bool BeforeHit(CEntityAlive* victim, SHit& hit, bool monster)
+namespace
 {
-    const events::EBuiltin event = monster ? events::EBuiltin::MonsterOnBeforeHit : events::EBuiltin::NpcOnBeforeHit;
+// npc_on_before_hit / monster_on_before_hit / actor_on_before_hit_ex: one schema, one meaning of the result
+bool EmitBeforeHit(events::EBuiltin event, CEntityAlive* victim, SHit& hit)
+{
     if (!victim || !events::HasSubscribers(event))
         return true;
     const IGameObject* who = hit.who;
@@ -665,6 +667,18 @@ bool BeforeHit(CEntityAlive* victim, SHit& hit, bool monster)
         return false;
     hit.power = static_cast<float>(std::min(power, static_cast<double>(FLT_MAX)));
     return true;
+}
+} // namespace
+
+bool BeforeHit(CEntityAlive* victim, SHit& hit, bool monster)
+{
+    return EmitBeforeHit(monster ? events::EBuiltin::MonsterOnBeforeHit : events::EBuiltin::NpcOnBeforeHit, victim, hit);
+}
+
+// P22 (plans/addon_api_ideas, group plugin): the readable hit of the actor
+bool ActorBeforeHit(CEntityAlive* actor, SHit& hit)
+{
+    return EmitBeforeHit(events::EBuiltin::ActorOnBeforeHitEx, actor, hit);
 }
 
 bool WantsRelationEvents() { return events::HasSubscribers(events::EBuiltin::RelationOnChanged); }

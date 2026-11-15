@@ -285,6 +285,8 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
     m_exit_button = UIHelper::Create3tButton(uiXml, "exit_button", this);
 
     m_clock_value = UIHelper::CreateStatic(uiXml, "clock_value", this, false);
+    // npc_equipment.md: the caption over the slots in the mode "equipment of the partner" (optional node)
+    m_partner_equipment_caption = UIHelper::CreateStatic(uiXml, "partner_equipment_caption", this, false);
 
     m_ItemInfo = xr_new<CUIItemInfo>();
     m_ItemInfo->InitItemInfo(ACTOR_MENU_ITEM_XML);

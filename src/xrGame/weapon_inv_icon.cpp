@@ -17,8 +17,10 @@
 #include "UIGameCustom.h"
 #include "ui/UIActorMenu.h"
 #include "xrServer.h"
+#include "level_preview_model.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "xrCommon/xr_map.h"
 
@@ -81,11 +83,35 @@ struct SPresetAngles
     float rt_grid_h{ICON_GRID_HEIGHT};
     float ui_grid_w{ICON_GRID_WIDTH};
     float ui_grid_h{ICON_GRID_HEIGHT};
+    // Model icons only (inv_icon_model): the part of the icon the box of the model fills, 0.3..1
+    float fill{0.9f};
 };
 
 SPresetAngles g_presets[eWpnInvIconPreset_COUNT];
 
 xr_vector<CInventoryItem*> g_pending;
+
+// Model icons (inv_icon_model). The inventory preset of such a section starts from g_inv_model_preset, not from the
+// weapon one. A model met for the first time is loaded from disk with its textures (a few ms), so these renders have
+// their own cap per frame. Sections with no item behind them (cells built from a section string) wait in their own
+// queue. g_inv_model_tries: failed renders per section; kInvModelGaveUp - never again until the settings reload.
+SPresetAngles g_inv_model_preset;
+u32 g_inv_model_icons_per_frame = 2;
+struct SInvModelSectionRequest
+{
+    shared_str section;
+    EWeaponInvIconPreset preset;
+};
+xr_vector<SInvModelSectionRequest> g_inv_model_pending_sections;
+xr_map<shared_str, u8> g_inv_model_tries;
+constexpr u8 kInvModelMaxTries = 8;
+constexpr u8 kInvModelGaveUp = 0xFF;
+constexpr pcstr kInvModelKey = "inv_icon_model";
+
+bool SectionHasInvModelKey(pcstr section)
+{
+    return section && section[0] && pSettings->line_exist(section, kInvModelKey);
+}
 
 static void MarkSectionInvIconPresetReady(const shared_str& sect, EWeaponInvIconPreset p)
 {
@@ -197,9 +223,10 @@ static bool TryGetWeaponGridSizeFromSection(pcstr section, u32& out_gw, u32& out
 
 static SPresetAngles ResolveWeaponPreset(pcstr weapon_section, EWeaponInvIconPreset preset)
 {
-    SPresetAngles out = g_presets[preset];
     if (!weapon_section || !weapon_section[0])
-        return out;
+        return g_presets[preset];
+    SPresetAngles out =
+        (preset == eWpnInvIcon_Inventory && SectionHasInvModelKey(weapon_section)) ? g_inv_model_preset : g_presets[preset];
 
     out.yaw_deg = ReadPresetFloatOverride(weapon_section, preset, "yaw_deg", out.yaw_deg);
     out.pitch_deg = ReadPresetFloatOverride(weapon_section, preset, "pitch_deg", out.pitch_deg);
@@ -213,7 +240,9 @@ static SPresetAngles ResolveWeaponPreset(pcstr weapon_section, EWeaponInvIconPre
     out.rt_grid_h = ReadPresetFloatOverride(weapon_section, preset, "rt_grid_height", out.rt_grid_h);
     out.ui_grid_w = ReadPresetFloatOverride(weapon_section, preset, "ui_grid_width", out.ui_grid_w);
     out.ui_grid_h = ReadPresetFloatOverride(weapon_section, preset, "ui_grid_height", out.ui_grid_h);
+    out.fill = ReadPresetFloatOverride(weapon_section, preset, "fill", out.fill);
 
+    clamp(out.fill, 0.3f, 1.f);
     clamp(out.proj_aspect, 0.2f, 5.f);
     clamp(out.frame_shift_ax, -2.f, 2.f);
     clamp(out.frame_shift_ay, -2.f, 2.f);
@@ -300,6 +329,39 @@ void EnsureLoaded()
     load_preset(inv_name, g_presets[eWpnInvIcon_Inventory]);
     load_preset(tech_name, g_presets[eWpnInvIcon_Technician]);
 
+    // inv_icon_model: a three-quarter view from above, the box of the model fit into the icon (BuildInvModelViewProj),
+    // 128 RT texels per cell drawn into the cell itself. The optional preset section overrides these defaults.
+    {
+        SPresetAngles& m = g_inv_model_preset;
+        m = SPresetAngles{};
+        m.yaw_deg = 35.f;
+        m.pitch_deg = 25.f;
+        m.fov_deg = 20.f;
+        m.fill = 0.9f;
+        m.rt_grid_w = m.rt_grid_h = 128.f;
+        m.ui_grid_w = m.ui_grid_h = 128.f;
+        pcstr model_name = pSettings->read_if_exists<pcstr>("weapon_inv_icon", "preset_section_model", "weapon_inv_icon_model");
+        if (model_name && pSettings->section_exist(model_name))
+        {
+            m.yaw_deg = pSettings->read_if_exists<float>(model_name, "yaw_deg", m.yaw_deg);
+            m.pitch_deg = pSettings->read_if_exists<float>(model_name, "pitch_deg", m.pitch_deg);
+            m.fov_deg = pSettings->read_if_exists<float>(model_name, "fov_deg", m.fov_deg);
+            m.fill = pSettings->read_if_exists<float>(model_name, "fill", m.fill);
+            m.rt_grid_w = pSettings->read_if_exists<float>(model_name, "rt_grid_width", m.rt_grid_w);
+            m.rt_grid_h = pSettings->read_if_exists<float>(model_name, "rt_grid_height", m.rt_grid_h);
+            m.ui_grid_w = pSettings->read_if_exists<float>(model_name, "ui_grid_width", m.rt_grid_w);
+            m.ui_grid_h = pSettings->read_if_exists<float>(model_name, "ui_grid_height", m.rt_grid_h);
+        }
+        clamp(m.fill, 0.3f, 1.f);
+        clamp(m.fov_deg, 4.f, 89.f);
+        clamp(m.rt_grid_w, 1.f, 1024.f);
+        clamp(m.rt_grid_h, 1.f, 1024.f);
+        clamp(m.ui_grid_w, 1.f, 1024.f);
+        clamp(m.ui_grid_h, 1.f, 1024.f);
+    }
+    g_inv_model_icons_per_frame = pSettings->read_if_exists<u32>("weapon_inv_icon", "model_icons_per_frame", 2);
+    clamp(g_inv_model_icons_per_frame, 1u, 64u);
+
     g_debug_trace = pSettings->read_if_exists<bool>("weapon_inv_icon", "debug_trace", false);
     g_debug_cache_trace = pSettings->read_if_exists<bool>("weapon_inv_icon", "debug_inv_icon_cache", false);
     g_debug_break_schedule = pSettings->read_if_exists<bool>("weapon_inv_icon", "debug_break_on_schedule", false);
@@ -380,6 +442,7 @@ void ReloadSettings()
     g_loaded = false;
     EnsureLoaded();
     g_section_inv_icon_presets_ready.clear();
+    g_inv_model_tries.clear(); // the model of a section that failed may be fixed in the reloaded ini
     ++g_inv_icon_rt_epoch;
 }
 
@@ -425,7 +488,41 @@ bool IsEnabledForSection(pcstr weapon_section)
     EnsureLoaded();
     if (!g_global_enabled || !weapon_section)
         return false;
-    return pSettings->read_if_exists<bool>(weapon_section, "use_dynamic_inv_icon", false);
+    // An explicit use_dynamic_inv_icon decides; without it, inv_icon_model turns the (model) icon on
+    if (pSettings->line_exist(weapon_section, "use_dynamic_inv_icon"))
+        return pSettings->r_bool(weapon_section, "use_dynamic_inv_icon");
+    return SectionHasInvModelKey(weapon_section);
+}
+
+bool SectionUsesModelIcon(pcstr section)
+{
+    return SectionHasInvModelKey(section) && IsEnabledForSection(section);
+}
+
+static bool InvModelIconGaveUp(const shared_str& section)
+{
+    const auto it = g_inv_model_tries.find(section);
+    return it != g_inv_model_tries.end() && it->second == kInvModelGaveUp;
+}
+
+void ScheduleSection(pcstr section, EWeaponInvIconPreset preset)
+{
+    GW_OVERLAP_HAZARD("weapon_inv_icon::ScheduleSection");
+    if (GEnv.isDedicatedServer || !section || !section[0] || preset >= eWpnInvIconPreset_COUNT)
+        return;
+    if (!SectionUsesModelIcon(section))
+        return;
+    const shared_str sect(section);
+    if (SectionInvIconPresetReady(sect, preset) || InvModelIconGaveUp(sect))
+        return;
+    for (const SInvModelSectionRequest& r : g_inv_model_pending_sections)
+    {
+        if (r.section == sect && r.preset == preset)
+            return;
+    }
+    g_inv_model_pending_sections.push_back({sect, preset});
+    WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] QUEUE_SECTION sect=[%s] preset=%u (model icon, no item)",
+        section, (u32)preset);
 }
 
 bool IsEnabledForItem(const CInventoryItem* item)
@@ -450,6 +547,9 @@ void ScheduleItem(CInventoryItem* item, EWeaponInvIconPreset preset)
     pcstr sect = item->m_section_id.c_str();
 
     if (!IsEnabledForSection(sect))
+        return;
+    // A model icon that cannot be made (no model file, empty box): the static icon stays, nothing is queued
+    if (InvModelIconGaveUp(item->m_section_id))
         return;
 
     // The request set is cumulative: a weapon the player once opened at the technician keeps its
@@ -673,6 +773,263 @@ void OnWeaponIconSnapshot(IRenderable* subject, bool begin)
     }
 }
 
+// ----- Model icons (inv_icon_model) -----
+
+namespace
+{
+// What WeaponIcon_RenderToTexture draws for a model icon: a model with no game object at the identity transform. Not a
+// RenderableBase: its destructor gives the visual back to the pool itself (and asserts outside of rendering), here
+// RenderInvModelIcon owns the visual. No ROS (lighting object): the icon takes only the albedo of the g-buffer. Lives on
+// the stack - WeaponIcon_RenderToTexture drains every dsgraph list that holds it before it returns.
+class CInvIconModelSubject final : public IRenderable
+{
+public:
+    explicit CInvIconModelSubject(IRenderVisual* visual)
+    {
+        m_data.xform.identity();
+        m_data.visual = visual;
+        m_data.pROS = nullptr;
+        m_data.pROS_Allowed = false;
+        m_data.invisible = false;
+        m_data.hud = false;
+    }
+
+    RenderData& GetRenderData() override { return m_data; }
+    void renderable_Render(u32 context_id, IRenderable* root) override
+    {
+        if (!m_data.visual)
+            return;
+        GEnv.Render->add_Visual(context_id, root, m_data.visual, m_data.xform);
+        m_data.visual->getVisData().hom_frame = Device.dwFrame;
+    }
+    IRender_ObjectSpecific* renderable_ROS() override { return nullptr; }
+    bool renderable_ShadowGenerate() override { return false; }
+    bool renderable_ShadowReceive() override { return false; }
+    bool renderable_Invisible() override { return false; }
+    void renderable_Invisible(bool) override {}
+    bool renderable_HUD() override { return false; }
+    void renderable_HUD(bool) override {}
+
+private:
+    RenderData m_data;
+};
+
+enum EInvModelIconResult : u8
+{
+    eInvModelIcon_Ok,
+    eInvModelIcon_Retry, // the render said no (device not ready, renderer without the icon pass) - try later
+    eInvModelIcon_Fail, // nothing to shoot (no model, no file, empty box) - never again until the settings reload
+};
+
+// The model of the section's inv_icon_model: the visual of the section it names, or the value itself as a model name.
+// nullptr - empty key, or a named section without visual.
+pcstr ResolveInvModelVisual(pcstr section)
+{
+    if (!SectionHasInvModelKey(section))
+        return nullptr;
+    pcstr value = pSettings->r_string(section, kInvModelKey);
+    if (!value || !value[0])
+        return nullptr;
+    if (pSettings->section_exist(value))
+    {
+        pcstr visual = pSettings->line_exist(value, "visual") ? pSettings->r_string(value, "visual") : nullptr;
+        return (visual && visual[0]) ? visual : nullptr;
+    }
+    return value;
+}
+
+// Camera of a model icon: looks at the box from the preset angles (yaw - around the vertical axis, 0 = from +Z; pitch -
+// above the horizon) and stands as close as the eight corners allow, so that the box fills `fill` of the icon
+// (perspective, fov_deg vertical) and its projection is centred. RT size w x h.
+bool BuildInvModelViewProj(pcstr section, const Fbox& box, EWeaponInvIconPreset preset, u32 w, u32 h, Fmatrix& out_view,
+    Fmatrix& out_proj)
+{
+    if (!box.is_valid() || !w || !h)
+        return false;
+    Fvector center, size;
+    box.getcenter(center);
+    box.getsize(size);
+    const float radius = size.magnitude() * 0.5f;
+    if (!_valid(radius) || radius < EPS_L)
+        return false;
+
+    const SPresetAngles P = ResolveWeaponPreset(section, preset);
+    float pitch_deg = P.pitch_deg;
+    clamp(pitch_deg, -80.f, 80.f); // keeps the world up usable as the camera up
+    const float yaw = deg2rad(P.yaw_deg);
+    const float pitch = deg2rad(pitch_deg);
+    Fvector to_eye;
+    to_eye.set(std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch));
+    const Fvector world_up{0.f, 1.f, 0.f};
+
+    // The view basis with the camera 1 m away from the centre (which lands at 0, 0, 1). A corner: x, y - in the view
+    // plane through the centre, z - its depth from that plane (+ away from the camera).
+    Fvector eye;
+    eye.add(center, to_eye);
+    Fmatrix basis;
+    basis.build_camera(eye, center, world_up);
+    Fvector corners[8];
+    float z_min = flt_max, z_max = -flt_max;
+    for (int i = 0; i < 8; ++i)
+    {
+        box.getpoint(i, corners[i]);
+        basis.transform_tiny(corners[i]);
+        corners[i].z -= 1.f;
+        z_min = _min(z_min, corners[i].z);
+        z_max = _max(z_max, corners[i].z);
+    }
+
+    const float tan_y = std::tan(deg2rad(P.fov_deg) * 0.5f);
+    const float tan_x = tan_y * float(w) / float(h); // build_projection: aspect h / w scales x
+    // (ox, oy) - the shift of the look point in the view plane that centres the projection
+    float ox = 0.f, oy = 0.f;
+    const auto fit_distance = [&]() {
+        float d = 0.f;
+        for (const Fvector& c : corners)
+        {
+            d = _max(d, std::fabs(c.x - ox) / (tan_x * P.fill) - c.z);
+            d = _max(d, std::fabs(c.y - oy) / (tan_y * P.fill) - c.z);
+            d = _max(d, 0.05f * radius - c.z); // every corner in front of the camera
+        }
+        return d;
+    };
+    float dist = fit_distance();
+    for (int pass = 0; pass < 3; ++pass)
+    {
+        float u0 = flt_max, u1 = -flt_max, v0 = flt_max, v1 = -flt_max;
+        for (const Fvector& c : corners)
+        {
+            const float depth = dist + c.z;
+            const float u = (c.x - ox) / depth;
+            const float v = (c.y - oy) / depth;
+            u0 = _min(u0, u);
+            u1 = _max(u1, u);
+            v0 = _min(v0, v);
+            v1 = _max(v1, v);
+        }
+        ox += 0.5f * (u0 + u1) * dist;
+        oy += 0.5f * (v0 + v1) * dist;
+        dist = fit_distance();
+    }
+    if (!_valid(dist) || !_valid(ox) || !_valid(oy))
+        return false;
+
+    Fmatrix inv;
+    inv.invert(basis);
+    Fvector right, up;
+    inv.transform_dir(right, Fvector().set(1.f, 0.f, 0.f));
+    inv.transform_dir(up, Fvector().set(0.f, 1.f, 0.f));
+    Fvector target = center;
+    target.mad(right, ox);
+    target.mad(up, oy);
+    Fvector cam;
+    cam.mad(target, to_eye, dist);
+    out_view.build_camera(cam, target, world_up);
+
+    const float near_plane = _max(0.005f, (dist + z_min) * 0.5f);
+    const float far_plane = dist + z_max + radius + 1.f;
+    out_proj.build_projection(deg2rad(P.fov_deg), float(h) / float(w), near_plane, far_plane);
+    return true;
+}
+
+// Renders the model icon of `section` into `tex`. The visual comes from the model pool and goes back to it right after
+// the shot, without discard: a discarded instance could be one somebody else still points at (plans/addon_base_building
+// plan.md 17.25), and nothing of this instance is changed. The model file is checked first: the pool stops the game on
+// a missing one.
+EInvModelIconResult RenderInvModelIcon(pcstr section, EWeaponInvIconPreset preset, const shared_str& tex)
+{
+    pcstr visual_name = ResolveInvModelVisual(section);
+    if (!visual_name)
+    {
+        Msg("! [weapon_inv_icon] [%s]: %s names no model (empty, or a section without visual)", section, kInvModelKey);
+        return eInvModelIcon_Fail;
+    }
+    if (!gw::preview_model::ModelFileExists(visual_name, kInvModelKey))
+        return eInvModelIcon_Fail;
+
+    IRenderVisual* visual = GEnv.Render->model_Create(visual_name);
+    if (!visual)
+    {
+        Msg("! [weapon_inv_icon] [%s]: model_Create('%s') failed", section, visual_name);
+        return eInvModelIcon_Fail;
+    }
+
+    u32 tw, th;
+    GetWeaponIconRtTexelSizeForSection(section, preset, tw, th);
+    Fmatrix view, proj;
+    EInvModelIconResult result = eInvModelIcon_Fail;
+    if (BuildInvModelViewProj(section, visual->getVisData().box, preset, tw, th, view, proj))
+    {
+        CInvIconModelSubject subject(visual);
+        result = GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, &subject) ?
+            eInvModelIcon_Ok :
+            eInvModelIcon_Retry;
+    }
+    else
+        Msg("! [weapon_inv_icon] [%s]: model '%s' has an empty bounding box", section, visual_name);
+
+    GEnv.Render->model_Delete(visual); // back to the pool (no discard, see above)
+
+    if (g_debug_trace)
+        Msg("~ [weapon_inv_icon] model icon sect=[%s] model=[%s] %ux%u tex=[%s] result=%u", section, visual_name, tw, th,
+            tex.c_str(), (u32)result);
+    return result;
+}
+
+// One more failed render of a section's model icon. True: worth another try.
+bool NoteInvModelIconFailure(const shared_str& section, EInvModelIconResult result)
+{
+    u8& tries = g_inv_model_tries[section];
+    if (tries == kInvModelGaveUp)
+        return false;
+    if (result == eInvModelIcon_Fail || ++tries >= kInvModelMaxTries)
+    {
+        tries = kInvModelGaveUp;
+        Msg("! [weapon_inv_icon] gave up the model icon of [%s]; the static icon is used", section.c_str());
+        return false;
+    }
+    return true;
+}
+
+// The section's model icon still needs a render for some preset the item asked for (not in the shared section RT)
+bool ItemNeedsInvModelRender(CInventoryItem* item)
+{
+    if (!item || item->IsInvalid() || !SectionUsesModelIcon(item->m_section_id.c_str()))
+        return false;
+    const u8 want = item->InvIconRequestedPresets();
+    for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
+    {
+        const auto preset = (EWeaponInvIconPreset)pi;
+        if (!(want & (u8)(1u << pi)) || item->DynamicInvIconPresetReady(preset))
+            continue;
+        if (!item->InvIconUsesSharedSectionRt() || !SectionInvIconPresetReady(item->m_section_id, preset))
+            return true;
+    }
+    return false;
+}
+
+// A section taken off g_inv_model_pending_sections (a copy: a retry goes back to that vector): renders its shared RT,
+// or finds it done meanwhile
+void ProcessInvModelSection(const SInvModelSectionRequest request)
+{
+    if (SectionInvIconPresetReady(request.section, request.preset) || InvModelIconGaveUp(request.section))
+        return;
+    if (!SectionUsesModelIcon(request.section.c_str()))
+        return;
+    const EInvModelIconResult result = RenderInvModelIcon(
+        request.section.c_str(), request.preset, TextureResourceName(request.section.c_str(), request.preset));
+    if (result == eInvModelIcon_Ok)
+    {
+        MarkSectionInvIconPresetReady(request.section, request.preset);
+        g_inv_model_tries.erase(request.section);
+        WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] SECTION_MAP_STORE sect=[%s] preset=%u (model icon, no item)",
+            request.section.c_str(), (u32)request.preset);
+    }
+    else if (NoteInvModelIconFailure(request.section, result))
+        g_inv_model_pending_sections.push_back(request);
+}
+} // namespace
+
 static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
 {
     if (!item || item->IsInvalid())
@@ -682,12 +1039,14 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
         return;
     }
 
-    CWeapon* w = item->cast_weapon();
+    // inv_icon_model: the shot of another model, not of the item's own visual (a placement kit shows its decor)
+    const bool model_icon = SectionUsesModelIcon(item->m_section_id.c_str());
+    CWeapon* w = model_icon ? nullptr : item->cast_weapon();
 
     // Non-weapon addons (scopes, silencers, grips, etc.) with use_dynamic_inv_icon=true
     // inherit CInventoryItemObject -> CPhysicItem -> CGameObject, so they have Visual().
     CGameObject* non_wpn_go = nullptr;
-    if (!w)
+    if (!w && !model_icon)
     {
         non_wpn_go = smart_cast<CGameObject*>(item);
         if (!non_wpn_go || !non_wpn_go->Visual())
@@ -715,6 +1074,29 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
             WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] SECTION_MAP_HIT id=%u sect=[%s] preset=%u tex=[%s] "
                                    "(no GPU render, marked item ready)",
                 item->object_id(), item->m_section_id.c_str(), pi, TextureResourceName(item, preset).c_str());
+            continue;
+        }
+
+        if (model_icon)
+        {
+            const shared_str tex = TextureResourceName(item, preset);
+            const EInvModelIconResult result = RenderInvModelIcon(item->m_section_id.c_str(), preset, tex);
+            if (result == eInvModelIcon_Ok)
+            {
+                item->SetDynamicInvIconPresetReady(preset, true);
+                g_inv_model_tries.erase(item->m_section_id);
+                if (item->InvIconUsesSharedSectionRt())
+                    MarkSectionInvIconPresetReady(item->m_section_id, preset);
+                WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] RENDER_NEW id=%u sect=[%s] preset=%u model icon tex=[%s]",
+                    item->object_id(), item->m_section_id.c_str(), pi, tex.c_str());
+            }
+            else if (!NoteInvModelIconFailure(item->m_section_id, result))
+            {
+                // Given up: the item keeps its static icon and is not queued again (ScheduleItem checks the same)
+                item->SetNeedDynamicInvIconUpgrade(false);
+                item->ClearInvIconQueueRetries();
+                return;
+            }
             continue;
         }
 
@@ -796,7 +1178,7 @@ static void DrainEvictedInvIconKeys();
 
 // Conservative (a disabled feature or a zero budget still counts): only decides whether the early main build
 // (r__main_build_early) may run this frame - the icons render on the render's immediate dsgraph in Calculate().
-bool RenderPassPending() { return !g_pending.empty(); }
+bool RenderPassPending() { return !g_pending.empty() || !g_inv_model_pending_sections.empty(); }
 
 void ProcessRenderPass()
 {
@@ -808,7 +1190,7 @@ void ProcessRenderPass()
 
     DrainEvictedInvIconKeys();
 
-    if (g_pending.empty())
+    if (g_pending.empty() && g_inv_model_pending_sections.empty())
         return;
 
     u32 frame_budget = g_icons_per_frame;
@@ -826,12 +1208,30 @@ void ProcessRenderPass()
     if (g_debug_break_process)
         WPN_INV_ICON_DBG_BREAK();
 
+    // Model icons have a cap of their own (g_inv_model_icons_per_frame): the queue stops at an item that needs one
+    // when the cap is spent, and keeps its order for the next frame
+    u32 model_budget = g_inv_model_icons_per_frame;
     const u32 budget = _min<u32>(frame_budget, (u32)g_pending.size());
     for (u32 i = 0; i < budget; ++i)
     {
         CInventoryItem* item = g_pending.front();
+        const bool model_render = ItemNeedsInvModelRender(item);
+        if (model_render && !model_budget)
+            break;
         g_pending.erase(g_pending.begin());
+        if (model_render)
+            --model_budget;
         ProcessDynamicInvIconForSingleItem(item);
+    }
+
+    // Sections with no item behind them (cells built from a section string), with what is left of the cap
+    while (model_budget && !g_inv_model_pending_sections.empty())
+    {
+        const SInvModelSectionRequest request = g_inv_model_pending_sections.front();
+        g_inv_model_pending_sections.erase(g_inv_model_pending_sections.begin());
+        if (!SectionInvIconPresetReady(request.section, request.preset))
+            --model_budget;
+        ProcessInvModelSection(request);
     }
 }
 
@@ -961,6 +1361,14 @@ void LogInvIconStats(bool detailed)
         items, requested, ready_inv, ready_tech);
     Msg("~ [inv_icon_stats] render queue: %u pending, %u per frame (%u while the inventory is open), epoch %u",
         (u32)g_pending.size(), g_icons_per_frame, g_icons_per_frame_inventory_open, g_inv_icon_rt_epoch);
+    u32 model_gave_up = 0;
+    for (const auto& it : g_inv_model_tries)
+    {
+        if (it.second == kInvModelGaveUp)
+            ++model_gave_up;
+    }
+    Msg("~ [inv_icon_stats] model icons (inv_icon_model): %u section(s) pending, %u per frame, %u given up",
+        (u32)g_inv_model_pending_sections.size(), g_inv_model_icons_per_frame, model_gave_up);
 }
 
 void OnWeaponIconUserRtsReleased()
@@ -981,6 +1389,7 @@ static void ReleaseAllInvIconRtsAndState()
     OnWeaponIconUserRtsReleased();
 
     g_pending.clear();
+    g_inv_model_pending_sections.clear();
 }
 
 void HotReloadInvIconSettings()

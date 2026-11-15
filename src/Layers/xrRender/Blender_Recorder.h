@@ -48,6 +48,13 @@ private:
     SPass dest;
     R_constant_table ctable;
 
+    // GPU instancing (plans/render_instancing/plan.md): the INSTANCED twin of the pass being recorded. r_Pass sets it
+    // up for the rigid model vertex shaders (r_PassInstancedTwin), r_End finishes it into dest.inst.
+    SPass dest_inst;
+    R_constant_table ctable_inst;
+    bool bInstTwin{};
+    void r_PassInstancedTwin(LPCSTR vs, LPCSTR ps, u32 vs_flags);
+
     STextureList passTextures;
     SMatrixList passMatrices;
     SConstantList passConstants;

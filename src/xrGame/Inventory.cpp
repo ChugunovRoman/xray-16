@@ -202,14 +202,19 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
 
     m_all.push_back(pIItem);
 
-    if (!strict_placement)
+    // npc_equipment.md: an NPC whose equipment the player sets up keeps the saved place of an item (a load: a moved
+    // item has its place reset by OnH_*_Independent). Its belt goes strictly - the outfit giving the belt its width may
+    // come after the belt items
+    const bool keep_place = !strict_placement && m_pOwner->equipment_editable() &&
+        (pIItem->m_ItemCurrPlace.type == eItemPlaceSlot || pIItem->m_ItemCurrPlace.type == eItemPlaceBelt);
+    if (!strict_placement && !keep_place)
         pIItem->m_ItemCurrPlace.type = eItemPlaceUndefined;
 
     bool result = false;
     switch (pIItem->m_ItemCurrPlace.type)
     {
     case eItemPlaceBelt:
-        result = Belt(pIItem, strict_placement);
+        result = Belt(pIItem, strict_placement || keep_place);
         if (!result)
             pIItem->m_ItemCurrPlace.type = eItemPlaceUndefined;
 #ifdef DEBUG
@@ -243,14 +248,18 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
     {
         const bool slotFirst = pSettingsOpenXRay->read_if_exists<bool>("compatibility", "default_to_slot", ShadowOfChernobylMode);
         const bool defaultToRuck = pIItem->RuckDefault();
+        // npc_equipment.md: an outfit, a PDA, a belt item that an equipment_editable NPC got (a corpse, the player) is
+        // put on only by the player - the NPC does not dress itself in looted armour
+        const bool by_player_only = m_pOwner->equipment_editable();
 
         if (slotFirst || !defaultToRuck)
         {
-            if (CanPutInSlot(pIItem, pIItem->BaseSlot()))
+            if ((!by_player_only || !m_pOwner->EquipmentSlotOverride(pIItem->BaseSlot())) &&
+                CanPutInSlot(pIItem, pIItem->BaseSlot()))
             {
                 result = Slot(pIItem->BaseSlot(), pIItem, bNotActivate, strict_placement);
             }
-            else if (!defaultToRuck && CanPutInBelt(pIItem))
+            else if (!defaultToRuck && !by_player_only && CanPutInBelt(pIItem))
             {
                 result = Belt(pIItem, strict_placement);
             }
@@ -1358,7 +1367,8 @@ bool CInventory::CanPutInSlot(PIItem pIItem, u16 slot_id) const
     if (!m_bSlotsUseful)
         return false;
 
-    if (!GetOwner()->CanPutInSlot(pIItem, slot_id))
+    // npc_equipment.md: an equipment_editable NPC takes the slots its class refuses (CAI_Stalker: outfit, PDA)
+    if (!GetOwner()->CanPutInSlot(pIItem, slot_id) && !GetOwner()->EquipmentSlotOverride(slot_id))
         return false;
 
     if (slot_id == HELMET_SLOT)
@@ -1468,6 +1478,12 @@ u32 CInventory::BeltWidth() const
         {
             return outfit->get_artefact_count();
         }
+    }
+    // npc_equipment.md: the belt of an equipment_editable NPC, like the actor's: as wide as its outfit allows
+    else if (m_pOwner && m_pOwner->equipment_editable())
+    {
+        if (CCustomOutfit* outfit = m_pOwner->GetOutfit())
+            return outfit->get_artefact_count();
     }
     return 0; // m_iMaxBelt;
 }

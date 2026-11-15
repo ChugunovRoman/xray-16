@@ -761,6 +761,21 @@ void WriteAddonsReport(pcstr when)
         json.texts("load_after", addon.load_after);
         json.texts("patches", addon.patches); // [addon] patches: a compatibility patch of these (addon_merge.h)
         json.text("game_version", addon.game_version); // [addon] game_version: the base of its replacements
+        // [addon] conflicts (open questions 2026-11-15, 1.2 (B)): the addons of this run it conflicts with, both ways;
+        // the engine loads both of a pair, the launcher decides. A field added to format 1: older readers skip it
+        json.open("conflicts", '[');
+        for (const AddonInfo::ConflictInfo& pair : addon.conflicts)
+        {
+            json.open(nullptr, '{');
+            json.text("id", pair.id);
+            json.text("version", pair.version);
+            json.text("state", pair.state);
+            json.flag("active", pair.active);
+            json.text("declared_by", pair.declared_by); // self | other | both
+            json.text("rule", pair.rule);
+            json.close('}');
+        }
+        json.close(']');
         xr_vector<xr_string> layers;
         for (const ContentLayer& layer : g_content_mounted)
         {

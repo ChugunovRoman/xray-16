@@ -1900,6 +1900,13 @@ void CGameObject::shedule_Update(u32 dt)
         }
         else
             PERF_INC(binder_skip_throttle);
+
+        // actor_on_frame (bus event): the actor is a real-time scheduler item (Actor_Network.cpp, t_min = t_max = 1)
+        // - its shedule_Update runs every frame that is not paused, after FrameMove and OnCameraUpdated, so subscribers
+        // see the camera of this frame. Sent after the binder pass above (actor_on_update* when it was due); a lookup
+        // in the bus without subscribers. Not ObjectBinderUpdate: that one is throttled with the binder.
+        if (is_actor)
+            gw::addons::objevents::ActorFrame(this, dt);
     }
     STOP_PROFILE
 }

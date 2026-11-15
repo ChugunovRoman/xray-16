@@ -9,6 +9,82 @@ namespace xray::render::RENDER_NAMESPACE
 {
 void fix_texture_name(pstr fn);
 
+namespace
+{
+// GPU instancing (plans/render_instancing/plan.md): the vertex shaders with an INSTANCED variant (gw_instancing.h of
+// the r3 and gl shaders) - the rigid model shaders of uber_deffer(C, .., "model", ..) and the shadow passes of the
+// model blenders. Not the tessellated ones (r_TessPass, another r_Pass) nor the forward/transparent model_def_lq.
+bool instancing_vs_supported(pcstr vs)
+{
+    static constexpr pcstr names[] = { "deffer_model_flat", "deffer_model_flat_d", "deffer_model_bump",
+        "deffer_model_bump_d", "deffer_model_bump-hq", "deffer_model_bump_d-hq", "shadow_direct_model",
+        "shadow_direct_model_aref" };
+    for (pcstr name : names)
+    {
+        if (0 == xr_stricmp(vs, name))
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+// The twin of the pass r_Pass records: the same pixel shader and (in r_End) the same state and textures, the INSTANCED
+// variant of the vertex shader. Only for rigid meshes: no skinning variant (Fvisual, FProgressive) or SKIN_0 (the
+// one-bone RM_SINGLE children of skeletons) - the palette-skinned variants SKIN_1..4 get no twin.
+void CBlender_Compile::r_PassInstancedTwin(LPCSTR _vs, LPCSTR _ps, u32 vs_flags)
+{
+    bInstTwin = false;
+    // r__instancing 0 (the emergency switch, read when the shader is created): no twin at all - no INSTANCED vertex
+    // shader to compile (its failure would be CHECK_OR_EXIT), the passes are exactly the ones without instancing.
+    // Switched on again in the game, it applies to the shaders created after that (all of them after a restart).
+    if (!ps_r__instancing || !instancing_vs_supported(_vs) || RImplementation.shader_skinning() > 0)
+        return;
+#if defined(USE_OGL)
+    // Without ARB_separate_shader_objects the pass is one linked program, and the stage of each sampler is its index
+    // among the active uniforms of that program (R_constant_table::parse, RC_dest_all). The twin program has other
+    // vertex uniforms (gw_inst instead of m_WVP...), so its sampler stages differ from those of dest.T and the sampler
+    // states of r_End, which the twin shares: the textures would land on the wrong samplers. No twin then.
+    if (!GLAD_GL_ARB_separate_shader_objects)
+        return;
+#endif
+
+    ctable_inst.clear();
+    dest_inst.ps = nullptr;
+    dest_inst.vs = nullptr;
+    dest_inst.gs = nullptr;
+#if defined(USE_DX11)
+    dest_inst.hs = nullptr;
+    dest_inst.ds = nullptr;
+    dest_inst.cs = nullptr;
+#elif defined(USE_OGL)
+    dest_inst.pp = nullptr;
+#endif
+
+    RImplementation.shader_option_instanced(true); // the "_i" names, the INSTANCED define
+#if defined(USE_OGL)
+    dest_inst.pp = RImplementation.Resources->_CreatePP(_vs, _ps, "null", "null", "null");
+    if (GLAD_GL_ARB_separate_shader_objects || !dest_inst.pp->pp)
+#endif
+    {
+        dest_inst.ps = RImplementation.Resources->_CreatePS(_ps);
+        ctable_inst.merge(&dest_inst.ps->constants);
+        dest_inst.vs = RImplementation.Resources->_CreateVS(_vs, vs_flags);
+        ctable_inst.merge(&dest_inst.vs->constants);
+        dest_inst.gs = RImplementation.Resources->_CreateGS("null");
+#ifdef USE_DX11
+        dest_inst.hs = RImplementation.Resources->_CreateHS("null");
+        dest_inst.ds = RImplementation.Resources->_CreateDS("null");
+        dest_inst.cs = RImplementation.Resources->_CreateCS("null");
+#endif
+    }
+#if defined(USE_OGL)
+    RImplementation.Resources->_LinkPP(dest_inst);
+    ctable_inst.merge(&dest_inst.pp->constants);
+#endif
+    RImplementation.shader_option_instanced(false);
+    bInstTwin = true;
+}
+
 void CBlender_Compile::r_Pass(LPCSTR _vs, LPCSTR _ps, bool bFog, BOOL bZtest, BOOL bZwrite,
     BOOL bABlend, D3DBLEND abSRC, D3DBLEND abDST, BOOL aTest, u32 aRef)
 {
@@ -18,6 +94,7 @@ void CBlender_Compile::r_Pass(LPCSTR _vs, LPCSTR _ps, bool bFog, BOOL bZtest, BO
     passMatrices.clear();
     passConstants.clear();
     dwStage = 0;
+    u32 vs_flags = 0;
 
     // Setup FF-units (Z-buffer, blender)
     PassSET_ZB(bZtest, bZwrite);
@@ -37,6 +114,7 @@ void CBlender_Compile::r_Pass(LPCSTR _vs, LPCSTR _ps, bool bFog, BOOL bZtest, BO
         if (dest.ps->constants.dx9compatibility)
             flags |= D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
 #endif
+        vs_flags = flags;
         dest.vs = RImplementation.Resources->_CreateVS(_vs, flags);
         ctable.merge(&dest.vs->constants);
         dest.gs = RImplementation.Resources->_CreateGS("null");
@@ -50,6 +128,7 @@ void CBlender_Compile::r_Pass(LPCSTR _vs, LPCSTR _ps, bool bFog, BOOL bZtest, BO
     RImplementation.Resources->_LinkPP(dest);
     ctable.merge(&dest.pp->constants);
 #endif
+    r_PassInstancedTwin(_vs, _ps, vs_flags);
 
     // Last Stage - disable
     if (0 == xr_stricmp(_ps, "null"))
@@ -221,6 +300,28 @@ void CBlender_Compile::r_End()
     dest.T = RImplementation.Resources->_CreateTextureList(passTextures);
     dest.C = nullptr;
     dest.M = nullptr;
+    dest.inst = nullptr;
+    if (bInstTwin)
+    {
+        // GPU instancing: the twin gets the state, the textures and the constant handlers of the pass (SetMapping
+        // above and the blender's own r_Constant calls set them on ctable); its gw_inst array has no handler -
+        // render_matrix_items writes it
+        bInstTwin = false;
+        for (const ref_constant& C : ctable_inst.table)
+        {
+            const ref_constant src = ctable.get(C->name);
+            if (src && src->handler)
+                C->handler = src->handler;
+        }
+        dest_inst.constants = RImplementation.Resources->_CreateConstantTable(ctable_inst);
+        dest_inst.state = dest.state;
+        dest_inst.T = dest.T;
+        dest_inst.C = nullptr;
+        dest_inst.M = nullptr;
+        dest_inst.inst = nullptr;
+        dest.inst = RImplementation.Resources->_CreatePass(dest_inst);
+    }
     SH->passes.push_back(RImplementation.Resources->_CreatePass(dest));
+    dest.inst = nullptr; // PassEnd and the other r_Pass variants record no twin
 }
 } // namespace xray::render::RENDER_NAMESPACE

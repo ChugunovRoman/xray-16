@@ -75,7 +75,11 @@ void CUIDialogWnd::script_register(lua_State* luaState)
             .def("ShowDialog", &CUIDialogWnd::ShowDialog)
             .def("HideDialog", &CUIDialogWnd::HideDialog)
             .def("GetHolder", &CUIDialogWnd::GetHolder)
-            .def("SetHolder", &CUIDialogWnd::SetHolder),
+            .def("SetHolder", &CUIDialogWnd::SetHolder)
+            // The actor walks while the dialog takes the input (UIDialogWnd.h, m_bAllowMovement). Call before
+            // ShowDialog: StartMenu stops the actor once when the dialog is shown and StopAnyMove() is true
+            .def("AllowMovement", +[](CUIDialogWnd* self, bool allow) { self->m_bAllowMovement = allow; })
+            .def("IsMovementAllowed", +[](CUIDialogWnd* self) { return self->m_bAllowMovement; }),
 
         class_<CUIMessageBoxEx, CUIDialogWnd>("CUIMessageBoxEx")
             .def(constructor<>())

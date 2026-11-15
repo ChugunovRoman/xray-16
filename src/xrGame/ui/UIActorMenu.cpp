@@ -327,6 +327,9 @@ void CUIActorMenu::Update()
     {
         // Alundaio: remove distance check when opening inventory boxes
         //CheckDistance();
+        // npc_equipment.md: the side of the partner follows its inventory
+        if (m_pEquipOwner)
+            UpdatePartnerEquipment();
         break;
     }
     default: R_ASSERT(0); break;
@@ -548,7 +551,6 @@ void CUIActorMenu::QuickUnloadWeapons()
             continue;
 
         int const count = m_wpn->GetAmmoElapsed();
-        m_wpn->SetAmmoElapsed(0);
         LPCSTR const ammo_sec = pSettings->r_string(m_wpn->m_section_id, "ammo_class");
         R_ASSERT2(ammo_sec, make_string("! ERROR: Weapon [%s] doesn't contain property 'ammo_class' in config file!", m_wpn->m_section_id.c_str()));
 
@@ -560,6 +562,16 @@ void CUIActorMenu::QuickUnloadWeapons()
         else
             _GetItem(ammo_sec, m_wpn->GetAmmoType(), _ammoItem);
 
+        // an ammo section that does not exist (an addon wrote a wrong ammo_class): the weapon is skipped - its magazine
+        // stays as it is (spawning that section would be a fatal error)
+        if (!pSettings->section_exist(_ammoItem))
+        {
+            Msg("! [ui] weapon %s: ammo section '%s' does not exist, the weapon is not unloaded",
+                m_wpn->m_section_id.c_str(), _ammoItem);
+            continue;
+        }
+
+        m_wpn->SetAmmoElapsed(0);
         m_wpn->SpawnAmmo(count, _ammoItem, m_pActorInvOwner->cast_game_object()->ID());
 
         if (!m_wpn->bUseAttachmentSystem && g_quick_unload_scopes && m_wpn->ScopeAttachable() && m_wpn->IsScopeAttached())
@@ -647,7 +659,8 @@ void CUIActorMenu::SetCurrentItem(CUICellItem* itm)
             u16 compare_slot = current_item->BaseSlot();
             if (compare_slot != NO_ACTIVE_SLOT)
             {
-                compare_item = m_pActorInvOwner->inventory().ItemFromSlot(compare_slot);
+                // npc_equipment.md: compared with what the partner wears in the equipment mode
+                compare_item = EquipOwner()->inventory().ItemFromSlot(compare_slot);
             }
 
             if (GetMenuMode() != mmTrade)
@@ -720,7 +733,7 @@ void CUIActorMenu::InfoCurItem(CUICellItem* cell_item)
     PIItem compare_item = NULL;
     u16 compare_slot = current_item->BaseSlot();
     if (compare_slot != NO_ACTIVE_SLOT)
-        compare_item = m_pActorInvOwner->inventory().ItemFromSlot(compare_slot);
+        compare_item = EquipOwner()->inventory().ItemFromSlot(compare_slot); // npc_equipment.md: the partner's
 
     if (compare_item == NULL)
         compare_item = current_item;

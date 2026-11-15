@@ -115,6 +115,42 @@ void CUIKeyBinding::FillUpList(CUIXml& xml_doc_ui, LPCSTR path_ui)
         }
         xml_doc.SetLocalRoot(xml_doc.GetRoot());
     }
+
+    // The key groups of addons (addons.register_key_group -> AddonKeyGroupRegister, xr_level_controller.h): after the
+    // groups of the file, in the order of registration. Keyboard and mouse only - not in the gamepad list
+    if (!m_isGamepadBinds)
+    {
+        xr_vector<addon_key_group_view> groups;
+        AddonKeyGroups(groups);
+        for (const addon_key_group_view& group : groups)
+        {
+            if (group.actions.empty())
+                continue;
+            CUIStatic* item = xr_new<CUIStatic>(group.name.c_str());
+            CUIXmlInit::InitStatic(xml_doc_ui, strconcat(sizeof(buf), buf, path_ui, ":scroll_view:item_group"), 0, item);
+            item->TextItemControl()->SetTextST(group.title.c_str());
+            m_scroll_wnd->AddWindow(item, true);
+
+            for (const addon_key_action_view& action : group.actions)
+            {
+                item = xr_new<CUIStatic>(action.name.c_str());
+                CUIXmlInit::InitStatic(xml_doc_ui, strconcat(sizeof(buf), buf, path_ui, ":scroll_view:item_key"), 0, item);
+                item->TextItemControl()->SetTextST(action.label.c_str());
+                m_scroll_wnd->AddWindow(item, true);
+
+                for (int slot = 0; slot < 2; ++slot)
+                {
+                    const CUIFrameLineWnd& header = m_header[slot + 1];
+                    CUIEditKeyBind* editKB = xr_new<CUIEditKeyBind>(slot == 0);
+                    editKB->SetAutoDelete(true);
+                    editKB->InitKeyBind(Fvector2().set(header.GetWndPos().x, 0.0f),
+                        Fvector2().set(header.GetWidth() - 3.0f, item->GetWndSize().y));
+                    editKB->AssignProps(action.name, "key_binding");
+                    item->AttachChild(editKB);
+                }
+            }
+        }
+    }
 #ifdef DEBUG
     CheckStructure(xml_doc);
 #endif

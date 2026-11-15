@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 
 #include "addon_api_console.h"
+#include "addon_event_bus.h"
 #include "addon_host.h"
 #include "npc_cpp_profile.h"
 
@@ -46,6 +47,42 @@ struct PluginCvar
     ECvarSource source = ECvarSource::Default;
     int saved_int = 0; // the value in plugins.ltx after the last write: a difference means the file is stale
     float saved_float = 0.f;
+    // P19 (plans/addon_api_ideas, group plugin): a string variable (cvar_register_string, CCC_String)
+    bool is_string = false;
+    char string_value[GWP_CVAR_STRING_MAX + 1] = {};
+    xr_string saved_string;
+};
+
+// P19: a console command of a plugin (console_command_register). The record and the command live in the host: the
+// console keeps a pointer to the command, and the command calls the plugin under the crash guard.
+struct PluginCommandRecord;
+
+class PluginCommand final : public IConsole_Command
+{
+public:
+    PluginCommand(pcstr name, PluginCommandRecord& record) : IConsole_Command(name), m_record(record)
+    {
+        bEmptyArgsHandled = true; // the plugin decides what an empty argument means
+        bLowerCaseArgs = false;
+    }
+    void Execute(pcstr args) override;
+    void Info(TInfo& info) override;
+    void Save(IWriter*) override {} // a command has no value for user.ltx
+
+private:
+    PluginCommandRecord& m_record;
+};
+
+struct PluginCommandRecord
+{
+    xr_string name; // the command is registered with name.c_str(): the string must outlive the command
+    xr_string help;
+    const GwpPlugin* owner = nullptr;
+    GwpConsoleCommandFn fn = nullptr;
+    void* user = nullptr;
+    PluginCommand* command = nullptr;
+    u32 running = 0;   // inside Execute now: the console still touches the command after Execute (add_to_LRU)
+    bool dead = false; // removed while running: deleted by OnFrame once it returns
 };
 
 // Stage of the -npc_cpp_profile report owned by a plugin.
@@ -60,6 +97,8 @@ struct ProfileStage
 // pointers, so growing it moves nothing.
 xr_vector<PluginCvar*>* g_cvars = nullptr;
 xr_vector<xr_string>* g_deferred = nullptr;
+xr_vector<PluginCommandRecord*>* g_commands = nullptr; // P19: the live commands of plugins
+xr_vector<PluginCommandRecord*>* g_dead_commands = nullptr; // P19: removed during their own Execute
 
 // Stages, as the zone sites below: profile_add runs on any thread and works with an index, so the entries never
 // move (a fixed array, allocated once, never freed: a worker of the plugin may still add to a stage at the exit).
@@ -178,11 +217,8 @@ bool ParseCvarLine(pcstr line, xr_string& name, xr_string& value, bool& blank)
     pcstr value_begin = name_end;
     while (value_begin < end && IsBlank(*value_begin))
         ++value_begin;
-    for (pcstr p = value_begin; p < end; ++p)
-    {
-        if (IsBlank(*p))
-            return false; // more than one token
-    }
+    // The value is the rest of the line (P19: a string variable may hold blanks); a number with a second token fails
+    // its parse later (ApplyCvarText) and the variable keeps its default, as a line with two tokens did before
     name.assign(begin, name_end);
     value.assign(value_begin, end);
     return !value.empty() && ValidCvarName(name);
@@ -212,6 +248,14 @@ bool ParseFloat(pcstr text, float& out)
 // The same range checks as CCC_Integer and CCC_Float, so a saved value is what the console would accept.
 bool ApplyCvarText(PluginCvar& cvar, pcstr text, double min, double max)
 {
+    if (cvar.is_string)
+    {
+        // P19: one line of at most GWP_CVAR_STRING_MAX bytes
+        if (xr_strlen(text) > GWP_CVAR_STRING_MAX || strchr(text, '\n') || strchr(text, '\r'))
+            return false;
+        xr_strcpy(cvar.string_value, text);
+        return true;
+    }
     if (cvar.is_float)
     {
         float value = 0.f;
@@ -244,8 +288,12 @@ void ApplySavedValue(PluginCvar& cvar, double min, double max)
         }
     }
     shared_str pending;
+    // plugins.ltx already has the value: a leftover line of user.ltx (the old place) is stale - dropped, so the
+    // next cfg_save no longer writes it and the start no longer logs "Unknown command" for it
+    if (source == ECvarSource::File && Console)
+        Console->ConsumePendingConfigCommandValue(cvar.name.c_str(), pending);
     // Taken out of user.ltx only when plugins.ltx is readable: it must land there at the next write
-    if (source == ECvarSource::Default && Console && g_cvars_loaded &&
+    else if (source == ECvarSource::Default && Console && g_cvars_loaded &&
         Console->ConsumePendingConfigCommandValue(cvar.name.c_str(), pending) && pending.size())
     {
         text = pending.c_str();
@@ -257,9 +305,13 @@ void ApplySavedValue(PluginCvar& cvar, double min, double max)
         return;
     if (!ApplyCvarText(cvar, text.c_str(), min, max))
     {
-        Msg("! [console] %s: the saved value '%s' of '%s' is not %s in [%g, %g], the default is used",
-            source == ECvarSource::File ? kCvarsFile : "user.ltx", text.c_str(), cvar.name.c_str(),
-            cvar.is_float ? "a number" : "an integer", min, max);
+        if (cvar.is_string)
+            Msg("! [console] %s: the saved value of '%s' is not one line of at most %u bytes, the default is used",
+                source == ECvarSource::File ? kCvarsFile : "user.ltx", cvar.name.c_str(), GWP_CVAR_STRING_MAX);
+        else
+            Msg("! [console] %s: the saved value '%s' of '%s' is not %s in [%g, %g], the default is used",
+                source == ECvarSource::File ? kCvarsFile : "user.ltx", text.c_str(), cvar.name.c_str(),
+                cvar.is_float ? "a number" : "an integer", min, max);
         return;
     }
     cvar.source = source;
@@ -274,6 +326,8 @@ void CvarStatus(const PluginCvar& cvar, IConsole_Command::TStatus& status)
 
 bool CvarChanged(const PluginCvar& cvar)
 {
+    if (cvar.is_string)
+        return cvar.saved_string != cvar.string_value; // P19
     // Bitwise for the float: NaN != NaN would mean "changed" on every frame
     return cvar.is_float ? std::memcmp(&cvar.float_value, &cvar.saved_float, sizeof(float)) != 0 :
                            cvar.int_value != cvar.saved_int;
@@ -287,6 +341,7 @@ void SnapshotCvars()
     {
         cvar->saved_int = cvar->int_value;
         cvar->saved_float = cvar->float_value;
+        cvar->saved_string = cvar->string_value; // P19
     }
 }
 
@@ -486,10 +541,10 @@ GwpResult RegisterCvar(const GwpPlugin* self, const char* name, pcstr function, 
                 PluginAddonId(existing->owner));
             return GWP_ERROR_ACCESS_DENIED;
         }
-        if (existing->is_float != is_float)
+        if (existing->is_float != is_float || existing->is_string)
         {
             Msg("! [plugin:%s] %s('%s'): the variable is registered as %s already", PluginAddonId(self), function,
-                name, existing->is_float ? "a float" : "an integer");
+                name, existing->is_string ? "a string" : existing->is_float ? "a float" : "an integer");
             return GWP_ERROR_INVALID_ARGUMENT;
         }
         return GWP_OK; // registered again after a reload of the plugin: the value of the game is kept
@@ -573,8 +628,8 @@ GwpResult GWP_CALL ApiCvarSetInt(const GwpPlugin* self, const char* name, int va
     PluginCvar* cvar = OwnCvar(self, name, "cvar_set_int", result);
     if (!cvar)
         return result;
-    if (cvar->is_float)
-        return GWP_ERROR_INVALID_ARGUMENT; // a float variable: cvar_set_float
+    if (cvar->is_float || cvar->is_string)
+        return GWP_ERROR_INVALID_ARGUMENT; // a float variable: cvar_set_float (a string one: cvar_set_string)
     if (value < cvar->min || value > cvar->max)
         return GWP_ERROR_INVALID_ARGUMENT; // the console refuses it too; the file would drop it at the next start
     cvar->int_value = value;
@@ -593,6 +648,218 @@ GwpResult GWP_CALL ApiCvarSetFloat(const GwpPlugin* self, const char* name, doub
         return GWP_ERROR_INVALID_ARGUMENT; // as CCC_Float::Execute; NaN never
     cvar->float_value = static_cast<float>(value);
     return GWP_OK;
+}
+
+// ---------------------------------------------------------------------------------------------
+// P19 (plans/addon_api_ideas, group plugin): string variables and console commands of plugins
+// ---------------------------------------------------------------------------------------------
+
+bool ValidStringValue(const char* value)
+{
+    return value && xr_strlen(value) <= GWP_CVAR_STRING_MAX && !strchr(value, '\n') && !strchr(value, '\r');
+}
+
+GwpResult GWP_CALL ApiCvarRegisterString(const GwpPlugin* self, const char* name, const char* def)
+{
+    constexpr pcstr function = "cvar_register_string";
+    const GwpResult check = CheckOwnName(self, name, function);
+    if (check != GWP_OK)
+        return check;
+    if (!ValidStringValue(def ? def : ""))
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (const PluginCvar* existing = FindCvar(name))
+    {
+        if (existing->owner != self)
+        {
+            Msg("! [plugin:%s] %s('%s'): the variable belongs to addon '%s'", PluginAddonId(self), function, name,
+                PluginAddonId(existing->owner));
+            return GWP_ERROR_ACCESS_DENIED;
+        }
+        if (!existing->is_string)
+        {
+            Msg("! [plugin:%s] %s('%s'): the variable is registered as a number already", PluginAddonId(self),
+                function, name);
+            return GWP_ERROR_INVALID_ARGUMENT;
+        }
+        return GWP_OK; // registered again after a reload of the plugin: the value of the game is kept
+    }
+    if (!Console)
+        return GWP_ERROR_INVALID_STATE;
+    if (Console->GetCommand(name))
+    {
+        Msg("! [plugin:%s] %s('%s'): the console has this command already", PluginAddonId(self), function, name);
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    if (!g_cvars)
+        g_cvars = xr_new<xr_vector<PluginCvar*>>();
+    PluginCvar* cvar = xr_new<PluginCvar>();
+    cvar->name = name;
+    cvar->owner = self;
+    cvar->is_string = true;
+    xr_strcpy(cvar->string_value, def ? def : "");
+    cvar->command = xr_new<CCC_String>(cvar->name.c_str(), cvar->string_value,
+        static_cast<int>(sizeof(cvar->string_value)));
+    ApplySavedValue(*cvar, 0.0, 0.0);
+    cvar->saved_string = cvar->string_value;
+    if (cvar->source != ECvarSource::File)
+        g_cvars_dirty = true;
+    g_cvars->push_back(cvar);
+    Console->AddCommand(cvar->command);
+    return GWP_OK;
+}
+
+GwpResult GWP_CALL ApiCvarSetString(const GwpPlugin* self, const char* name, const char* value)
+{
+    GwpResult result = GWP_OK;
+    PluginCvar* cvar = OwnCvar(self, name, "cvar_set_string", result);
+    if (!cvar)
+        return result;
+    if (!cvar->is_string || !ValidStringValue(value))
+        return GWP_ERROR_INVALID_ARGUMENT; // a number variable: cvar_set_int / cvar_set_float
+    xr_strcpy(cvar->string_value, value);
+    return GWP_OK;
+}
+
+PluginCommandRecord* FindCommand(const char* name)
+{
+    if (!g_commands || !name)
+        return nullptr;
+    for (PluginCommandRecord* record : *g_commands)
+    {
+        if (record->name == name)
+            return record;
+    }
+    return nullptr;
+}
+
+struct CommandCall
+{
+    GwpConsoleCommandFn fn;
+    void* user;
+    pcstr args;
+};
+
+void CommandThunk(void* context)
+{
+    const CommandCall& call = *static_cast<const CommandCall*>(context);
+    call.fn(call.user, call.args);
+}
+
+void PluginCommand::Execute(pcstr args)
+{
+    PluginCommandRecord& record = m_record;
+    if (record.dead || !record.fn)
+        return;
+    if (!IsMainThread())
+    {
+        Msg("! [console] '%s': a command of a plugin, run outside the main thread, ignored", record.name.c_str());
+        return;
+    }
+    // The args of the console, trimmed of the blanks around them
+    xr_string text = args ? args : "";
+    while (!text.empty() && IsBlank(text.back()))
+        text.pop_back();
+    size_t first = 0;
+    while (first < text.size() && IsBlank(text[first]))
+        ++first;
+    text.erase(0, first);
+    CommandCall call{ record.fn, record.user, text.c_str() };
+    const GwpPlugin* owner = record.owner;
+    ++record.running;
+    const bool ok = events::CallPluginGuarded(reinterpret_cast<const void*>(record.fn), record.name.c_str(),
+        &CommandThunk, &call);
+    --record.running;
+    if (!ok)
+    {
+        string256 what;
+        xr_sprintf(what, "the console command '%s'", record.name.c_str());
+        // Stops the plugin: its commands leave the console; this record is only marked while the console still holds
+        // the command (deleted by OnFrame)
+        ++record.running;
+        OnPluginCrashed(owner, what);
+        --record.running;
+    }
+}
+
+void PluginCommand::Info(TInfo& info)
+{
+    if (m_record.help.empty())
+        xr_strcpy(info, "(a command of a plugin)");
+    else
+        xr_strcpy(info, m_record.help.c_str());
+}
+
+// Takes the command out of the console; deleted now, or by OnFrame while it runs (its own Execute removed it): the
+// console touches the command after Execute returns (add_to_LRU)
+void DropCommand(PluginCommandRecord* record)
+{
+    if (Console && record->command && !record->dead)
+        Console->RemoveCommand(record->command);
+    record->dead = true;
+    if (!g_dead_commands)
+        g_dead_commands = xr_new<xr_vector<PluginCommandRecord*>>();
+    g_dead_commands->push_back(record);
+}
+
+GwpResult GWP_CALL ApiConsoleCommandRegister(const GwpPlugin* self, const char* name, GwpConsoleCommandFn fn,
+    void* user, const char* help)
+{
+    constexpr pcstr function = "console_command_register";
+    const GwpResult check = CheckOwnName(self, name, function);
+    if (check != GWP_OK)
+        return check;
+    if (!fn)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!Console)
+        return GWP_ERROR_INVALID_STATE;
+    if (const PluginCommandRecord* existing = FindCommand(name))
+    {
+        if (existing->owner != self)
+        {
+            Msg("! [plugin:%s] %s('%s'): the command belongs to addon '%s'", PluginAddonId(self), function, name,
+                PluginAddonId(existing->owner));
+            return GWP_ERROR_ACCESS_DENIED;
+        }
+    }
+    if (Console->GetCommand(name))
+    {
+        Msg("! [plugin:%s] %s('%s'): the console has this command already", PluginAddonId(self), function, name);
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    if (!g_commands)
+        g_commands = xr_new<xr_vector<PluginCommandRecord*>>();
+    PluginCommandRecord* record = xr_new<PluginCommandRecord>();
+    record->name = name;
+    record->help = help ? help : "";
+    if (record->help.size() > 255)
+        record->help.resize(255); // TInfo of the console is 256 bytes
+    record->owner = self;
+    record->fn = fn;
+    record->user = user;
+    record->command = xr_new<PluginCommand>(record->name.c_str(), *record);
+    g_commands->push_back(record);
+    Console->AddCommand(record->command);
+    return GWP_OK;
+}
+
+GwpResult GWP_CALL ApiConsoleCommandUnregister(const GwpPlugin* self, const char* name)
+{
+    if (!CheckCall("console_command_unregister"))
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!self || !name || !*name)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!g_commands)
+        return GWP_ERROR_NOT_FOUND;
+    for (auto it = g_commands->begin(); it != g_commands->end(); ++it)
+    {
+        PluginCommandRecord* record = *it;
+        if (record->owner != self || record->name != name)
+            continue;
+        g_commands->erase(it);
+        DropCommand(record);
+        return GWP_OK;
+    }
+    return GWP_ERROR_NOT_FOUND;
 }
 
 GwpResult GWP_CALL ApiConsoleExecute(const GwpPlugin* self, const char* command)
@@ -787,10 +1054,36 @@ void FillEngineApi(GwpEngineApi& api)
     api.profile_zone_begin = &ApiProfileZoneBegin;
     api.profile_zone_text = &ApiProfileZoneText;
     api.profile_zone_end = &ApiProfileZoneEnd;
+    // P19 (plans/addon_api_ideas, group plugin)
+    api.cvar_register_string = &ApiCvarRegisterString;
+    api.cvar_set_string = &ApiCvarSetString;
+    api.console_command_register = &ApiConsoleCommandRegister;
+    api.console_command_unregister = &ApiConsoleCommandUnregister;
+}
+
+// P19: the dropped commands that no Execute runs now
+void DeleteDeadCommands()
+{
+    if (!g_dead_commands || g_dead_commands->empty())
+        return;
+    auto& dead = *g_dead_commands;
+    for (auto it = dead.begin(); it != dead.end();)
+    {
+        PluginCommandRecord* record = *it;
+        if (record->running)
+        {
+            ++it;
+            continue;
+        }
+        xr_delete(record->command);
+        xr_delete(record);
+        it = dead.erase(it);
+    }
 }
 
 void OnFrame()
 {
+    DeleteDeadCommands(); // P19
     if (g_deferred && !g_deferred->empty() && Console)
     {
         // A command may destroy the level and everything in it, and a handler of it may queue another command:
@@ -921,6 +1214,41 @@ void RemovePluginCvars(const GwpPlugin* plugin)
         xr_delete(cvar);
         it = g_cvars->erase(it);
     }
+    // P19: the console commands of the plugin
+    if (g_commands)
+    {
+        for (auto it = g_commands->begin(); it != g_commands->end();)
+        {
+            PluginCommandRecord* record = *it;
+            if (record->owner != plugin)
+            {
+                ++it;
+                continue;
+            }
+            it = g_commands->erase(it);
+            DropCommand(record);
+        }
+    }
+}
+
+void DisablePluginCommands(const GwpPlugin* plugin)
+{
+    if (!g_commands)
+        return;
+    for (PluginCommandRecord* record : *g_commands)
+    {
+        if (record->owner == plugin)
+            record->fn = nullptr; // PluginCommand::Execute checks it
+    }
+}
+
+void QueueCommand(pcstr command)
+{
+    if (!command || !*command)
+        return;
+    if (!g_deferred)
+        g_deferred = xr_new<xr_vector<xr_string>>();
+    g_deferred->emplace_back(command);
 }
 
 void Shutdown()
@@ -952,5 +1280,14 @@ void Shutdown()
     g_retry_at_ms = 0;
     // The profiling stages stay: profile_add may still run on a thread of the plugin (see g_stages)
     xr_delete(g_deferred);
+    // P19: the commands of plugins that are still there (no Execute runs at the shutdown)
+    if (g_commands)
+    {
+        for (PluginCommandRecord* record : *g_commands)
+            DropCommand(record);
+        xr_delete(g_commands);
+    }
+    DeleteDeadCommands();
+    xr_delete(g_dead_commands);
 }
 } // namespace gw::addons::console

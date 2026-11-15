@@ -4599,6 +4599,9 @@
     <ClInclude Include="addon_api_world.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
+    <ClInclude Include="addon_api_extra.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_api_feedback.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
@@ -4614,10 +4617,19 @@
     <ClInclude Include="level_pack.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
+    <ClInclude Include="level_preview_model.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="level_world_draw.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_event_bus.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_timers.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_user_data.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_binders.h">
@@ -4653,6 +4665,9 @@
     <ClInclude Include="addon_lua_entry.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
+    <ClInclude Include="addon_lua_console.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_merge.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
@@ -4660,6 +4675,9 @@
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_object_events.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_perf.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="ai_space.h">
@@ -7801,6 +7819,9 @@
     <ClCompile Include="addon_api_world.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
+    <ClCompile Include="addon_api_extra.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
     <ClCompile Include="addon_api_feedback.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
@@ -7852,10 +7873,19 @@
     <ClCompile Include="level_pack.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
+    <ClCompile Include="level_preview_model.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="level_world_draw.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
     <ClCompile Include="addon_event_bus.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_timers.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_user_data.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_content.cpp">
@@ -7867,6 +7897,9 @@
     <ClCompile Include="addon_lua_entry.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
+    <ClCompile Include="addon_lua_console.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
     <ClCompile Include="addon_merge.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
@@ -7874,6 +7907,9 @@
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_object_events.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_perf.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="ai_space.cpp">

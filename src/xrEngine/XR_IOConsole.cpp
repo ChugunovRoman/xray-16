@@ -80,6 +80,10 @@ bool CConsole::is_mark(Console_mark type)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+CConsole::ExecuteHook CConsole::s_execute_hook = nullptr;
+
+void CConsole::SetExecuteHook(ExecuteHook hook) { s_execute_hook = hook; }
+
 CConsole::CConsole()
 {
     m_cmd_history_max = cmd_history_max;
@@ -559,6 +563,8 @@ void CConsole::ExecuteCommand(pcstr cmd_str, bool record_cmd)
                 if (cc->bEmptyArgsHandled)
                 {
                     cc->Execute(last);
+                    if (s_execute_hook)
+                        s_execute_hook(first, last);
                 }
                 else
                 {
@@ -582,6 +588,8 @@ void CConsole::ExecuteCommand(pcstr cmd_str, bool record_cmd)
                 {
                     cc->add_to_LRU((pcstr)last);
                 }
+                if (s_execute_hook)
+                    s_execute_hook(first, last);
             }
         }
         else

@@ -12,6 +12,10 @@ class CMapManager : public CUIResetNotifier
     CMapLocationWrapper* m_locations_wrapper;
     vLocations* m_locations;
     xr_vector<CMapLocation*> m_deffered_destroy_queue;
+    // P38 (plans/addon_api_ideas/spec.md): the locations removed since the last Update - (object id, spot type) - sent
+    // as map_spot_on_removed at the start of the next Update: a handler that adds or removes spots must not run inside
+    // the loops over Locations() that remove them
+    xr_vector<std::pair<u16, shared_str>> m_removed_spots;
     // Visible relation locations of the running Update by object id: their spots are hidden by the other locations
     // of the same object, matched in one pass over all locations (ResolveRelationSpotChecks)
     xr_vector<std::pair<u16, CRelationMapLocation*>> m_relation_spot_checks;
@@ -46,7 +50,8 @@ public:
 #ifdef DEBUG
     void Dump();
 #endif
-    void Destroy(CMapLocation*);
+    // spot_type: the type the location was added with (SLocationKey), for map_spot_on_removed
+    void Destroy(CMapLocation*, const shared_str& spot_type);
 
     void OnUIReset() override;
 

@@ -45,7 +45,10 @@ void OnFrame();
 void OnGameStart();
 
 // Console command plugin_reload <addon id>: the plugin of the addon is unloaded (when loaded) and loaded again from
-// its library - a rebuilt one too - at the start of the next frame. false with a reason for an unknown addon.
+// its library - a rebuilt one too - at the start of the next frame. A crashed plugin may be reloaded for any addon; the
+// reload of a working plugin (or of one that did not load) is a development command, as addon_reload: trust = local,
+// an addon not in appdata/addons.ltx or any with -addon_debug (open questions 2026-11-15, 1.11). false with a reason
+// when refused (an unknown addon too).
 bool RequestPluginReload(pcstr addon_id, xr_string& reason);
 // Console command addon_reload <addon id> (08-unified-addons-api-lua-native.md 4.10, U6): at the start of the next
 // frame the addon goes and comes back - its Lua part (on_unload, its save data in memory, its registrations and
@@ -93,6 +96,20 @@ struct AddonInfo
     // [addon] depends of addon.ltx: the ids of the addons it depends on (the conditions on their versions are checked
     // by the host: active means they hold)
     xr_vector<xr_string> depends;
+    // [addon] conflicts (open questions 2026-11-15, 1.2 (B)): the other addons found in this run (not switched off in
+    // appdata/addons.ltx) that this one conflicts with - its rule names that one (the conditions on the version hold)
+    // or the rule of that one names it. The engine loads both of a pair, the launcher decides; addon_list and
+    // addons_report.json show them
+    struct ConflictInfo
+    {
+        xr_string id;
+        xr_string version;   // of that addon, as written
+        xr_string state;     // of that addon, as `state` above
+        bool active = false; // that addon works
+        xr_string declared_by; // whose [addon] conflicts names the pair: "self" (this addon), "other" (that one), "both"
+        xr_string rule;      // the entry as written ("other_addon <2.0.0"): of this addon unless declared_by is "other"
+    };
+    xr_vector<ConflictInfo> conflicts;
     // [addon] patches of addon.ltx (15-merge-implementation.md 6.1): a compatibility patch of these addons - it works
     // only while all of them do (else skipped) and loads after them; its fragments <dir>merge\gamedata\<file> take
     // part in the merge of the files they replace (addon_merge.h), merge\ is not mounted
@@ -225,6 +242,13 @@ xr_string ErrorText(const std::error_code& ec);
 bool ReadStringZChecked(IReader& reader, xr_string& out);
 void FillObjectsApi(GwpEngineApi& api);
 void FillLevelApi(GwpEngineApi& api);
+// engine gaps P47 (addon_api_level.cpp): the online objects of the level whose position lies within radius of
+// center, nearest first, as ids into `out` (cleared first). class_id 0 = any class (else CLASS_ID, the text of
+// object_class_id), script_clsid < 0 = any (else the clsid of Lua, obj:clsid()); with_inventory: also the items
+// inside an owner (their position is the owner's). Lua: level.objects_in_radius (the Plugin API function
+// level_objects_in_radius of the plugin group may use it too).
+void LevelObjectsInRadius(const Fvector& center, float radius, CLASS_ID class_id, int script_clsid,
+    bool with_inventory, xr_vector<u16>& out);
 void FillInfoApi(GwpEngineApi& api);
 void FillNpcApi(GwpEngineApi& api); // groups npc and script (addon_api_npc.cpp)
 void ShutdownNpcApi();

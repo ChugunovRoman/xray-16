@@ -35,6 +35,8 @@
 #include "Artefact.h"
 #include "level_changer.h"
 #include "CustomOutfit.h"
+#include "InventoryOwner.h"
+#include "Actor.h"
 #include "ui/UIInventoryUtilities.h"
 
 using namespace InventoryUtilities;
@@ -622,6 +624,41 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("item_on_belt", &CScriptGameObject::ItemOnBelt)
         .def("belt_count", &CScriptGameObject::BeltSize)
         .def("belt_object_count", &CScriptGameObject::BeltSize)
+        // plans/addon_companion_extended/npc_equipment.md: the player sets up the equipment of this NPC (outfit and
+        // PDA slots, the belt; CInventoryOwner::set_equipment_editable). Runtime only: set it again at npc_on_net_spawn.
+        // Not for the actor and not for objects without an inventory (an error in the log)
+        .def("set_equipment_editable", +[](CScriptGameObject* self, bool value)
+        {
+            CInventoryOwner* owner = smart_cast<CInventoryOwner*>(&self->object());
+            if (!owner || smart_cast<CActor*>(&self->object()))
+            {
+                GEnv.ScriptEngine->script_log(LuaMessageType::Error,
+                    "set_equipment_editable: [%s] is not an NPC with an inventory", self->Name());
+                return;
+            }
+            owner->set_equipment_editable(value);
+        })
+        .def("equipment_editable", +[](CScriptGameObject* self)
+        {
+            const CInventoryOwner* owner = smart_cast<CInventoryOwner*>(&self->object());
+            return owner && owner->equipment_editable();
+        })
+        // npc_equipment.md, the temporary swap of a weapon: the id of the weapon the NPC took out of the slot 2 / 3 to
+        // fight with a loaded one (-1 - none); set_equipment_swapped(slot, id) - the record after a load (id < 0 clears).
+        // Runtime in the engine: the addon keeps it in its save
+        .def("equipment_swapped", +[](CScriptGameObject* self, int slot) -> int
+        {
+            const CInventoryOwner* owner = smart_cast<CInventoryOwner*>(&self->object());
+            const u16 id = owner && slot > 0 && slot < 0xffff ? owner->EquipmentSwapped(u16(slot)) : u16(-1);
+            return id == u16(-1) ? -1 : int(id);
+        })
+        .def("set_equipment_swapped", +[](CScriptGameObject* self, int slot, int id)
+        {
+            CInventoryOwner* owner = smart_cast<CInventoryOwner*>(&self->object());
+            if (!owner || smart_cast<CActor*>(&self->object()) || slot <= 0 || slot >= 0xffff)
+                return;
+            owner->SetEquipmentSwapped(u16(slot), id >= 0 && id < 0xffff ? u16(id) : u16(-1));
+        })
 
         .def("get_actor_max_weight", &CScriptGameObject::GetActorMaxWeight)
         .def("set_actor_max_weight", &CScriptGameObject::SetActorMaxWeight)

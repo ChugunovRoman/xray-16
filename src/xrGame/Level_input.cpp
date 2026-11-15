@@ -68,6 +68,12 @@ void CLevel::IR_OnMouseWheel(float x, float y)
             return;
     }
 
+    // D1 (plans/addon_base_building/plan.md 10.1): level_input_on_mouse_wheel(y, x) - a subscriber may consume the
+    // wheel (flags.ret = true) so that the actor does not switch the weapon. After the UI, as level_input_on_key_press:
+    // an open window with a scroll keeps the wheel
+    if (gw::addons::objevents::LevelInputMouseWheel(y, x))
+        return;
+
     if (CURRENT_ENTITY())
     {
         IInputReceiver* IR = smart_cast<IInputReceiver*>(smart_cast<CGameObject*>(CURRENT_ENTITY()));

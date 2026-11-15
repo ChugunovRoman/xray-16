@@ -242,5 +242,15 @@ u32 CTrade::GetItemPrice(PIItem pItem, bool b_buying, bool bFree /*= false*/)
     //	result		= iFloor(result/10+0.5f)*10;
 
     clamp<u32>(result, 1, 1000000);
+
+    // trade_on_item_price (engine gaps P08): a subscriber may replace the price of a trade with the actor. pThis prices
+    // the item: the actor buys when the actor is pThis and buys, or the other side sells to the actor
+    if (pThis.type == TT_ACTOR || pPartner.type == TT_ACTOR)
+    {
+        const bool actor_is_this = pThis.type == TT_ACTOR;
+        const CGameObject* other = smart_cast<const CGameObject*>(actor_is_this ? pPartner.inv_owner : pThis.inv_owner);
+        result = gw::addons::objevents::TradeItemPrice(
+            &pItem->object(), other, actor_is_this ? b_buying : !b_buying, result);
+    }
     return (result);
 }

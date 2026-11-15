@@ -14,6 +14,7 @@
 #include "Layers/xrRender/FVF.h"
 #include "Include/xrRender/KinematicsAnimated.h"
 #include "Layers/xrRender/SkeletonCustom.h"
+#include "Layers/xrRender/SkeletonX.h" // CSkeletonX::ShaderSkinningMode (model_MakeGhost)
 #include "Layers/xrRender/dxWallMarkArray.h"
 #include "Layers/xrRender/dxUIShader.h"
 #include "xrCore/_std_extensions.h"
@@ -1228,6 +1229,28 @@ void CRender::PreviewScene_ResetDiskCache()
         m_preview_scene->WipeDiskCache();
 }
 
+void CRender::PreviewScene_LiveSet(u32 slot, pcstr model_path, const SPreviewSceneSettings& settings)
+{
+    if (m_preview_scene)
+        m_preview_scene->LiveSet(slot, model_path, settings);
+}
+
+bool CRender::PreviewScene_LiveReady(u32 slot) const
+{
+    return m_preview_scene && m_preview_scene->LiveReady(slot);
+}
+
+shared_str CRender::PreviewScene_LiveTextureName(u32 slot) const
+{
+    return m_preview_scene ? m_preview_scene->LiveTextureName(slot) : shared_str();
+}
+
+void CRender::PreviewScene_LiveClear(u32 slot)
+{
+    if (m_preview_scene)
+        m_preview_scene->LiveClear(slot);
+}
+
 void CRender::PreviewScene_ProcessQueue()
 {
     if (!m_preview_scene)
@@ -1284,6 +1307,127 @@ void CRender::model_Delete(IRenderVisual*& V, bool bDiscard)
     dxRender_Visual* pVisual = (dxRender_Visual*)V;
     Models->Delete(pVisual, bDiscard);
     V = nullptr;
+}
+
+// Ghost models (IRender::model_MakeGhost, level.preview_model_* of xrGame\level_preview_model.cpp)
+namespace
+{
+// The Lua shader script (shaders\r3\gw_preview_ghost.s, shaders\gl\gw_preview_ghost.s): element "normal" only - the
+// sorted forward pass (sorting 2, strict back to front), no depth write, no shadow (no l_point element)
+constexpr pcstr ghost_shader_script = "gw_preview_ghost";
+
+// The base texture of a mesh shader: the texture bound to "s_base" in the first pass of the normal element (the stage
+// of a texture in SPass::T is the register index of its constant, CBlender_Compile::r_dx11Texture / r_Sampler), else
+// the first texture of that pass. Empty - no texture.
+shared_str ghost_base_texture(const Shader* shader)
+{
+    if (!shader)
+        return {};
+    for (u32 e = SE_R2_NORMAL_HQ; e <= SE_R2_NORMAL_LQ; ++e)
+    {
+        const ShaderElement* element = shader->E[e]._get();
+        if (!element || element->passes.empty())
+            continue;
+        const SPass* pass = element->passes[0]._get();
+        if (!pass || !pass->T._get())
+            continue;
+        ref_constant base;
+        if (pass->constants._get())
+        {
+#if defined(USE_DX11)
+            base = pass->constants->get("s_base", RC_dx11texture);
+#endif
+            if (!base)
+                base = pass->constants->get("s_base");
+        }
+        if (base)
+        {
+            for (const auto& [stage, texture] : *pass->T)
+            {
+                if (stage == base->samp.index && texture._get() && texture->cName.size())
+                    return texture->cName;
+            }
+        }
+        for (const auto& [stage, texture] : *pass->T)
+        {
+            if (texture._get() && texture->cName.size())
+                return texture->cName;
+        }
+    }
+    return {};
+}
+
+// Calls `fn` for every mesh of the visual: the children of a hierarchy / skeleton and its LOD model (all duplicated
+// per instance by Copy, so the instance owns them). Particles are left alone.
+template <typename F>
+void ghost_for_each_mesh(dxRender_Visual* visual, F& fn)
+{
+    if (!visual)
+        return;
+    switch (visual->Type)
+    {
+    case MT_PARTICLE_EFFECT:
+    case MT_PARTICLE_GROUP: return;
+    default: break;
+    }
+    if (auto* hierarchy = dynamic_cast<FHierrarhyVisual*>(visual))
+    {
+        for (dxRender_Visual* child : hierarchy->children)
+            ghost_for_each_mesh(child, fn);
+        if (auto* kinematics = dynamic_cast<CKinematics*>(visual))
+            ghost_for_each_mesh(kinematics->m_lod, fn);
+        return;
+    }
+    fn(visual);
+}
+} // namespace
+
+bool CRender::model_MakeGhost(IRenderVisual* V)
+{
+    if (!V)
+        return false;
+    // The script is looked for as LS_Load found the shader scripts at the device creation: by the file of the
+    // render's shader folder. Without it Resources->Create would take the name for a C++ blender and fail
+    string_path script;
+    strconcat(sizeof(script), script, getShaderPath(), ghost_shader_script, ".s");
+    if (!FS.exist("$game_shaders$", script))
+    {
+        Msg("! [preview_model] no shader script %s: the ghost is drawn opaque", script);
+        return false;
+    }
+    bool changed = false;
+    const s32 skinning_before = shader_skinning();
+    auto make = [&](dxRender_Visual* mesh)
+    {
+        // The tint goes into the own shader data of the mesh (vis_data::own_obj_data): the copy shares it with the
+        // pool model otherwise
+        mesh->vis.own_obj_data();
+        const shared_str texture = ghost_base_texture(mesh->shader._get());
+        if (!texture.size())
+            return;
+        // The vertex shader of the ghost must be of the skinning variant of the mesh vertices (as at its load)
+        const auto* skeleton = dynamic_cast<CSkeletonX*>(mesh);
+        shader_option_skinning(skeleton ? skeleton->ShaderSkinningMode() : -1);
+        ref_shader ghost;
+        ghost.create(ghost_shader_script, texture.c_str());
+        shader_option_skinning(skinning_before);
+        if (!ghost._get())
+            return;
+        mesh->shader = ghost;
+        changed = true;
+    };
+    ghost_for_each_mesh(static_cast<dxRender_Visual*>(V), make);
+    return changed;
+}
+
+void CRender::model_SetGhostTint(IRenderVisual* V, const Fvector4& tint)
+{
+    auto set = [&](dxRender_Visual* mesh)
+    {
+        mesh->vis.own_obj_data();
+        mesh->vis.obj_data->sh_custom_data.set(tint);
+    };
+    ghost_for_each_mesh(static_cast<dxRender_Visual*>(V), set);
 }
 
 IRender_DetailModel* CRender::model_CreateDM(IReader* F)

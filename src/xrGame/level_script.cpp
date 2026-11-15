@@ -21,6 +21,7 @@
 #include "date_time.h"
 #include "ai_space.h"
 #include "xrAICore/Navigation/level_graph.h"
+#include "xrAICore/Navigation/game_level_cross_table.h"
 #include "xrPhysics/PHCommander.h"
 #include "xrPhysics/PHScriptCall.h"
 #include "xrScriptEngine/script_engine.hpp"
@@ -38,6 +39,10 @@
 #include "xrServer_Objects_ALife_Monsters.h"
 #include "HUDManager.h"
 #include "raypick.h"
+#include "level_preview_model.h"
+#include "level_world_draw.h"
+#include "addon_api_world.h"
+#include "addon_host.h"
 #include "ui/UIMainIngameWnd.h"
 #include "UIZoneMap.h"
 #include "xrCDB/xr_collide_defs.h"
@@ -223,6 +228,101 @@ Fvector vertex_position(u32 level_vertex_id)
     }
     return ai().level_graph().vertex_position(level_vertex_id);
 }
+
+// RS4 (plans/addon_runtime_smarts): the game vertex of a level vertex of the current level by the cross table (the
+// nearest vertex of the game graph), as a server object placed there gets it. GameGraph::_GRAPH_ID(-1) (65535,
+// MAX_U16_TYPE_SIZE of Lua) without a level graph / cross table or for an invalid level vertex
+GameGraph::_GRAPH_ID game_vertex_id(u32 level_vertex_id)
+{
+    if (!ai().get_level_graph() || !ai().get_cross_table())
+    {
+#ifndef MASTER_GOLD
+        Msg("! level.game_vertex_id: no level graph or cross table (level_vertex_id=%u)", level_vertex_id);
+#endif
+        return GameGraph::_GRAPH_ID(-1);
+    }
+    if (!ai().level_graph().valid_vertex_id(level_vertex_id))
+    {
+#ifndef MASTER_GOLD
+        Msg("! level.game_vertex_id: invalid level_vertex_id=%u", level_vertex_id);
+#endif
+        return GameGraph::_GRAPH_ID(-1);
+    }
+    return ai().cross_table().vertex(level_vertex_id).game_vertex_id();
+}
+
+ENGINE_API extern float psHUD_FOV;
+
+// RS10 (plans/addon_runtime_smarts, the labels of the smart mode): a point of the world on the screen, in the UI space
+// 1024 x 768 (the UI is stretched to the whole screen at any aspect, 16:9 too - as the cursor, CUICursor). hud - the
+// projection of the HUD (FOV of the weapon model: hud_fov * fov) instead of the one of the camera; allow_offscreen -
+// a point in front of the camera but out of the screen gets its coordinates too (out of 0..1024 / 0..768).
+// x = y = -9999 - the point is behind the camera (or out of the screen without allow_offscreen). The math is on the CPU
+// by the matrices of the last frame (Device.mFullTransform), the same for DX11 and GL. As world2ui of Anomaly and
+// IX-Ray (level_script.cpp, World2Ui) - the same call and the same -9999
+Fvector2 world_to_ui(const Fvector& pos, bool hud, bool allow_offscreen)
+{
+    constexpr float NO_POINT = -9999.f;
+    Fvector2 res;
+    res.set(NO_POINT, NO_POINT);
+    Fmatrix xform;
+    if (hud)
+    {
+        Fmatrix project;
+        project.build_projection(deg2rad(psHUD_FOV * Device.fFOV), Device.fASPECT, HUD_VIEWPORT_NEAR,
+            g_pGamePersistent->Environment().CurrentEnv.far_plane);
+        xform.mul(project, Device.mView);
+    }
+    else
+        xform.set(Device.mFullTransform);
+
+    // w - the depth of the point in the view space (the projection of build_projection: _34 = 1, _44 = 0)
+    const float w = pos.x * xform._14 + pos.y * xform._24 + pos.z * xform._34 + xform._44;
+    if (w <= EPS_S)
+        return res;
+    const float x = (pos.x * xform._11 + pos.y * xform._21 + pos.z * xform._31 + xform._41) / w;
+    const float y = (pos.x * xform._12 + pos.y * xform._22 + pos.z * xform._32 + xform._42) / w;
+    if (!allow_offscreen && (_abs(x) > 1.f || _abs(y) > 1.f))
+        return res;
+    res.set((1.f + x) * 0.5f * UI_BASE_WIDTH, (1.f - y) * 0.5f * UI_BASE_HEIGHT);
+    return res;
+}
+
+// RS11 (plans/addon_runtime_smarts): level.draw_polyline - the points of a Lua array {vector, ...} (1..n, in order)
+bool draw_polyline(pcstr id, const luabind::object& points, bool closed, u32 color)
+{
+    if (luabind::type(points) != LUA_TTABLE)
+    {
+        Msg("! [world_draw] draw_polyline '%s': the points are not a table", id ? id : "");
+        return false;
+    }
+    lua_State* L = points.interpreter();
+    points.push(L);
+    const int table = lua_gettop(L);
+    const int count = int(lua_objlen(L, table));
+    xr_vector<Fvector> list;
+    list.reserve(_min(count, int(gw::world_draw::kMaxPoints) + 1));
+    int bad = 0;
+    // more than kMaxPoints + 1 are not read: Polyline refuses them anyway
+    for (int i = 1; i <= count && i <= int(gw::world_draw::kMaxPoints) + 1 && !bad; ++i)
+    {
+        lua_rawgeti(L, table, i);
+        const luabind::object value(luabind::from_stack(L, -1));
+        if (const auto* p = luabind::object_cast_nothrow<const Fvector*>(value, static_cast<const Fvector*>(nullptr)))
+            list.push_back(*p);
+        else
+            bad = i;
+        lua_pop(L, 1);
+    }
+    lua_settop(L, table - 1);
+    if (bad)
+    {
+        Msg("! [world_draw] draw_polyline '%s': the point %d is not a vector", id ? id : "", bad);
+        return false;
+    }
+    return gw::world_draw::Polyline(id, list, closed, color);
+}
+
 void map_add_object_spot(u16 id, LPCSTR spot_type, LPCSTR text)
 {
     CMapLocation* ml = Level().MapManager().AddMapLocation(spot_type, id);
@@ -660,6 +760,42 @@ luabind::object get_sections(lua_State* L, ESectionTypeName type) {
 }
 
 u32 render_get_dx_level() { return GEnv.Render->get_dx_level(); }
+
+// engine gaps P47 (plans/addon_api_ideas/spec.md): level.objects_in_radius(pos, radius[, clsid[, with_inventory]]) -
+// a table {1..n} of the online game objects within radius of pos, nearest first (by the position of the object).
+// clsid: a value of the clsid table (obj:clsid()), nil or -1 - any; with_inventory: true - also the items inside an
+// owner (their position is the owner's). The search: gw::addons::LevelObjectsInRadius (addon_api_level.cpp)
+static luabind::object objects_in_radius(lua_State* L, const Fvector& position, float radius, int script_clsid,
+    bool with_inventory)
+{
+    luabind::object result = luabind::newtable(L);
+    if (!g_pGameLevel)
+        return result;
+    xr_vector<u16> ids;
+    gw::addons::LevelObjectsInRadius(position, radius, 0, script_clsid, with_inventory, ids);
+    int index = 1;
+    for (const u16 id : ids)
+    {
+        CGameObject* object = smart_cast<CGameObject*>(Level().Objects.net_Find(id));
+        if (object)
+            result[index++] = object->lua_game_object();
+    }
+    return result;
+}
+
+
+// The settings of a UI preview of a model (level.ui_preview_*): the camera turned by yaw / pitch around the model
+// (framed by its box), a square texture of size texels
+static SPreviewSceneSettings ui_preview_settings(float yaw, float pitch, u32 size)
+{
+    SPreviewSceneSettings settings;
+    settings.yaw_deg = yaw;
+    settings.pitch_deg = pitch;
+    clamp<u32>(size, 32, 512);
+    settings.frame_width = size;
+    settings.frame_height = size;
+    return settings;
+}
 CUISequencer* g_tutorial = NULL;
 CUISequencer* g_tutorial2 = NULL;
 
@@ -773,7 +909,7 @@ bool ray_pick(const Fvector& start, const Fvector& dir, float range,
         ignore = smart_cast<IGameObject*>(&(ignore_object->object()));
     if (Level().ObjectSpace.RayPick(start, dir, range, tgt, R, ignore))
     {
-        script_R.set(R);
+        script_R.set(R, start, dir); // D2 (plans/addon_base_building): with the normal and the material
         return true;
     }
     return false;
@@ -826,6 +962,11 @@ void CLevel::script_register(lua_State* luaState)
             .def_readonly("object", &script_rq_result::O)
             .def_readonly("range", &script_rq_result::range)
             .def_readonly("element", &script_rq_result::element)
+            // D2 (plans/addon_base_building/plan.md 10.2): the surface of the hit - the normal (static geometry: of
+            // the triangle, facing the ray; a bone: the face of its shape; else -dir), the game material (index, name)
+            .def_readonly("normal", &script_rq_result::normal)
+            .def_readonly("material_id", &script_rq_result::material_id)
+            .property("material", &script_rq_result::get_material)
             .def(constructor<>()),
         class_<EnumCallbackType<collide::rq_target>>("rq_target")
             .enum_("targets")
@@ -915,6 +1056,25 @@ void CLevel::script_register(lua_State* luaState)
         def("is_wfx_playing", is_wfx_playing),
         def("get_wfx_time", get_wfx_time),
         def("stop_weather_fx", stop_weather_fx),
+        // engine gaps P11 (plans/addon_api_ideas/spec.md): the weather lock - level_weathers.script applies the locked
+        // cycle instead of its own pick (addon_api_world.cpp). weather_lock(name, forced[, owner]) -> bool: another
+        // owner's lock refuses (false, logged); owner "lua" by default. weather_unlock([owner]) -> bool.
+        // weather_locked() -> the locked cycle or nil; weather_lock_owner() -> its owner or nil
+        def("weather_lock", +[](pcstr name, bool forced) { return gw::addons::LuaWeatherLock(name, forced, nullptr); }),
+        def("weather_lock", +[](pcstr name, bool forced, pcstr owner)
+            { return gw::addons::LuaWeatherLock(name, forced, owner); }),
+        def("weather_unlock", +[]() { return gw::addons::LuaWeatherUnlock(nullptr); }),
+        def("weather_unlock", +[](pcstr owner) { return gw::addons::LuaWeatherUnlock(owner); }),
+        def("weather_locked", +[]() { return gw::addons::WeatherLockedCycle(); }),
+        def("weather_lock_owner", +[]() { return gw::addons::WeatherLockOwner(); }),
+        // engine gaps P47: online objects in a radius, nearest first (objects_in_radius above)
+        def("objects_in_radius", +[](lua_State* L, const Fvector& position, float radius)
+            { return objects_in_radius(L, position, radius, -1, false); }),
+        def("objects_in_radius", +[](lua_State* L, const Fvector& position, float radius, int script_clsid)
+            { return objects_in_radius(L, position, radius, script_clsid, false); }),
+        def("objects_in_radius",
+            +[](lua_State* L, const Fvector& position, float radius, int script_clsid, bool with_inventory)
+            { return objects_in_radius(L, position, radius, script_clsid, with_inventory); }),
 
         def("environment", environment),
 
@@ -935,6 +1095,7 @@ void CLevel::script_register(lua_State* luaState)
         def("rain_factor", rain_factor),
         def("patrol_path_exists", patrol_path_exists),
         def("vertex_position", vertex_position),
+        def("game_vertex_id", game_vertex_id), // RS4 (plans/addon_runtime_smarts): cross table, 65535 on an error
         def("name", +[]() { return Level().name().c_str(); }),
         def("prefetch_sound", prefetch_sound),
 
@@ -1014,7 +1175,109 @@ void CLevel::script_register(lua_State* luaState)
             return id == u32(-1) ? u64(id) + 1 : u64(id);
         }),
         def("game_id", &GameID),
-        def("ray_pick", &ray_pick)
+        def("ray_pick", &ray_pick),
+
+        // D3 (plans/addon_base_building/plan.md 10.3): "ghost" models without a game object (level_preview_model.h).
+        // hpb - radians (heading, pitch, bank): as an object spawned with se_obj.angle = (p, h, b); id - a slot
+        // 0..7, 0 when omitted. The change shows from the end of the frame; show answers false (and logs) for a
+        // missing model file
+        def("preview_model_show", +[](pcstr visual, const Fvector& position, const Fvector& hpb) -> bool
+            { return gw::preview_model::Show(0, visual, position, hpb); }),
+        def("preview_model_show", +[](pcstr visual, const Fvector& position, const Fvector& hpb, u32 id) -> bool
+            { return gw::preview_model::Show(id, visual, position, hpb); }),
+        def("preview_model_set_transform", +[](const Fvector& position, const Fvector& hpb) -> bool
+            { return gw::preview_model::SetTransform(0, position, hpb); }),
+        def("preview_model_set_transform", +[](const Fvector& position, const Fvector& hpb, u32 id) -> bool
+            { return gw::preview_model::SetTransform(id, position, hpb); }),
+        def("preview_model_hide", +[]() -> bool { return gw::preview_model::Hide(0); }),
+        def("preview_model_hide", +[](u32 id) -> bool { return gw::preview_model::Hide(id); }),
+        def("preview_model_hide_all", +[]() { gw::preview_model::HideAll(); }),
+        // The tint of the translucent ghost: r, g, b, a in 0..1 (a - opacity); kept by the slot until the next call
+        def("preview_model_set_color", +[](float r, float g, float b, float a) -> bool
+            { return gw::preview_model::SetColor(0, Fvector4().set(r, g, b, a)); }),
+        def("preview_model_set_color", +[](float r, float g, float b, float a, u32 id) -> bool
+            { return gw::preview_model::SetColor(id, Fvector4().set(r, g, b, a)); }),
+        def("preview_model_shown", +[]() -> bool { return gw::preview_model::IsShown(0); }),
+        def("preview_model_shown", +[](u32 id) -> bool { return gw::preview_model::IsShown(id); }),
+        // The bounding box of a model file in object space (the OGF header), into `box` (Fbox() of Lua): the overlap
+        // check of a placement (base building). false - no such model / no box; the box is left as it was
+        def("model_bounds", +[](pcstr visual, Fbox& box) -> bool { return gw::preview_model::ModelBounds(visual, box); }),
+
+        // A picture of a model for the UI (plans/addon_base_building/plan.md 17.16) - the preview renderer of the
+        // faction editor (PreviewSceneRenderer: R2 / R4 / GL, not R1). yaw / pitch - the camera around the model,
+        // degrees; size - the texture, texels (32..512; one size for all the calls - the renderer keeps one set of its
+        // buffers of that size). ui_preview_supported - the renderer has it. ui_preview_thumb - a cached picture: ""
+        // while it waits for its render (one model a frame, console npc_preview_scene_budget_per_frame), then the
+        // texture name for CUIStatic:InitTexture; kept for the session (DX11 - on disk too). ui_preview_live_* - a
+        // live slot 0..3: the model stays created, the texture of the slot is rendered again only when yaw / pitch /
+        // the model change (a turning model); live_texture - its name, live_ready - it holds the model
+        def("ui_preview_supported", +[]() -> bool { return GEnv.Render->PreviewScene_LiveTextureName(0).size() != 0; }),
+        def("ui_preview_thumb", +[](pcstr visual, float yaw, float pitch, u32 size) -> pcstr
+        {
+            static xr_string name;
+            name.clear();
+            if (!visual || !visual[0])
+                return name.c_str();
+            GEnv.Render->PreviewScene_SetSettings(ui_preview_settings(yaw, pitch, size));
+            if (GEnv.Render->PreviewScene_IsCached(visual))
+                name = GEnv.Render->PreviewScene_TextureName(visual).c_str();
+            // the model pool stops the game on a missing model file (the render of the queue, a frame later)
+            else if (gw::preview_model::ModelFileExists(visual, "ui_preview_thumb"))
+                GEnv.Render->PreviewScene_ScheduleModel(visual, 10);
+            return name.c_str();
+        }),
+        def("ui_preview_live_set", +[](u32 slot, pcstr visual, float yaw, float pitch, u32 size)
+        {
+            // a missing model file would stop the game in the model pool: the slot is emptied instead (live_ready false)
+            if (visual && visual[0] && !gw::preview_model::ModelFileExists(visual, "ui_preview_live_set"))
+            {
+                GEnv.Render->PreviewScene_LiveClear(slot);
+                return;
+            }
+            GEnv.Render->PreviewScene_LiveSet(slot, visual, ui_preview_settings(yaw, pitch, size));
+        }),
+        def("ui_preview_live_ready", +[](u32 slot) -> bool { return GEnv.Render->PreviewScene_LiveReady(slot); }),
+        def("ui_preview_live_texture", +[](u32 slot) -> pcstr
+        {
+            static xr_string name;
+            name = GEnv.Render->PreviewScene_LiveTextureName(slot).c_str();
+            return name.c_str();
+        }),
+        def("ui_preview_live_clear", +[](u32 slot) { GEnv.Render->PreviewScene_LiveClear(slot); }),
+
+        // RS11 (plans/addon_runtime_smarts, level_world_draw.h): shapes drawn in the world, kept by a string id until
+        // set again / removed / the level unload. color - 0xAARRGGBB (GetARGB; the alpha is ignored); depth tested,
+        // 1 pixel lines. false (and a log line): no level, a bad id or value, the limit of shapes
+        def("draw_line", +[](pcstr id, const Fvector& a, const Fvector& b, u32 color) -> bool
+            { return gw::world_draw::Line(id, a, b, color); }),
+        def("draw_circle", +[](pcstr id, const Fvector& center, float radius, u32 color) -> bool
+            { return gw::world_draw::Circle(id, center, radius, color, 0); }),
+        def("draw_circle", +[](pcstr id, const Fvector& center, float radius, u32 color, u32 segments) -> bool
+            { return gw::world_draw::Circle(id, center, radius, color, segments); }),
+        def("draw_polyline", +[](pcstr id, const luabind::object& points, u32 color) -> bool
+            { return draw_polyline(id, points, false, color); }),
+        def("draw_polyline", &draw_polyline),
+        def("draw_box", +[](pcstr id, const Fvector& center, const Fvector& half, const Fvector& hpb, u32 color) -> bool
+            { return gw::world_draw::Box(id, center, half, hpb, color); }),
+        def("draw_sphere", +[](pcstr id, const Fvector& center, float radius, u32 color) -> bool
+            { return gw::world_draw::Sphere(id, center, radius, color); }),
+        def("draw_arrow", +[](pcstr id, const Fvector& from, const Fvector& to, u32 color) -> bool
+            { return gw::world_draw::Arrow(id, from, to, color, 0.f); }),
+        def("draw_arrow", +[](pcstr id, const Fvector& from, const Fvector& to, u32 color, float head) -> bool
+            { return gw::world_draw::Arrow(id, from, to, color, head); }),
+        def("draw_remove", +[](pcstr id) -> bool { return gw::world_draw::Remove(id); }),
+        def("draw_remove_prefix", +[](pcstr prefix) -> u32 { return gw::world_draw::RemovePrefix(prefix); }),
+        def("draw_clear", +[]() { gw::world_draw::RemoveAll(); }),
+        def("draw_count", +[]() -> u32 { return gw::world_draw::Count(); }),
+
+        // RS12 (plans/addon_runtime_smarts, level_world_draw.h): a UI window (a child of a dialog of the HUD) put every
+        // frame before the UI at the point of the world on the screen + (dx, dy) of the UI; hidden behind the camera
+        def("ui_anchor", +[](CUIWindow* wnd, const Fvector& pos) -> bool
+            { return gw::world_draw::Anchor(wnd, pos, 0.f, 0.f); }),
+        def("ui_anchor", +[](CUIWindow* wnd, const Fvector& pos, float dx, float dy) -> bool
+            { return gw::world_draw::Anchor(wnd, pos, dx, dy); }),
+        def("ui_anchor_remove", +[](CUIWindow* wnd) -> bool { return gw::world_draw::AnchorRemove(wnd); }),
+        def("ui_anchor_clear", +[]() { gw::world_draw::AnchorClear(); })
     ];
 
     module(luaState, "actor_stats")
@@ -1135,6 +1398,11 @@ void CLevel::script_register(lua_State* luaState)
         def("stop_tutorial", &stop_tutorial),
         def("has_active_tutorial", &has_active_tutotial),
         def("active_tutorial_name", +[](){ return g_tutorial->GetTutorName(); }),
+        // RS10 (plans/addon_runtime_smarts): game.world2ui(pos[, hud[, allow_offscreen]]) -> vector2 of the UI
+        // (1024 x 768); x = -9999 - behind the camera / out of the screen. See world_to_ui
+        def("world2ui", +[](const Fvector& pos) { return world_to_ui(pos, false, false); }),
+        def("world2ui", +[](const Fvector& pos, bool hud) { return world_to_ui(pos, hud, false); }),
+        def("world2ui", &world_to_ui),
         def("translate_string", &translate_string),
         def("replace_translate_string", &replace_translate_string),
         def("register_string_token", &register_string_token),

@@ -11,6 +11,7 @@
 #include "addon_api_common.h"
 
 #include "Actor.h"
+#include "ai/stalker/ai_stalker.h"
 #include "CharacterPhysicsSupport.h"
 #include "Include/xrRender/Kinematics.h"
 #include "Inventory.h"
@@ -587,6 +588,20 @@ GwpResult GWP_CALL ApiObjectSetVisual(const GwpPlugin* self, GwpObjectId id, con
             return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "an object without a model");
         if (CActor* actor = smart_cast<CActor*>(object))
             actor->ChangeVisual(visual); // bones, animations, physics: the path of an outfit
+        else if (CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(object); stalker && stalker->g_Alive() &&
+                 !stalker->PPhysicsShell())
+        {
+            // A live stalker (plans/addon_companion_extended/npc_visual.md): the whole change of Lua npc:set_visual -
+            // animations, bones, physics rebuilt, deferred to the end of the frame beside the render; the server object
+            // is written by ChangeVisual once the model is really set (an unfit model never gets into the save)
+            string_path name;
+            xr_strcpy(name, visual);
+            xr_strlwr(name); // as CSE_Visual::set_visual keeps it: the same-model check of ChangeVisual compares names
+            if (!stalker->ChangeVisual(name, true))
+                return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT,
+                    "the model has not the bones or the animations of a stalker (or was not created)");
+            return GWP_OK;
+        }
         else if (smart_cast<CEntityAlive*>(object))
             return api::PluginRefusal(self, function, GWP_ERROR_NOT_SUPPORTED,
                 "a creature changes its model only offline (its skeleton is cached by its managers)");

@@ -2,11 +2,13 @@
 
 #include "addon_lua_entry.h"
 #include "addon_host.h"
+#include "addon_lua_console.h"
 #include "addon_content.h"
 #include "addon_merge.h"
 #include "addon_slots.h"
 
 #include "xrScriptEngine/script_engine.hpp"
+#include "xrEngine/xr_level_controller.h" // AddonKeyGroupsClear
 
 #include <algorithm>
 #include <cctype>
@@ -280,6 +282,9 @@ void RunSlotProviderEntries()
 void RunLuaEntries()
 {
     g_state_entries.clear(); // a new Lua state: the entries of the old one got on_unload in RunLuaUnloadEntries
+    // The key groups of addons (addons.register_key_group) are registered by on_load again: a group of an addon that is
+    // off now must leave Options -> Controls (the keys the player set stay, AddonKeyGroupsClear)
+    AddonKeyGroupsClear();
     if (!GEnv.ScriptEngine)
         return;
     const xr_vector<LuaEntryInfo> entries = ActiveLuaEntries();
@@ -436,6 +441,7 @@ bool UnloadLuaEntryForReload(pcstr addon_id)
     const u32 unload_failed = RunReloadPhase(addon_id, "unload");
     if (!ReloadCall(kLuaReloadRemove, {}))
         Msg("! [addon:%s] addon_reload: its registrations were not removed (the error is above)", addon_id);
+    lua_console::RemoveOwner(addon_id); // addons.register_command: the console commands of the addon (gap P03)
     Msg("* [addon:%s] addon_reload: unloaded (on_unload: %s, save data: %s)", addon_id,
         unload_failed ? "failed" : "ok", save_failed ? "incomplete, not carried over" : "ok");
     return present;

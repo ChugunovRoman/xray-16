@@ -115,6 +115,11 @@ void CActor::AddGameTask(const CInfoPortion* info_portion) const
 
 void CActor::AddGameNews(GAME_NEWS_DATA&& news_data)
 {
+    // news_on_before_show (engine gaps P30): a subscriber may drop the news - not shown, not kept in the PDA log
+    if (!gw::addons::objevents::NewsBeforeShow(news_data.news_caption.c_str(), news_data.news_text.c_str(),
+            news_data.texture_name.c_str(), news_data.show_time, news_data.m_type))
+        return;
+
     // Assign timestamp before passing the news to UI
     news_data.receive_time = Level().GetGameTime();
 
@@ -298,8 +303,11 @@ void CActor::UpdateDefferedMessages()
         auto& [news_data, time] = m_defferedMessages.back();
         if (time <= Device.dwTimeGlobal)
         {
-            AddGameNews(std::move(news_data));
+            // Taken out of the list first: AddGameNews runs news_on_before_show, whose subscribers may add deferred
+            // news (the list grows and is sorted again - the reference above would point elsewhere)
+            GAME_NEWS_DATA ready = std::move(news_data);
             m_defferedMessages.pop_back();
+            AddGameNews(std::move(ready));
         }
         else
             break;

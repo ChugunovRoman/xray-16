@@ -10,6 +10,11 @@
 #include "ui/UIActorMenu.h"
 #include "UIGameCustom.h"
 #include "inventory_item.h"
+#include "xrPhysics/IPHStaticGeomShell.h"
+#include "Include/xrRender/Kinematics.h"
+#ifdef DEBUG
+#include "xrEngine/ObjectDump.h"
+#endif
 
 CInventoryBox::CInventoryBox()
 {
@@ -83,11 +88,66 @@ void CInventoryBox::UpdateCL()
     ZoneScopedN("ucl_CInventoryBox");
     inherited::UpdateCL();
 }
-void CInventoryBox::net_Destroy() { inherited::net_Destroy(); }
+void CInventoryBox::net_Destroy()
+{
+    DestroyStaticGeomShell(m_static_shell);
+    inherited::net_Destroy();
+}
+
+void CInventoryBox::Load(LPCSTR section)
+{
+    inherited::Load(section);
+    m_static_collision = !!READ_IF_EXISTS(pSettings, r_bool, section, "static_collision", false);
+    m_npc_collision = !!READ_IF_EXISTS(pSettings, r_bool, section, "npc_collision", true);
+    m_is_ai_obstacle =
+        !!READ_IF_EXISTS(pSettings, r_bool, section, "is_ai_obstacle", m_static_collision && m_npc_collision);
+}
+
+// Read in Load (the getter runs for the objects near a walking NPC on the main thread and in the path search on the
+// Game thread - no ini lookup here, as CPhysicObject F5). A box without the keys stays no obstacle, as before
+bool CInventoryBox::is_ai_obstacle() const { return m_is_ai_obstacle; }
+
+// static_collision (plans/addon_base_building/plan.md 17.37): a placed stash of the base building addon stands as the
+// level - the actor walks on it and does not pass through it, the dropped items and the grenades lie on it. The shapes
+// of all the bones of the model in the bind pose at XFORM after inherited::net_Spawn (CGameObject::net_Spawn has put
+// the box on the AI mesh already); the box never moves while online (a teleport takes it offline: net_Destroy, then
+// a new net_Spawn builds the shell again). Ray picks (F, the crosshair) and bullets use the collision form
+// (CCF_Skeleton), not the shell
+void CInventoryBox::CreateStaticCollision()
+{
+    if (m_static_shell)
+        return;
+    m_static_shell = P_BuildStaticGeomShellFromBones(this);
+    if (!m_static_shell)
+    {
+        Msg("! [static_collision] [%s] visual [%s]: no bone with a physics shape - the inventory box has no collision",
+            cNameSect().c_str(), cNameVisual().c_str());
+        return;
+    }
+    if (!m_npc_collision)
+        P_StaticGeomShellAddContactCallback(m_static_shell, P_IgnoreNpcCharacterContact);
+}
+
+Fmatrix& CInventoryBox::ObjectXFORM() { return XFORM(); }
+Fvector& CInventoryBox::ObjectPosition() { return Position(); }
+// NameObject directly, as CPhysicsShellHolder::ObjectName (no shared_str copy: called from physics worker tasks too)
+LPCSTR CInventoryBox::ObjectName() const { return NameObject.c_str(); }
+LPCSTR CInventoryBox::ObjectNameVisual() const { return cNameVisual().c_str(); }
+LPCSTR CInventoryBox::ObjectNameSect() const { return cNameSect().c_str(); }
+bool CInventoryBox::ObjectGetDestroy() const { return getDestroy(); }
+u16 CInventoryBox::ObjectID() const { return ID(); }
+ICollisionForm* CInventoryBox::ObjectCollisionModel() { return CForm; }
+IKinematics* CInventoryBox::ObjectKinematics() { return Visual() ? Visual()->dcast_PKinematics() : nullptr; }
+bool CInventoryBox::has_parent_object() { return !!H_Parent(); }
+#ifdef DEBUG
+std::string CInventoryBox::dump(EDumpType /*type*/) const { return dbg_object_base_dump_string(this); }
+#endif
 #include "xrServerEntities/xrServer_Objects_ALife.h"
 bool CInventoryBox::net_Spawn(CSE_Abstract* DC)
 {
     inherited::net_Spawn(DC);
+    if (m_static_collision)
+        CreateStaticCollision();
     setVisible(TRUE);
     setEnabled(TRUE);
     set_tip_text("inventory_box_use");

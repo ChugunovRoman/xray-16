@@ -520,6 +520,7 @@
     <ClInclude Include="addon_api_threads.h" />
     <ClInclude Include="addon_api_alife_ext.h" />
     <ClInclude Include="addon_api_world.h" />
+    <ClInclude Include="addon_api_extra.h" />
     <ClInclude Include="addon_api_feedback.h" />
     <ClInclude Include="addon_api_character.h" />
     <ClInclude Include="addon_api_inventory_ext.h" />
@@ -534,10 +535,13 @@
     <ClInclude Include="addon_content.h" />
     <ClInclude Include="addon_host.h" />
     <ClInclude Include="addon_lua_entry.h" />
+    <ClInclude Include="addon_lua_console.h" />
     <ClInclude Include="addon_merge.h" />
     <ClInclude Include="addon_slots.h" />
     <ClInclude Include="addon_object_events.h" />
+    <ClInclude Include="addon_perf.h" />
     <ClInclude Include="addon_timers.h" />
+    <ClInclude Include="addon_user_data.h" />
     <ClInclude Include="ai_space.h" />
     <ClInclude Include="ai_space_inline.h" />
     <ClInclude Include="alife_abstract_registry.h" />
@@ -879,6 +883,8 @@
     <ClInclude Include="Level_network_Demo.h" />
     <ClInclude Include="Level_network_map_sync.h" />
     <ClInclude Include="level_pack.h" />
+    <ClInclude Include="level_preview_model.h" />
+    <ClInclude Include="level_world_draw.h" />
     <ClInclude Include="level_path_builder.h" />
     <ClInclude Include="level_path_manager.h" />
     <ClInclude Include="level_path_manager_inline.h" />
@@ -1953,6 +1959,7 @@
     <ClCompile Include="addon_api_threads.cpp" />
     <ClCompile Include="addon_api_alife_ext.cpp" />
     <ClCompile Include="addon_api_world.cpp" />
+    <ClCompile Include="addon_api_extra.cpp" />
     <ClCompile Include="addon_api_feedback.cpp" />
     <ClCompile Include="addon_api_character.cpp" />
     <ClCompile Include="addon_api_inventory_ext.cpp" />
@@ -1971,10 +1978,13 @@
     <ClCompile Include="addon_content.cpp" />
     <ClCompile Include="addon_host.cpp" />
     <ClCompile Include="addon_lua_entry.cpp" />
+    <ClCompile Include="addon_lua_console.cpp" />
     <ClCompile Include="addon_merge.cpp" />
     <ClCompile Include="addon_slots.cpp" />
     <ClCompile Include="addon_object_events.cpp" />
+    <ClCompile Include="addon_perf.cpp" />
     <ClCompile Include="addon_timers.cpp" />
+    <ClCompile Include="addon_user_data.cpp" />
     <ClCompile Include="ai_space.cpp" />
     <ClCompile Include="ai_stalker_alife.cpp" />
     <ClCompile Include="alife_anomalous_zone.cpp" />
@@ -2491,6 +2501,8 @@
     </ClCompile>
     <ClCompile Include="Level_network_start_client.cpp" />
     <ClCompile Include="level_pack.cpp" />
+    <ClCompile Include="level_preview_model.cpp" />
+    <ClCompile Include="level_world_draw.cpp" />
     <ClCompile Include="level_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

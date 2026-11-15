@@ -12,6 +12,7 @@
 #include "xrEngine/EngineThreading.h"
 #include "ParticlesObject.h"
 #include "Level.h"
+#include "level_preview_model.h"
 #include "VisionBatch.h"
 #include "Include/xrRender/Kinematics.h"
 #include "inventory_item.h" // render prepare of held items: CLevel::BonesPrepass collect step
@@ -77,6 +78,7 @@
 #include "level_debug.h"
 #include "ai/stalker/ai_stalker.h"
 #include "debug_renderer.h"
+#include "level_world_draw.h"
 #include "PhysicObject.h"
 #include "PHDebug.h"
 #include "debug_text_tree.h"
@@ -194,6 +196,10 @@ CLevel::~CLevel()
     {
         destroy_physics_world();
     }
+    // D3 (plans/addon_base_building): the preview models of level.preview_model_show go with the level
+    gw::preview_model::Clear();
+    // RS11 (plans/addon_runtime_smarts): the shapes of level.draw_* too
+    gw::world_draw::Clear();
     // destroy PSs
     for (auto& ps : m_StaticParticles)
         CParticlesObject::Destroy(ps);
@@ -3066,6 +3072,12 @@ void CLevel::OnRender()
     // sequential frame.
     Device.JoinGameLogicBeforeUI();
 
+    {
+        // RS11 (plans/addon_runtime_smarts): the shapes of level.draw_* - in the world (depth tested), under the UI;
+        // after the join: the Game thread has finished its frame
+        ZoneScopedN("lvl_world_draw");
+        gw::world_draw::Render();
+    }
     {
         ZoneScopedN("lvl_RenderUI");
         PERF_SCOPE(rlvl_ui);

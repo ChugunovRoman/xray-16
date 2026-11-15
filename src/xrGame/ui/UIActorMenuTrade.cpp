@@ -23,6 +23,7 @@
 #include "xrScriptEngine/script_engine.hpp"
 #include "UIGameSP.h"
 #include "UITalkWnd.h"
+#include "addon_object_events.h"
 
 #include "xrNetServer/NET_Messages.h"
 
@@ -338,6 +339,37 @@ float CUIActorMenu::CalcItemsWeight(CUIDragDropListEx* pList)
     return res;
 }
 
+namespace
+{
+// The ids of the items of a trade list (a cell and the items stacked in it), for actor_on_before_trade_deal
+void TradeListIds(CUIDragDropListEx* list, xr_vector<u16>& ids)
+{
+    ids.clear();
+    for (u32 i = 0; i < list->ItemsCount(); ++i)
+    {
+        CUICellItem* cell = list->GetItemIdx(i);
+        ids.push_back(static_cast<PIItem>(cell->m_pData)->object().ID());
+        for (u32 j = 0; j < cell->ChildsCount(); ++j)
+            ids.push_back(static_cast<PIItem>(cell->Child(j)->m_pData)->object().ID());
+    }
+}
+
+// actor_on_before_trade_deal (engine gaps P08): false - a subscriber cancelled the deal, nothing is transferred.
+// actor_list / partner_list: nullptr for the side the button does not trade (the buy and sell buttons)
+bool TradeDealAllowed(CInventoryOwner* partner, CUIDragDropListEx* actor_list, CUIDragDropListEx* partner_list,
+    int actor_price, int partner_price)
+{
+    xr_vector<u16> sold;
+    xr_vector<u16> bought;
+    if (actor_list)
+        TradeListIds(actor_list, sold);
+    if (partner_list)
+        TradeListIds(partner_list, bought);
+    return gw::addons::objevents::ActorBeforeTradeDeal(smart_cast<CGameObject*>(partner),
+        static_cast<u32>(std::max(actor_price, 0)), static_cast<u32>(std::max(partner_price, 0)), sold, bought);
+}
+} // namespace
+
 u32 CUIActorMenu::CalcItemsPrice(CUIDragDropListEx* pList, CTrade* pTrade, bool bBuying)
 {
     u32 res = 0;
@@ -466,10 +498,17 @@ void CUIActorMenu::OnBtnPerformTrade(CUIWindow* w, void* d)
 
     if ((actor_money >= 0) && (partner_money >= 0 || inf_partner_money) && (actor_price >= 0 || partner_price > 0))
     {
+        if (!TradeDealAllowed(m_pPartnerInvOwner, m_pLists[eTradeActorList], m_pLists[eTradePartnerList],
+                actor_price, partner_price))
+            return; // a subscriber cancelled it (and tells the player why itself); the lists stay as they are
+
         m_partner_trade->OnPerformTrade(partner_price, actor_price);
 
+        // actor_on_trade_deal: the items of both lists are one deal (ActorTrade collects them)
+        gw::addons::objevents::ActorTradeDealBegin();
         TransferItems(m_pLists[eTradeActorList], m_pLists[eTradePartnerBagList], m_partner_trade, true);
         TransferItems(m_pLists[eTradePartnerList], m_pLists[eTradeActorBagList], m_partner_trade, false);
+        gw::addons::objevents::ActorTradeDealEnd(smart_cast<CGameObject*>(m_pPartnerInvOwner));
     }
     else
     {
@@ -509,9 +548,14 @@ void CUIActorMenu::OnBtnPerformTradeBuy(CUIWindow* w, void* d)
 
     if ((actor_money >= 0) /*&& ( partner_money >= 0 )*/ && (actor_price >= 0 || partner_price > 0))
     {
+        if (!TradeDealAllowed(m_pPartnerInvOwner, nullptr, m_pLists[eTradePartnerList], actor_price, partner_price))
+            return; // cancelled by a subscriber of actor_on_before_trade_deal
+
         m_partner_trade->OnPerformTrade(partner_price, actor_price);
 
+        gw::addons::objevents::ActorTradeDealBegin(); // actor_on_trade_deal
         TransferItems(m_pLists[eTradePartnerList], m_pLists[eTradeActorBagList], m_partner_trade, false);
+        gw::addons::objevents::ActorTradeDealEnd(smart_cast<CGameObject*>(m_pPartnerInvOwner));
     }
     else
     {
@@ -551,9 +595,14 @@ void CUIActorMenu::OnBtnPerformTradeSell(CUIWindow* w, void* d)
 
     if ((actor_money >= 0) && (partner_money >= 0 || inf_partner_money) && (actor_price >= 0 || partner_price > 0))
     {
+        if (!TradeDealAllowed(m_pPartnerInvOwner, m_pLists[eTradeActorList], nullptr, actor_price, partner_price))
+            return; // cancelled by a subscriber of actor_on_before_trade_deal
+
         m_partner_trade->OnPerformTrade(partner_price, actor_price);
 
+        gw::addons::objevents::ActorTradeDealBegin(); // actor_on_trade_deal
         TransferItems(m_pLists[eTradeActorList], m_pLists[eTradePartnerBagList], m_partner_trade, true);
+        gw::addons::objevents::ActorTradeDealEnd(smart_cast<CGameObject*>(m_pPartnerInvOwner));
     }
     else
     {

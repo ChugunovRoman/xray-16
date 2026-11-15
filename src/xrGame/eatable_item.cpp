@@ -41,13 +41,20 @@ void CEatableItem::Load(LPCSTR section)
     m_fWeightFull = m_weight;
     m_fWeightEmpty = READ_IF_EXISTS(pSettings, r_float, section, "empty_weight", 0.0f);
 
-    if (IsUsingCondition())
-    {
-        if (m_iMaxUses > 0)
-            SetCondition(static_cast<float>(m_iRemainingUses / m_iMaxUses));
-        else
-            SetCondition(0.f);
-    }
+    UpdateConditionFromUses();
+}
+
+void CEatableItem::UpdateConditionFromUses()
+{
+    if (!IsUsingCondition())
+        return;
+
+    // Float division: the former static_cast<float>(m_iRemainingUses / m_iMaxUses) divided integers, so a started item
+    // (1 of 3 uses left and so on) had condition 0. Clamped: a save may hold more uses than the current max_uses
+    if (m_iMaxUses > 0)
+        SetCondition(std::min(1.f, static_cast<float>(m_iRemainingUses) / static_cast<float>(m_iMaxUses)));
+    else
+        SetCondition(0.f);
 }
 
 void CEatableItem::load(IReader& packet)
@@ -69,13 +76,10 @@ bool CEatableItem::net_Spawn(CSE_Abstract* DC)
     if (!inherited::net_Spawn(DC))
         return FALSE;
 
-    if (IsUsingCondition())
-    {
-        if (m_iMaxUses > 0)
-            SetCondition(static_cast<float>(m_iRemainingUses / m_iMaxUses));
-        else
-            SetCondition(0);
-    }
+    // The uses come from the client data (net_Load of CGameObject::net_Spawn, which CEatableItemObject runs first), the
+    // condition from the server entity (inherited::net_Spawn): recompute it, so an old save with condition 0 of a
+    // started item gets the right share on load
+    UpdateConditionFromUses();
 
     return TRUE;
 };
@@ -153,13 +157,7 @@ bool CEatableItem::UseBy(CEntityAlive* entity_alive)
             m_iRemainingUses = 0;
     }
 
-    if (IsUsingCondition())
-    {
-        if (m_iMaxUses > 0)
-            SetCondition(static_cast<float>(m_iRemainingUses / m_iMaxUses));
-        else
-            SetCondition(0.f);
-    }
+    UpdateConditionFromUses();
 
     return true;
 }

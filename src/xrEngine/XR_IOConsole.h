@@ -131,6 +131,13 @@ public:
     void ExecuteCommand(pcstr cmd, bool record_cmd = true);
     void SelectCommand();
 
+    // Called after ExecuteCommand ran a known, enabled command (its Execute, not a status query): the name of the
+    // command and its arguments ("" - none; lowercased for a command that asks for it). xrGame sends the event
+    // on_console_execute from it (plans/addon_api_ideas, gap P09). nullptr - none. The command may be gone already: the hook
+    // gets the name only.
+    using ExecuteHook = void (*)(pcstr name, pcstr args);
+    static void SetExecuteHook(ExecuteHook hook);
+
     bool GetBool(pcstr cmd) const;
     float GetFloat(pcstr cmd, float& min, float& max) const;
     int GetInteger(pcstr cmd, int& min, int& max) const;
@@ -203,6 +210,7 @@ protected:
     void select_for_filter(pcstr filter_str, const vecTips& in_v, vecTipsEx& out_v);
 
 private:
+    static ExecuteHook s_execute_hook; // SetExecuteHook
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // class CConsole
 

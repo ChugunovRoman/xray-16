@@ -40,6 +40,50 @@ void CObjectActionCommand::initialize()
 // CObjectActionShow
 //////////////////////////////////////////////////////////////////////////
 
+namespace
+{
+// The slot the stalker shows the item from. Usually its base slot: what lies there goes to the ruck.
+// plans/addon_companion_extended/npc_equipment.md: an NPC whose equipment the player sets up (equipment_editable)
+// keeps the slots the player filled: an item already in a slot is shown from it (a rifle the player put into the
+// pistol slot stays there); an item of the ruck goes to its base slot when it is free, a weapon of the slots 2 / 3 -
+// to the other one of them when that is free. Both busy (the choice of the weapon took it in a fight because the weapons
+// of the slots have no ammo, CAI_Stalker::update_best_item_info_impl) - the temporary swap: the slot whose weapon cannot
+// kill gives place, the weapon goes to the ruck and is remembered (CInventoryOwner::SetEquipmentSwapped; the first
+// record of the slot stays - it is the weapon of the player, not an earlier replacement), it comes back later. No such
+// slot - NO_ACTIVE_SLOT: nothing is shown, nothing leaves its slot. The other slots (grenades, binoculars) - as before
+u16 show_slot(CAI_Stalker& stalker, CInventoryItem* item)
+{
+    const u16 base = item->BaseSlot();
+    if (!stalker.equipment_editable())
+        return base;
+
+    CInventory& inv = stalker.inventory();
+    if (inv.InSlot(item))
+        return item->CurrSlot();
+    if (base == NO_ACTIVE_SLOT || !inv.ItemFromSlot(base))
+        return base;
+    if (base == INV_SLOT_2 || base == INV_SLOT_3)
+    {
+        const u16 other = base == INV_SLOT_2 ? INV_SLOT_3 : INV_SLOT_2;
+        if (!inv.ItemFromSlot(other))
+            return other;
+        for (const u16 slot : { base, other })
+        {
+            CInventoryItem* current = inv.ItemFromSlot(slot);
+            if (current && current != item && !current->can_kill())
+            {
+                if (stalker.EquipmentSwapped(slot) == u16(-1))
+                    stalker.SetEquipmentSwapped(slot, current->object_id());
+                return slot;
+            }
+        }
+        return NO_ACTIVE_SLOT;
+    }
+    // the other slots (grenades, binoculars...) - as before
+    return base;
+}
+} // namespace
+
 CObjectActionShow::CObjectActionShow(
     CInventoryItem* item, CAI_Stalker* owner, CPropertyStorage* storage, LPCSTR action_name)
     : inherited(item, owner, storage, action_name)
@@ -53,14 +97,17 @@ void CObjectActionShow::initialize()
 
     VERIFY(m_item);
 
-    CInventoryItem* slot_item = object().inventory().ItemFromSlot(m_item->BaseSlot());
+    const u16 slot = show_slot(object(), m_item);
+    if (slot == NO_ACTIVE_SLOT)
+        return;
+    CInventoryItem* slot_item = object().inventory().ItemFromSlot(slot);
     if (slot_item == m_item)
         return;
 
     if (slot_item)
         object().inventory().Ruck(slot_item);
 
-    object().inventory().Slot(m_item->BaseSlot(), m_item);
+    object().inventory().Slot(slot, m_item);
 }
 
 void CObjectActionShow::execute()
@@ -70,25 +117,28 @@ void CObjectActionShow::execute()
     if (object().inventory().ActiveItem() && (object().inventory().ActiveItem() == m_item))
         return;
 
+    const u16 slot = show_slot(object(), m_item);
+    if (slot == NO_ACTIVE_SLOT)
+        return;
     CHudItem* hud_item = smart_cast<CHudItem*>(object().inventory().ActiveItem());
     if (!hud_item)
     {
-        object().inventory().Slot(m_item->BaseSlot(), m_item);
-        object().inventory().Activate(m_item->BaseSlot());
+        object().inventory().Slot(slot, m_item);
+        object().inventory().Activate(slot);
         return;
     }
 
     if (hud_item->IsPending())
         return;
 
-    CInventoryItem* slot_item = object().inventory().ItemFromSlot(m_item->BaseSlot());
+    CInventoryItem* slot_item = object().inventory().ItemFromSlot(slot);
     if (slot_item == m_item)
         return;
 
     if (slot_item)
         object().inventory().Ruck(slot_item);
 
-    object().inventory().Slot(m_item->BaseSlot(), m_item);
+    object().inventory().Slot(slot, m_item);
 }
 
 //////////////////////////////////////////////////////////////////////////

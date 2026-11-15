@@ -359,6 +359,13 @@ CSE_ALifeObject::CSE_ALifeObject(LPCSTR caSection) : CSE_Abstract(caSection)
     fp_data.inc();
 #endif
     m_flags.set(flOfflineNoMove, false);
+    // D6 (plans/addon_base_building/plan.md section 15.2): the own switch distance from the section, not from the save
+    if (caSection && pSettings)
+    {
+        m_switch_distance = pSettings->read_if_exists<float>(caSection, "alife_switch_distance", 0.f);
+        if (!(m_switch_distance > 0.f)) // negative or NaN - the global distance
+            m_switch_distance = 0.f;
+    }
     seed(u32(CPU::QPC() & 0xffffffff));
 }
 
@@ -584,8 +591,11 @@ bool CSE_ALifeObject::used_ai_locations() const /* noexcept */
 { return !!m_flags.is(flUsedAI_Locations); }
 bool CSE_ALifeObject::can_switch_online() const /* noexcept */
 { return match_configuration() && !!m_flags.is(flSwitchOnline); }
+// D6 (plans/addon_base_building/plan.md section 15.2): an object with its own alife_switch_distance may go offline
+// even with flSwitchOffline cleared (a physic object or a lamp clear it in the constructor; old saves keep it cleared) -
+// decided on the fly, so it works for the saves made before this change too
 bool CSE_ALifeObject::can_switch_offline() const /* noexcept */
-{ return !match_configuration() || !!m_flags.is(flSwitchOffline); }
+{ return !match_configuration() || !!m_flags.is(flSwitchOffline) || m_switch_distance > 0.f; }
 bool CSE_ALifeObject::can_save() const /* noexcept */
 { return !!m_flags.is(flCanSave); }
 bool CSE_ALifeObject::interactive() const /* noexcept */

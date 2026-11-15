@@ -16,6 +16,7 @@
 #include "Actor.h"
 #include "MainMenu.h"
 #include "xrNetServer/NET_Messages.h"
+#include "addon_api_extra.h" // game_on_before_save (plans/addon_api_ideas, group plugin)
 
 extern LPCSTR alife_section;
 
@@ -62,6 +63,9 @@ void CAutosaveManager::shedule_Update(u32 dt)
 
     string_path temp;
     strconcat(sizeof(temp), temp, Core.UserName, " - ", "autosave");
+    // game_on_before_save (P21): a cancelled autosave waits for the next interval
+    if (!gw::addons::extra::BeforeGameSave(temp, "autosave"))
+        return;
     NET_Packet net_packet;
     net_packet.w_begin(M_SAVE_GAME);
     net_packet.w_stringZ(temp);

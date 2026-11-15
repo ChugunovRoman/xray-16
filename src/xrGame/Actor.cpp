@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "addon_object_events.h"
+#include "addon_api_character.h" // actor_on_before_hit_ex (plans/addon_api_ideas, P22)
 #include "Actor_Flags.h"
 #include "HUDManager.h"
 
@@ -704,6 +705,11 @@ void CActor::Hit(SHit* pHDS)
             HDS.hit_type = (ALife::EHitType)(tLuaHit.m_tHitType);
             //HDS.who = smart_cast<CObject*>(tLuaHit.m_tpDraftsman->object());
             //HDS.whoID = tLuaHit.m_tpDraftsman->ID();
+
+            // actor_on_before_hit_ex (plans/addon_api_ideas, group plugin, P22): the hit as numbers, after Lua let it
+            // through; a subscriber may change the power or cancel the hit (only when the event has subscribers)
+            if (!gw::addons::character::ActorBeforeHit(this, HDS))
+                return;
 
             /* AVO: send script callback*/
             callback(GameObject::eHit)(

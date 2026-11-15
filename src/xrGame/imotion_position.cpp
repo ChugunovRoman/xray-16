@@ -80,10 +80,9 @@ static void get_depth(bool& do_colide, bool bo1, dContact& c, SGameMtl* /*materi
         ud = PHRetrieveGeomUserData(c.geom.g2);
     else
         ud = PHRetrieveGeomUserData(c.geom.g1);
-    if (ud)
-        collide_obj = static_cast<CPhysicsShellHolder*>(ud->ph_ref_object);
-    else
-        collide_obj = 0;
+    // the ref object may be no CPhysicsShellHolder (an inventory box with static_collision, plan 17.37)
+    IGameObject* object = ud && ud->ph_ref_object ? ud->ph_ref_object->IObject() : nullptr;
+    collide_obj = object ? object->cast_physics_shell_holder() : 0;
 #endif
 }
 static std::string collide_diag()

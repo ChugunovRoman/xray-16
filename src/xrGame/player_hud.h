@@ -110,6 +110,22 @@ struct attachable_hud_item
 
     player_hud_motion_container m_hand_motions;
 
+    // Shot kick damping in the aim (player_hud::apply_shot_aim_kick). Per hud section overrides,
+    // read once in the constructor; a negative value means "not set, use the console variable".
+    float m_shot_aim_factor{-1.f}; // shot_aim_hud_factor, 0..1: share of the kick that stays
+    float m_shot_aim_kick_time{-1.f}; // shot_aim_hud_kick_time, ms of the animation time
+    float m_shot_aim_kick_fade{-1.f}; // shot_aim_hud_kick_fade, ms
+    // Runtime state of the damping.
+    float m_shot_aim_phase{}; // 1 - inside the kick window, falls linearly to 0 over the fade
+    u32 m_shot_aim_motion_start{}; // start time of the shot motion the speed below belongs to
+    float m_shot_aim_motion_speed{1.f}; // playback speed of that motion (motion def x hud section)
+    shared_str m_shot_aim_scope_sect; // scope addon section the factor below was read from
+    float m_shot_aim_scope_factor{-1.f}; // shot_aim_hud_factor of that scope section
+
+    // Share of the shot kick to remove this frame: w_ads * w_shot * (1 - factor), 0 - keep the
+    // animation as is. Advances the kick window, so call it once per frame.
+    float shot_aim_kick_weight();
+
     attachable_hud_item(player_hud* parent, const shared_str& sect_name, IKinematicsAnimated* model);
     ~attachable_hud_item();
 
@@ -203,6 +219,10 @@ public:
 
 private:
     void load_ancors();
+    // Scales the shot kick of the hud animation down in the aim: moves the hands (and with them
+    // the item) rigidly so that the anchor bone sits between the static aim rest pose and the
+    // animated pose. Call after the hands bones are calculated, before the item update.
+    void apply_shot_aim_kick(attachable_hud_item& item);
     void update_inertion(Fmatrix& trans) const;
     void update_additional(Fmatrix& trans) const;
 public:

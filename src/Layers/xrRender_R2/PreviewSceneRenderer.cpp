@@ -617,6 +617,7 @@ void CPreviewSceneRenderer::RequeueCachedEntries()
 void CPreviewSceneRenderer::DestroyRuntime(bool preserve_requests)
 {
     m_ephemeral.clear();
+    DestroyLive(preserve_requests);
     FlushDeferredVisualDiscard();
 
     if (preserve_requests)
@@ -1685,6 +1686,7 @@ void CPreviewSceneRenderer::WarmDiskCacheTextures()
 void CPreviewSceneRenderer::ProcessQueue()
 {
     FlushDeferredVisualDiscard();
+    ProcessLive();
 
     if (m_queue.empty())
         return;
@@ -1770,5 +1772,139 @@ void CPreviewSceneRenderer::ProcessQueue()
     // persist those removals so the next session doesn't see them either.
     if (m_diskCacheDirty && m_queue.empty())
         FlushDiskIndex();
+}
+// ---------------------------------------------------------------------------
+// Live preview slots (plans/addon_base_building/plan.md 17.16): a turning model in a UI window. The cached previews
+// above are keyed by the settings - every new angle would be a new texture (and a DDS on disk). A slot keeps its
+// model created and one texture of a fixed name, rendered again only when the settings of the slot change.
+// ---------------------------------------------------------------------------
+
+static shared_str PreviewSceneLiveName(u32 slot)
+{
+    string64 name{};
+    xr_sprintf(name, sizeof(name), "$user$gw_live_preview_%u", slot);
+    return shared_str(name);
+}
+
+void CPreviewSceneRenderer::LiveSet(u32 slot, pcstr model_path, const SPreviewSceneSettings& settings)
+{
+    if (slot >= kLiveSlots || !model_path || !model_path[0])
+        return;
+
+    SLiveSlot& live = m_live[slot];
+    if (live.model_path != model_path)
+    {
+        DiscardPreviewVisual(live.visual);
+        live.model_path = shared_str(model_path);
+        live.ready = false;
+        live.failed = false;
+        live.dirty = true;
+    }
+    if (live.settings != settings)
+    {
+        live.settings = settings;
+        live.dirty = true;
+    }
+}
+
+bool CPreviewSceneRenderer::LiveReady(u32 slot) const
+{
+    return slot < kLiveSlots && m_live[slot].ready;
+}
+
+shared_str CPreviewSceneRenderer::LiveTextureName(u32 slot) const
+{
+    return slot < kLiveSlots ? PreviewSceneLiveName(slot) : shared_str();
+}
+
+void CPreviewSceneRenderer::LiveClear(u32 slot)
+{
+    if (slot >= kLiveSlots)
+        return;
+
+    SLiveSlot& live = m_live[slot];
+    DiscardPreviewVisual(live.visual);
+    live.color_rt.destroy();
+    live.model_path = shared_str();
+    live.settings = SPreviewSceneSettings{};
+    live.dirty = false;
+    live.ready = false;
+    live.failed = false;
+}
+
+void CPreviewSceneRenderer::DestroyLive(bool keep_models)
+{
+    for (u32 slot = 0; slot < kLiveSlots; ++slot)
+    {
+        SLiveSlot& live = m_live[slot];
+        if (!keep_models)
+        {
+            LiveClear(slot);
+            continue;
+        }
+        live.color_rt.destroy();
+        live.ready = false;
+        live.dirty = live.model_path.size() != 0;
+    }
+}
+
+void CPreviewSceneRenderer::ProcessLive()
+{
+    if (!Device.b_is_Ready || !m_owner.Target || !m_owner.Resources)
+        return;
+
+    for (u32 slot = 0; slot < kLiveSlots; ++slot)
+    {
+        SLiveSlot& live = m_live[slot];
+        if (!live.dirty || live.failed || !live.model_path.size())
+            continue;
+
+        const u32 width = PreviewSceneResolveFrameWidth(live.settings);
+        const u32 height = PreviewSceneResolveFrameHeight(live.settings);
+        if (!!live.color_rt && (live.color_rt->dwWidth != width || live.color_rt->dwHeight != height))
+            live.color_rt.destroy();
+        if (!live.color_rt)
+        {
+            const auto fmt = m_owner.Target->rt_Color->fmt;
+            live.color_rt = m_owner.Resources->_CreateRT(PreviewSceneLiveName(slot).c_str(), width, height, fmt, 1);
+            if (!live.color_rt)
+            {
+                Msg("! [preview_scene] live slot %u: RT create failed", slot);
+                live.failed = true;
+                continue;
+            }
+        }
+        if (!live.visual)
+        {
+            live.visual = m_owner.model_Create(live.model_path.c_str());
+            if (!live.visual)
+            {
+                Msg("! [preview_scene] live slot %u: model create failed: %s", slot, live.model_path.c_str());
+                live.failed = true;
+                continue;
+            }
+        }
+
+        // As RenderCachedEntry: the shared runtime and the kinematics follow m_settings during the render
+        const SPreviewSceneSettings saved_settings = m_settings;
+        m_settings = live.settings;
+        const bool rendered = RenderModelIntoRT(live.visual, live.color_rt, live.settings, nullptr);
+        m_settings = saved_settings;
+        if (rendered)
+        {
+            live.ready = true;
+            live.dirty = false;
+        }
+        else if (!m_runtime.ready)
+        {
+            // the runtime is not there yet (a reset): the next frame tries again
+            continue;
+        }
+        else
+        {
+            Msg("! [preview_scene] live slot %u: render failed: %s", slot, live.model_path.c_str());
+            live.failed = true;
+        }
+    }
 }
 } // namespace xray::render::RENDER_NAMESPACE

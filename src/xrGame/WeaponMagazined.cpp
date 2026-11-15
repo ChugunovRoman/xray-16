@@ -1758,23 +1758,38 @@ void CWeaponMagazined::PlayAnimShoot()
 
     PlayCamAnim("cam_anm_shoot");
 
+    const bool zoomed = IsZoomed() || IsSecondZoomed();
+    // Выстрел "через прицел" (ключи OGSR): у такой анимации корневая кость почти не уезжает
+    // к камере, иначе окуляр 3D-прицела в прицеливании раздувается на каждом выстреле.
+    const bool scoped = zoomed && IsScopeAttached();
+
     if (iAmmoElapsed < 2)
     {
-        if ((IsZoomed() || IsSecondZoomed()) && isHUDAnimationExist("anm_shots_aim_l"))
+        if (scoped && isHUDAnimationExist("anm_shots_last_aim_scope"))
+            PlayHUDMotion("anm_shots_last_aim_scope", TRUE, this, GetState());
+        else if (zoomed && isHUDAnimationExist("anm_shots_aim_l"))
             PlayHUDMotion("anm_shots_aim_l", TRUE, this, GetState());
-        else if ((IsZoomed() || IsSecondZoomed()) && isHUDAnimationExist("anm_shots_aim"))
+        else if (zoomed && isHUDAnimationExist("anm_shots_when_aim_last"))
+            PlayHUDMotion("anm_shots_when_aim_last", FALSE, this, GetState());
+        else if (scoped && isHUDAnimationExist("anm_shots_aim_scope"))
+            PlayHUDMotion("anm_shots_aim_scope", TRUE, this, GetState());
+        else if (zoomed && isHUDAnimationExist("anm_shots_aim"))
             PlayHUDMotion("anm_shots_aim", TRUE, this, GetState());
         else if (isHUDAnimationExist("anm_shot_l"))
             PlayHUDMotion("anm_shot_l", TRUE, this, GetState());
+        else if (isHUDAnimationExist("anm_shots_last"))
+            PlayHUDMotion("anm_shots_last", FALSE, this, GetState());
         else if (isHUDAnimationExist("anm_shots"))
             PlayHUDMotion("anm_shots", "anim_shoot", false, this, GetState());
 
         return;
     }
 
-    if (IsZoomed() || IsSecondZoomed())
+    if (zoomed)
     {
-        if (isHUDAnimationExist("anm_shots_when_aim"))
+        if (scoped && isHUDAnimationExist("anm_shots_aim_scope"))
+            PlayHUDMotion("anm_shots_aim_scope", TRUE, this, GetState());
+        else if (isHUDAnimationExist("anm_shots_when_aim"))
             PlayHUDMotion("anm_shots_when_aim", false, this, GetState());
         else if (isHUDAnimationExist("anm_shots_aim"))
             PlayHUDMotion("anm_shots_aim", TRUE, this, GetState());

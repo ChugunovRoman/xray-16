@@ -38,10 +38,13 @@ int g_bodycamSession=0; // Kept through level teardown; updated by the session s
 #include "addon_merge.h"
 #include "addon_event_bus.h"
 #include "addon_object_events.h"
+#include "addon_perf.h"
 #include "addon_data_bus.h"
 #include "addon_timers.h"
 #include "addon_api_ini.h"
 #include "addon_api_console.h"
+#include "addon_api_extra.h" // game_on_before_save (plans/addon_api_ideas, group plugin)
+#include "addon_lua_console.h"
 #include "addon_binders.h"
 #include "addon_callbacks.h"
 #include "addon_goap.h"
@@ -176,6 +179,12 @@ extern BOOL g_ai_die_in_anomaly;
 int g_inv_highlight_equipped = 0;
 int g_inv_inv_cell_size = 3;
 int g_3d_scope_type = 1; // 0 = off, 1 = PiP (lens zoom), 2 = HUD overlay (no 2nd world render)
+// Ослабление пинка худ-анимации выстрела в прицеливании (player_hud::apply_shot_aim_kick).
+// Режим: 0 - выкл., 1 - только 3D-прицелы (g_3d_scopes != 0 и прицел установлен), 2 - любое прицеливание.
+int g_hud_shot_aim_mode = 1;
+float g_hud_shot_aim_factor = 0.3f; // доля пинка, которая остаётся (0 - пинка нет, 1 - как в анимации)
+float g_hud_shot_aim_kick_time = 150.f; // мс времени анимации от старта выстрела, пока пинок гасится полностью
+float g_hud_shot_aim_kick_fade = 100.f; // мс плавного возврата к анимации после окна
 xr_map<shared_str, float> g_scope_hud_fov_presets;
 xr_map<shared_str, float> g_weapon_hud_fov_presets;
 //-Alundaio
@@ -567,23 +576,44 @@ public:
 
     void Execute(pcstr args) override
     {
+        // plans/addon_api_ideas (gap P39): a language that is not installed now (its folder text\<language>\ comes
+        // with an addon, user.ltx runs before the addons are mounted) is remembered and taken once it is
+        const xr_token* known = GetToken();
+        bool installed = false;
+        for (const xr_token* token = known; token && token->name; ++token)
+            installed = installed || (args && 0 == xr_stricmp(token->name, args));
+        if (known && args && args[0] && !installed)
+        {
+            StringTable().SetPendingLanguage(args);
+            Msg("~ g_language: language '%s' is not installed now (no folder text\\%s\\), it is taken once an addon "
+                "brings it", args, args);
+            return;
+        }
+        StringTable().SetPendingLanguage(nullptr);
+
+        const shared_str before = StringTable().GetCurrentLanguage();
         CCC_Token::Execute(args);
         StringTable().ReloadLanguage();
+        const shared_str after = StringTable().GetCurrentLanguage();
 
         Device.seqUIReset.Process();
 
-        if (!g_pGameLevel)
-            return;
-
-        for (u16 id = 0; id < 0xffff; id++)
+        if (g_pGameLevel)
         {
-            IGameObject* gameObj = Level().Objects.net_Find(id);
-            if (gameObj)
+            for (u16 id = 0; id < 0xffff; id++)
             {
-                if (CInventoryItem* invItem = gameObj->cast_inventory_item())
-                    invItem->ReloadNames();
+                IGameObject* gameObj = Level().Objects.net_Find(id);
+                if (gameObj)
+                {
+                    if (CInventoryItem* invItem = gameObj->cast_inventory_item())
+                        invItem->ReloadNames();
+                }
             }
         }
+
+        // on_localization_change(language): the strings and the names of the items are of the new language already
+        if (before != after)
+            gw::addons::lua_console::LocalizationChanged(after.c_str());
     }
 
     const xr_token* GetToken() noexcept override
@@ -1128,6 +1158,17 @@ public:
         {
             Msg("cannot make saved game because actor is dead :(");
             return;
+        }
+        // game_on_before_save (plans/addon_api_ideas, group plugin, P21): Lua and the plugins may cancel the save. The
+        // quick save key, the save dialog, xr_effects and game_save of a plugin all come here
+        {
+            string_path name;
+            if (args && *args)
+                xr_strcpy(name, args);
+            else
+                strconcat(sizeof(name), name, Core.UserName, " - ", "quicksave");
+            if (!gw::addons::extra::BeforeGameSave(name, args && *args ? "save" : "quicksave"))
+                return;
         }
 
         Console->Execute("stat_memory save");
@@ -2570,6 +2611,38 @@ public:
     {
         xr_strcpy(I, "addon id: on_unload, unload its Lua modules and plugin, load them again, on_load (development)");
     }
+};
+
+// plans/addon_api_ideas/spec.md P48: the time of the addons on the event bus by owner (addon_perf.h)
+class CCC_AddonPerf : public IConsole_Command
+{
+public:
+    CCC_AddonPerf(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; bLowerCaseArgs = true; };
+    virtual void Execute(LPCSTR args)
+    {
+        gw::addons::perf::SetEnabled(atoi(args) != 0 || !xr_strcmp(args, "on"));
+    }
+    virtual void GetStatus(TStatus& S) { xr_strcpy(S, gw::addons::perf::Enabled() ? "1" : "0"); }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "0 | 1: measure the time of the event bus subscribers by addon"); }
+    virtual void Save(IWriter*) {} // diagnostic: not kept in user.ltx
+};
+
+class CCC_AddonPerfReport : public IConsole_Command
+{
+public:
+    CCC_AddonPerfReport(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; bLowerCaseArgs = true; };
+    virtual void Execute(LPCSTR args)
+    {
+        if (!xr_strcmp(args, "reset"))
+        {
+            gw::addons::perf::Reset();
+            Msg("* [addon_perf] the counters are reset");
+            return;
+        }
+        const int top = atoi(args);
+        gw::addons::perf::PrintReport(top > 0 ? static_cast<u32>(top) : 20);
+    }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "[N | reset]: the addon_perf report (N slowest rows, 20 by default)"); }
 };
 
 class CCC_EventList : public IConsole_Command
@@ -4097,6 +4170,10 @@ void CCC_RegisterCommands()
     CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
     CMD1(CCC_TuneAttachableItem, "dbg_adjust_attachable_item");
     CMD4(CCC_Integer, "g_3d_scopes", &g_3d_scope_type, 0, 2);
+    CMD4(CCC_Integer, "hud_shot_aim_mode", &g_hud_shot_aim_mode, 0, 2);
+    CMD4(CCC_Float, "hud_shot_aim_factor", &g_hud_shot_aim_factor, 0.f, 1.f);
+    CMD4(CCC_Float, "hud_shot_aim_kick_time", &g_hud_shot_aim_kick_time, 0.f, 2000.f);
+    CMD4(CCC_Float, "hud_shot_aim_kick_fade", &g_hud_shot_aim_kick_fade, 0.f, 1000.f);
     CMD3(CCC_Mask, "g_pnv_in_scope", &psActorFlags, AF_PNV_W_SCOPE_DIS);
     CMD3(CCC_Mask, "g_weapons_cam_anims", &psActorFlags, AF_USE_CAM_ANIMS);
 #ifndef MASTER_GOLD
@@ -4135,6 +4212,8 @@ void CCC_RegisterCommands()
     CMD1(CCC_PluginReload, "plugin_reload");
     CMD1(CCC_AddonReload, "addon_reload");
     CMD1(CCC_EventList, "event_list");
+    CMD1(CCC_AddonPerf, "addon_perf");
+    CMD1(CCC_AddonPerfReport, "addon_perf_report");
     CMD1(CCC_EventEngineSources, "gw_event_engine_sources");
     CMD1(CCC_EventSchemaCheck, "gw_event_schema_check");
     CMD1(CCC_EventEngineLog, "gw_event_engine_log");

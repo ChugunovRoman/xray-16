@@ -96,6 +96,8 @@ target_sources(xrGame PRIVATE
     addon_api_alife_ext.h
     addon_api_world.cpp
     addon_api_world.h
+    addon_api_extra.cpp
+    addon_api_extra.h
     addon_api_feedback.cpp
     addon_api_feedback.h
     addon_api_character.cpp
@@ -130,14 +132,20 @@ target_sources(xrGame PRIVATE
     addon_host.h
     addon_lua_entry.cpp
     addon_lua_entry.h
+    addon_lua_console.cpp
+    addon_lua_console.h
     addon_merge.cpp
     addon_merge.h
     addon_slots.cpp
     addon_slots.h
     addon_object_events.cpp
     addon_object_events.h
+    addon_perf.cpp
+    addon_perf.h
     addon_timers.cpp
     addon_timers.h
+    addon_user_data.cpp
+    addon_user_data.h
     agent_corpse_manager.cpp
     agent_corpse_manager.h
     agent_corpse_manager_inline.h
@@ -821,6 +829,10 @@ target_sources(xrGame PRIVATE
     level_path_builder.h
     level_path_manager.h
     level_path_manager_inline.h
+    level_preview_model.cpp
+    level_preview_model.h
+    level_world_draw.cpp
+    level_world_draw.h
     level_script.cpp
     Level_secure_messaging.cpp
     Level_SLS_Default.cpp

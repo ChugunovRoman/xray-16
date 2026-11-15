@@ -75,6 +75,10 @@ struct FeedbackSoundSlot
     const IGame_Level* level = nullptr; // the level it started on; the sound goes with it
     u32 generation = 1;
     bool used = false;
+    // sound_play_attached (plans/addon_api_ideas, group plugin, P12): follows this bone of the object every frame
+    GwpObjectId attached = GWP_INVALID_OBJECT_ID;
+    const CGameObject* attached_object = nullptr; // only compared: another object under the same id stops the sound
+    u16 bone = BI_NONE;                           // BI_NONE: the position of an object without a skeleton
 };
 
 struct FeedbackParticlesSlot
@@ -163,6 +167,9 @@ void FeedbackReleaseSound(FeedbackSoundSlot& slot)
     slot.used = false;
     slot.owner = nullptr;
     slot.level = nullptr;
+    slot.attached = GWP_INVALID_OBJECT_ID; // P12
+    slot.attached_object = nullptr;
+    slot.bone = BI_NONE;
     slot.generation = FeedbackNextGeneration(slot.generation);
 }
 
@@ -547,6 +554,113 @@ GwpResult GWP_CALL ApiHudMessageHide(const GwpPlugin* self, const char* static_i
     return GWP_OK;
 }
 
+// ---------------------------------------------------------------------------------------------
+// engine gaps P13 (plans/addon_api_ideas/spec.md): a HUD text without a timeout (hud_text_set / hud_text_clear).
+// The engine keeps a record per node: the text comes back by itself on the HUD of the next level (a level change),
+// goes with its plugin (StopPlugin) and with a new game or a load (OnGameStartHudTexts).
+// ---------------------------------------------------------------------------------------------
+
+struct FeedbackHudText
+{
+    const GwpPlugin* owner = nullptr;
+    xr_string static_id;
+    xr_string text_id;
+    const CUIGameCustom* ui = nullptr; // the HUD that shows it now; another one (a new level) gets it again
+};
+xr_vector<FeedbackHudText>* g_feedback_hud_texts = nullptr;
+constexpr size_t kFeedbackMaxHudTexts = 64; // nodes with a lasting text at once, of all plugins
+
+// Shows the text in the node of this HUD, without a timeout (m_endTime < 0: IsActual keeps it)
+void FeedbackShowHudText(CUIGameCustom& ui, const FeedbackHudText& text)
+{
+    StaticDrawableWrapper* message = ui.AddCustomStatic(text.static_id.c_str(), true);
+    message->SetText(text.text_id.c_str()); // SetTextST: translated here
+    message->m_endTime = -1.0f;
+}
+
+FeedbackHudText* FeedbackFindHudText(pcstr static_id)
+{
+    if (!g_feedback_hud_texts)
+        return nullptr;
+    for (FeedbackHudText& text : *g_feedback_hud_texts)
+    {
+        if (text.static_id == static_id)
+            return &text;
+    }
+    return nullptr;
+}
+
+GwpResult GWP_CALL ApiHudTextSet(const GwpPlugin* self, const char* static_id, const char* text_id)
+{
+    if (!api::CheckPluginMutation(self, kFeedbackGroup, "hud_text_set"))
+        return api::PluginCallRefused(self);
+    // A node of its own: a lasting text in the shared node of SetHudMsg would hide every Lua message
+    if (!FeedbackNodeNameOk(static_id) || !text_id || !*text_id)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    CUIGameCustom* ui = FeedbackGameUi();
+    CUIXml* messages = ui ? FeedbackUiAccess::Messages(*ui) : nullptr;
+    if (!messages)
+        return api::PluginRefusal(self, "hud_text_set", GWP_ERROR_INVALID_STATE, "no HUD");
+    if (!messages->NavigateToNode(static_id, 0))
+        return api::PluginRefusal(self, "hud_text_set", GWP_ERROR_NOT_FOUND, "ui_custom_msgs.xml has no such static");
+    FeedbackHudText* text = FeedbackFindHudText(static_id);
+    if (!text)
+    {
+        if (!g_feedback_hud_texts)
+            g_feedback_hud_texts = xr_new<xr_vector<FeedbackHudText>>();
+        if (g_feedback_hud_texts->size() >= kFeedbackMaxHudTexts)
+            return api::PluginRefusal(self, "hud_text_set", GWP_ERROR_INVALID_STATE, "64 lasting HUD texts already");
+        text = &g_feedback_hud_texts->emplace_back();
+        text->static_id = static_id;
+    }
+    // The last call wins the node (another plugin included): the text and the owner are replaced
+    text->owner = self;
+    text->text_id = text_id;
+    text->ui = ui;
+    FeedbackShowHudText(*ui, *text);
+    return GWP_OK;
+}
+
+GwpResult GWP_CALL ApiHudTextClear(const GwpPlugin* self, const char* static_id)
+{
+    if (!api::CheckPluginMutation(self, kFeedbackGroup, "hud_text_clear"))
+        return api::PluginCallRefused(self);
+    if (!FeedbackNodeNameOk(static_id))
+        return GWP_ERROR_INVALID_ARGUMENT;
+    FeedbackHudText* text = FeedbackFindHudText(static_id);
+    if (!text || text->owner != self)
+        return GWP_ERROR_NOT_FOUND; // no lasting text of this plugin in the node
+    CUIGameCustom* ui = FeedbackGameUi();
+    if (ui && text->ui == ui)
+        ui->RemoveCustomStatic(static_id);
+    g_feedback_hud_texts->erase(g_feedback_hud_texts->begin() + (text - g_feedback_hud_texts->data()));
+    return GWP_OK;
+}
+
+// A new HUD (the level changed) gets the lasting texts again; called from OnFrame
+void FeedbackRestoreHudTexts()
+{
+    if (!g_feedback_hud_texts || g_feedback_hud_texts->empty())
+        return;
+    CUIGameCustom* ui = FeedbackGameUi();
+    CUIXml* messages = ui ? FeedbackUiAccess::Messages(*ui) : nullptr;
+    if (!messages)
+    {
+        // No HUD (between levels): the next one is new whatever its address
+        for (FeedbackHudText& text : *g_feedback_hud_texts)
+            text.ui = nullptr;
+        return;
+    }
+    for (FeedbackHudText& text : *g_feedback_hud_texts)
+    {
+        if (text.ui == ui)
+            continue;
+        text.ui = ui;
+        if (messages->NavigateToNode(text.static_id.c_str(), 0)) // the file is the same, checked all the same
+            FeedbackShowHudText(*ui, text);
+    }
+}
+
 uint32_t GWP_CALL ApiTranslate(const char* id, char* out, uint32_t cap)
 {
     if (out && cap)
@@ -703,6 +817,70 @@ GwpResult GWP_CALL ApiSoundStop(const GwpPlugin* self, GwpSound sound)
     const bool playing = FeedbackSoundAlive(*slot);
     FeedbackReleaseSound(*slot);
     return playing ? GWP_OK : GWP_ERROR_NOT_FOUND;
+}
+
+// The point an attached sound plays at: its bone (an object with a skeleton) or the position of the object. false:
+// the object is gone (or another one took its id), or the bone with it
+bool FeedbackSoundPoint(const FeedbackSoundSlot& slot, Fvector& out)
+{
+    CGameObject* object = api::FindOnlineObject(slot.attached);
+    if (!object || object != slot.attached_object)
+        return false;
+    if (slot.bone == BI_NONE)
+    {
+        out = object->Position();
+        return true;
+    }
+    Fmatrix xform;
+    if (!FeedbackBoneTransform(object, slot.bone, xform))
+        return false;
+    out = xform.c;
+    return true;
+}
+
+GwpResult GWP_CALL ApiSoundPlayAttached(const GwpPlugin* self, const char* path, GwpObjectId object, const char* bone,
+    float volume, uint32_t flags, GwpSound* out_sound)
+{
+    constexpr pcstr function = "sound_play_attached";
+    if (out_sound)
+        *out_sound = GWP_INVALID_SOUND;
+    if (!api::CheckPluginMutation(self, kEffectsGroup, function))
+        return api::PluginCallRefused(self);
+    CGameObject* target = api::FindOnlineObject(object);
+    if (!target)
+        return api::PluginRefusal(self, function, g_pGameLevel ? GWP_ERROR_NOT_FOUND : GWP_ERROR_INVALID_STATE,
+            "no such online object");
+    // The bone: the named one, or the root of a skeleton; an object without a skeleton plays at its position (a
+    // named bone of it is GWP_ERROR_NOT_FOUND)
+    u16 bone_id = BI_NONE;
+    IKinematics* kinematics = smart_cast<IKinematics*>(target->Visual());
+    if (kinematics)
+        bone_id = bone && *bone ? kinematics->LL_BoneID(bone) : kinematics->LL_GetBoneRoot();
+    else if (bone && *bone)
+        return api::PluginRefusal(self, function, GWP_ERROR_NOT_FOUND, "the object has no skeleton for the bone");
+    FeedbackSoundSlot probe;
+    probe.attached = object;
+    probe.attached_object = target;
+    probe.bone = bone_id;
+    Fvector point;
+    if (kinematics && bone_id == BI_NONE)
+        return api::PluginRefusal(self, function, GWP_ERROR_NOT_FOUND, "the object has no such bone");
+    if (!FeedbackSoundPoint(probe, point))
+        return api::PluginRefusal(self, function, GWP_ERROR_NOT_FOUND, "the object has no such bone");
+    const float pos[3] = { point.x, point.y, point.z };
+    GwpSound handle = GWP_INVALID_SOUND;
+    const GwpResult result = FeedbackPlaySound(self, path, true, pos, volume, flags, &handle, function);
+    if (result != GWP_OK)
+        return result;
+    if (FeedbackSoundSlot* slot = FeedbackFindSound(handle))
+    {
+        slot->attached = object;
+        slot->attached_object = target;
+        slot->bone = bone_id;
+    }
+    if (out_sound)
+        *out_sound = handle;
+    return GWP_OK;
 }
 
 int GWP_CALL ApiSoundIsPlaying(GwpSound sound)
@@ -972,10 +1150,23 @@ void FeedbackReleaseAll()
 
 void OnFrame()
 {
+    FeedbackRestoreHudTexts(); // engine gaps P13: the lasting HUD texts on the HUD of a new level
     if (g_feedback_sounds)
     {
         for (FeedbackSoundSlot& slot : *g_feedback_sounds)
         {
+            if (slot.used && FeedbackSoundAlive(slot) && slot.attached != GWP_INVALID_OBJECT_ID)
+            {
+                // P12: an attached sound follows its bone; it stops with the object
+                Fvector point;
+                if (FeedbackSoundPoint(slot, point))
+                    slot.sound->set_position(point);
+                else
+                {
+                    FeedbackReleaseSound(slot);
+                    continue;
+                }
+            }
             if (slot.used && !FeedbackSoundAlive(slot))
                 FeedbackReleaseSound(slot);
         }
@@ -1005,10 +1196,41 @@ void OnFrame()
 
 void OnGameStart() { FeedbackReleaseAll(); }
 
+void OnGameStartHudTexts(bool level_change)
+{
+    // A level change keeps them (OnFrame shows them on the new HUD); a new game or a load starts without them - the
+    // HUD of the previous game is gone, nothing to remove from it
+    if (!g_feedback_hud_texts)
+        return;
+    if (!level_change)
+    {
+        g_feedback_hud_texts->clear();
+        return;
+    }
+    // The HUD of the previous level is gone: the next one may get its address, so the record forgets it here
+    for (FeedbackHudText& text : *g_feedback_hud_texts)
+        text.ui = nullptr;
+}
+
 void RemovePluginResources(const GwpPlugin* plugin)
 {
     if (!plugin)
         return;
+    if (g_feedback_hud_texts)
+    {
+        // engine gaps P13: the lasting HUD texts of the plugin leave the HUD with it
+        CUIGameCustom* ui = FeedbackGameUi();
+        auto& texts = *g_feedback_hud_texts;
+        for (const FeedbackHudText& text : texts)
+        {
+            if (text.owner == plugin && ui && text.ui == ui)
+                ui->RemoveCustomStatic(text.static_id.c_str());
+        }
+        texts.erase(std::remove_if(texts.begin(), texts.end(), [plugin](const FeedbackHudText& text)
+        {
+            return text.owner == plugin;
+        }), texts.end());
+    }
     if (g_feedback_sounds)
     {
         for (FeedbackSoundSlot& slot : *g_feedback_sounds)
@@ -1047,6 +1269,7 @@ void Shutdown()
     xr_delete(g_feedback_particles);
     xr_delete(g_feedback_effectors);
     xr_delete(g_feedback_effector_ranges);
+    xr_delete(g_feedback_hud_texts);
     g_feedback_sound_cursor = 0;
     g_feedback_particles_cursor = 0;
 }
@@ -1065,6 +1288,7 @@ void FillEngineApi(GwpEngineApi& api)
     api.sound_play_2d = &ApiSoundPlay2d;
     api.sound_stop = &ApiSoundStop;
     api.sound_is_playing = &ApiSoundIsPlaying;
+    api.sound_play_attached = &ApiSoundPlayAttached; // P12 (plans/addon_api_ideas, group plugin)
     api.particles_play_at = &ApiParticlesPlayAt;
     api.particles_attach = &ApiParticlesAttach;
     api.particles_stop = &ApiParticlesStop;
@@ -1074,5 +1298,8 @@ void FillEngineApi(GwpEngineApi& api)
     api.pp_effector_set_factor = &ApiPpEffectorSetFactor;
     api.cam_effector_add = &ApiCamEffectorAdd;
     api.cam_effector_remove = &ApiCamEffectorRemove;
+    // engine gaps P13: a HUD text without a timeout
+    api.hud_text_set = &ApiHudTextSet;
+    api.hud_text_clear = &ApiHudTextClear;
 }
 } // namespace gw::addons::feedback

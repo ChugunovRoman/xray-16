@@ -193,6 +193,9 @@ void CUIInventoryCellItem::UpdateIcon()
 
         const bool ready =
             weapon_inv_icon::SectionSharedInvIconPresetReady(m_section_id.c_str(), m_inv_icon_preset);
+        // A model icon (inv_icon_model) needs no item: ask for it. Other sections wait for an item to render theirs.
+        if (!ready)
+            weapon_inv_icon::ScheduleSection(m_section_id.c_str(), m_inv_icon_preset);
         m_inv_ui_showing_rt = ready;
         m_inv_seen_rev = weapon_inv_icon::InvIconRtEpoch();
         m_hide_base_for_dynamic = ready;
@@ -497,9 +500,12 @@ void CUIInventoryCellItem::InitDynamicOverlay(bool b_rotate)
         base_scale.y = GetHeight() / (INV_GRID_HEIGHTF * m_grid_size.y);
     }
 
+    // A model icon (inv_icon_model) is framed for the cell: its whole RT is drawn into the cell, whatever its texel
+    // count (the weapon icons draw texels 1:1 against the 64-texel cell grid)
+    const bool model_icon = weapon_inv_icon::SectionUsesModelIcon(m_section_id.c_str());
     u32 src_w = (u32)(m_grid_size.x * INV_GRID_WIDTHF);
     u32 src_h = (u32)(m_grid_size.y * INV_GRID_HEIGHTF);
-    if (data_is_string)
+    if (data_is_string || model_icon)
         weapon_inv_icon::GetWeaponIconUiTexelSizeForSection(m_section_id.c_str(), m_inv_icon_preset, src_w, src_h);
     else if (CInventoryItem* itm = object())
     {
@@ -522,6 +528,8 @@ void CUIInventoryCellItem::InitDynamicOverlay(bool b_rotate)
     m_dynamic_overlay->SetTextureRect(tex_rect);
 
     Fvector2 cell_size{float(src_w), float(src_h)};
+    if (model_icon)
+        cell_size.set(m_grid_size.x * INV_GRID_WIDTHF, m_grid_size.y * INV_GRID_HEIGHTF);
     cell_size.mul(base_scale);
 
     if (b_rotate)

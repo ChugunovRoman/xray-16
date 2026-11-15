@@ -13,6 +13,7 @@
 #include "inventory_upgrade_root.h"
 #include "inventory_upgrade_group.h"
 #include "inventory_upgrade_property.h"
+#include "addon_object_events.h"
 
 int g_upgrades_log = 0;
 
@@ -341,6 +342,7 @@ bool Manager::upgrade_add(CInventoryItem& item, shared_str const& upgrade_id)
         if (item.install_upgrade(upgrade->section()))
         {
             item.add_upgrade(upgrade_id, false);
+            gw::addons::objevents::ItemUpgrade(&item.object(), upgrade_id.c_str()); // item_on_upgrade (engine gaps P10)
 
             return true;
         }
@@ -377,6 +379,9 @@ bool Manager::upgrade_install(CInventoryItem& item, shared_str const& upgrade_id
         {
             upgrade->run_effects(loading);
             item.add_upgrade(upgrade_id, loading);
+            // item_on_upgrade (engine gaps P10): a new upgrade of the game, not the ones of a spawn or a load
+            if (!loading)
+                gw::addons::objevents::ItemUpgrade(&item.object(), upgrade_id.c_str());
 
             if (g_upgrades_log == 1)
             {

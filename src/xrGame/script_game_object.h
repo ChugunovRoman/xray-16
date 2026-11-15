@@ -736,6 +736,8 @@ public:
     void invulnerable(bool invulnerable);
     pcstr get_smart_cover_description() const;
     void set_visual_name(LPCSTR visual);
+    // The whole model change of a live stalker or the actor, kept by the save (plans/addon_companion_extended/npc_visual.md)
+    bool set_visual(pcstr visual);
     LPCSTR get_visual_name() const;
 
     bool can_throw_grenades() const;

@@ -106,6 +106,16 @@ private:
 private:
     SBoneProtections* m_boneHitProtection;
 
+    // Model change online (ChangeVisual, plans/addon_companion_extended/npc_visual.md)
+private:
+    // net_Spawn is finished; a model set during it (the Lua net_spawn of the binder) is completed at its end
+    bool m_net_spawn_complete{};
+    bool m_visual_swapped_on_spawn{};
+    void on_visual_swapped(bool spawn_in_progress);
+    bool visual_fits_stalker() const;
+    void reload_visual_protections();
+    void apply_faction_editor_immunities();
+
     // weapon dispersion
 private:
     float m_disp_walk_stand;
@@ -338,6 +348,14 @@ public:
     void update_best_item_info();
     void update_best_item_info_impl();
     void ResetBoneProtections(pcstr imm_sect, pcstr bone_sect);
+    // Changes the model of the stalker while it is online (plans/addon_companion_extended/npc_visual.md): the model,
+    // then everything the engine keeps of it - the animations and bone callbacks, the bone ids of the weapon, the feet,
+    // the sounds and the particles, the hit factors, immunities and armour of the model, IK, the death and hit
+    // animations. A live stalker without a physics shell only. Called on the game logic thread beside the render, it is
+    // done at the end of the frame. visual: a path under meshes without the extension, lower case, the file exists.
+    // save_to_server: the server object gets the model once it is set (the save, going offline and online keep it).
+    // true: changed, queued or the same model already; false: refused (in the log)
+    bool ChangeVisual(shared_str const& visual, bool save_to_server = false);
     virtual float GetWeaponAccuracy() const;
     virtual bool unlimited_ammo();
     virtual void spawn_supplies();

@@ -214,6 +214,16 @@ void CUIActorMenu::script_register(lua_State* luaState)
         def("get_pda_menu", +[]() -> CUIPdaWnd* { return CurrentGameUI() ? &CurrentGameUI()->GetPdaMenu() : nullptr; }),
         def("get_actor_menu", +[]() -> CUIActorMenu* { return CurrentGameUI() ? &CurrentGameUI()->GetActorMenu() : nullptr; }),
         def("get_menu_mode", +[]() { return CurrentGameUI() ? CurrentGameUI()->GetActorMenu().GetMenuMode() : mmUndefined; }),
-        def("get_maingame", +[]() -> CUIMainIngameWnd* { return CurrentGameUI() ? CurrentGameUI()->UIMainIngameWnd : nullptr; })
+        def("get_maingame", +[]() -> CUIMainIngameWnd* { return CurrentGameUI() ? CurrentGameUI()->UIMainIngameWnd : nullptr; }),
+        // plans/addon_companion_extended/npc_equipment.md: the mode "equipment of the partner" of the exchange window.
+        // set_partner_equipment(id) - for the next opening of the window with that live stalker (npc:use(db.actor) right
+        // after; the request lives 3 s and is dropped when the window closes); id < 0 drops the request.
+        // is_partner_equipment() - the window is open in this mode now
+        def("set_partner_equipment", +[](int id)
+        {
+            if (CurrentGameUI())
+                CurrentGameUI()->GetActorMenu().SetPartnerEquipmentRequest(id >= 0 && id < 0xffff ? u16(id) : u16(-1));
+        }),
+        def("is_partner_equipment", +[]() { return CurrentGameUI() && CurrentGameUI()->GetActorMenu().IsPartnerEquipmentMode(); })
     ];
 }

@@ -38,8 +38,21 @@ public:
     bool CanDelete() const { return m_bRemoveAfterUse == true; }
     virtual u8 GetMaxUses() const { return m_iMaxUses; }
     virtual u8 GetRemainingUses() const { return m_iRemainingUses; }
-    void SetRemainingUses(u8 value) { if (value <= m_iMaxUses) m_iRemainingUses = value; };
+    // Also refreshes the condition (use_condition sections): before, set_remaining_uses from Lua left it stale until
+    // the next UseBy / net_Spawn
+    void SetRemainingUses(u8 value)
+    {
+        if (value <= m_iMaxUses)
+        {
+            m_iRemainingUses = value;
+            UpdateConditionFromUses();
+        }
+    }
     float Weight() const override;
 
     virtual bool GetBriefInfo(II_BriefInfo& info);
+
+protected:
+    // use_condition sections: condition = the share of the uses left (remaining / max, clamped to 0..1)
+    void UpdateConditionFromUses();
 };

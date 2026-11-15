@@ -16,6 +16,12 @@ public:
     CUIWindow(pcstr window_name);
     ~CUIWindow() override;
 
+    // Called first in ~CUIWindow with the window being destroyed: a holder of a raw pointer to a window it does not
+    // own (the owner of the PDA map hint, CUIMapWnd) forgets it before the pointer dangles. One hook, nullptr - none;
+    // the hook only compares pointers (the derived parts of the window are destroyed already)
+    using DestroyHook = void (*)(CUIWindow* window);
+    static void SetDestroyHook(DestroyHook hook);
+
     virtual void SetWndPos(const Fvector2& pos)
     {
         m_wndPos.set(pos.x, pos.y);
@@ -225,6 +231,11 @@ public:
 
     [[nodiscard]]
     CUIWindow* GetMouseCapturer() const { return m_pMouseCapturer; }
+
+    // Drops the mouse capture of the window and of the whole chain of its capturers (a scroll box dragged by the
+    // mouse, ...): a dialog hidden while its button is held never gets the release, and its slider would follow the
+    // cursor when it is shown again (plans/addon_base_building/plan.md 17.17). CUIDialogWnd::Show(false) calls it
+    void ReleaseMouseCaptureTree();
 
     //окошко, которому пересылаются сообщения,
     //если NULL, то шлем на GetParent()

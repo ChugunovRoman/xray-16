@@ -3,6 +3,7 @@
 #include "addon_event_bus.h"
 #include "addon_host.h"
 #include "addon_object_events.h"
+#include "addon_perf.h"
 #include "lua_spike_probe.h"
 
 #include "xrScriptEngine/script_engine.hpp"
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <iterator>
 
@@ -72,6 +74,9 @@ struct Subscriber
     u32 throttle_ms = 0;     // 0 = every dispatch
     u32 last_call_ms = 0;
     bool called = false;
+    // P29 (plans/addon_api_ideas, group plugin): GwpSubscribeOptions::priority / Lua {priority = N}. A higher one is
+    // called earlier among the subscribers of its kind; equal ones keep the order of subscription
+    s32 priority = 0;
 };
 
 struct Event
@@ -87,6 +92,7 @@ struct Event
     u32 lua_count = 0;
     u32 dispatch_depth = 0;
     bool has_dead = false; // removed during a dispatch; erased when the outermost dispatch ends
+    bool needs_order = false; // P29: a subscriber came (or changed its priority) during a dispatch: sorted at its end
 
     // Lua scripts pass the result of some events as a flags table ({ret_value = true}); plugins see it as
     // GwpEvent::result. 1-based argument index of that table and its field; 0 = the event has none.
@@ -171,6 +177,10 @@ constexpr pcstr kBuiltinNames[] = {
     "relation_on_before_action",
     "addons_content_applied",
     "alife_objects_skipped",
+    // plans/addon_api_ideas (group plugin)
+    "actor_on_before_hit_ex",
+    "game_on_before_save",
+    "plugin_on_reloaded",
 };
 static_assert(std::size(kBuiltinNames) == static_cast<size_t>(EBuiltin::Count_) - 1, "kBuiltinNames != EBuiltin");
 
@@ -187,7 +197,19 @@ constexpr LuaResultBinding kLuaResultBindings[] = {
     { "actor_on_before_hit", 3, "ret_value" },
     { "actor_on_before_death", 2, "ret_value" },
     { "level_input_on_key_press", 3, "ret" },
+    { "level_input_on_mouse_wheel", 3, "ret" }, // D1 (plans/addon_base_building): sent by the engine only
     { "on_before_item_use", 3, "ret_value" },
+    // engine gaps P08/P30 (plans/addon_api_ideas/spec.md): sent by the engine only (addon_object_events.cpp)
+    { "trade_on_item_price", 5, "ret_value" },
+    { "actor_on_before_trade_deal", 6, "ret_value" },
+    { "actor_on_before_item_take", 2, "ret_value" },
+    { "actor_on_before_item_drop", 2, "ret_value" },
+    { "news_on_before_show", 6, "ret_value" },
+    // engine gaps P11: sent by surge_manager.notify_before_start (Lua): kind, manual, flags
+    { "surge_on_before_start", 3, "ret_value" },
+    // plans/addon_companion_extended/npc_equipment.md: sent by actor_menu_inventory.CUIActorMenu_PartnerEquipmentCanMove
+    // (Lua): npc, item, to_npc, place, slot, flags (the 6th argument, counted from 1 like the lines above)
+    { "actor_menu_partner_equipment_before_move", 6, "ret_value" },
 };
 
 // The offline simulation ones (squad_on_update, smart_terrain_on_update): plans/lua_to_cpp/27-gw-eoc-e0.md. Without
@@ -223,6 +245,10 @@ constexpr pcstr kBuiltinSchemas[] = {
     "sooINbIN", // relation_on_before_action (action, from, to, relation, delta, danger, hit type, health lost)
     "sbst", // addons_content_applied (when, ok, world, providers: an array of "<slot>=<provider>")
     "stt",  // alife_objects_skipped (save name, ids: an array of INT, sections: an array of STRING)
+    // plans/addon_api_ideas (group plugin)
+    "oNvo?IIN", // actor_on_before_hit_ex (actor, power, dir, who, bone, hit type, impulse)
+    "ss",       // game_on_before_save (save name, kind: "quicksave" | "save" | "autosave")
+    "sss?",     // plugin_on_reloaded (addon id, how: "plugin_reload" | "addon_reload", level name or nil)
 };
 static_assert(std::size(kBuiltinSchemas) == std::size(kBuiltinNames), "kBuiltinSchemas != kBuiltinNames");
 
@@ -231,6 +257,8 @@ constexpr pcstr kBuiltinResultEvents[] = {
     "npc_on_before_hit",
     "monster_on_before_hit",
     "relation_on_before_action",
+    "actor_on_before_hit_ex", // plans/addon_api_ideas (group plugin)
+    "game_on_before_save",
 };
 
 GwpEventId InternIn(Bus& bus, pcstr name);
@@ -471,6 +499,33 @@ void RemoveAt(Bus& bus, Event& event, size_t index)
         event.has_dead = true;
 }
 
+// P29 (plans/addon_api_ideas, group plugin): the subscribers by priority, the higher first; stable - equal priorities
+// keep the order of subscription. Only outside a dispatch of the event: its loops walk the vector by index
+void SortSubscribers(Event& event)
+{
+    event.needs_order = false;
+    std::stable_sort(event.subscribers.begin(), event.subscribers.end(),
+        [](const Subscriber& a, const Subscriber& b) { return a.priority > b.priority; });
+}
+
+// A new subscriber at its place by priority: after every subscriber of the same or a higher priority. During a
+// dispatch of the event it goes to the end (the running loop does not reach it) and the order is fixed when the
+// outermost dispatch ends
+void InsertSubscriber(Event& event, Subscriber&& subscriber)
+{
+    auto& list = event.subscribers;
+    if (event.dispatch_depth != 0)
+    {
+        if (!list.empty() && list.back().priority < subscriber.priority)
+            event.needs_order = true;
+        list.push_back(std::move(subscriber));
+        return;
+    }
+    const auto place = std::find_if(list.begin(), list.end(),
+        [&](const Subscriber& s) { return s.priority < subscriber.priority; });
+    list.insert(place, std::move(subscriber));
+}
+
 // Keeps the dispatch counters and the current Lua thread for the time of one dispatch.
 class DispatchScope
 {
@@ -495,6 +550,8 @@ public:
             list.erase(std::remove_if(list.begin(), list.end(), [](const Subscriber& s) { return !s.alive; }),
                 list.end());
         }
+        if (m_event.dispatch_depth == 0 && m_event.needs_order)
+            SortSubscribers(m_event); // P29
     }
 
     DispatchScope(const DispatchScope&) = delete;
@@ -753,6 +810,16 @@ bool CallPluginGuarded(const void* plugin_code, pcstr what, void (*fn)(void*), v
     return CallNativeGuarded(call);
 }
 
+bool CallPluginGuardedBackground(const void* plugin_code, pcstr what, void (*fn)(void*), void* context)
+{
+    NativeCall call;
+    call.thunk = fn;
+    call.thunk_context = context;
+    call.plugin_code = plugin_code;
+    call.event_name = what ? what : "?";
+    return CallNativeGuardedSeh(call); // without CallDepthScope: see the header
+}
+
 namespace
 {
 void Enqueue(Subscriber& subscriber, const Event& event, const GwpValue* argv, u32 argc, u32 flags)
@@ -851,7 +918,11 @@ void DispatchNative(Bus& bus, Event& event, GwpEventId id, u32 flags, const GwpV
         const GwpPlugin* const plugin = subscriber.plugin;
         ZoneScopedN("events/plugin_handler"); // Tracy: one zone per handler call, text = addon id and event
         ZoneTextF("%s: %s", PluginAddonId(plugin), event.name.c_str());
-        if (!CallNativeGuarded(call))
+        const u64 perf_t0 = perf::Enabled() ? xray::perf::Ticks() : 0; // P48: addon_perf
+        const bool called = CallNativeGuarded(call);
+        if (perf_t0)
+            perf::NoteNative(PluginAddonId(plugin), event.name.c_str(), xray::perf::Ticks() - perf_t0);
+        if (!called)
         {
             string256 what;
             xr_sprintf(what, "a handler of event '%s'", event.name.c_str());
@@ -1382,6 +1453,7 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
     // 50n-frame-spike-report.md (Lua events, always on with perf_frame_spike_ms > 0): every call is timed, a slow one
     // is named for the frame spike report / a "[lua-slow]" line (NoteTimedLuaHandler); the calls together too
     const bool timed = xray::perf::LuaDispatchTimed();
+    const bool perf_on = perf::Enabled(); // P48: addon_perf - every call timed and noted by the owner of its handler
     u64 timed_sum = 0;
     u32 timed_calls = 0;
     bool timed_slow_call = false; // one call of this dispatch alone reached the [lua-slow] threshold
@@ -1446,7 +1518,8 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
         }
 
         int handler_index = 0;
-        if (name_handlers || (timed && once)) // a {once} subscriber has no registry reference after the call
+        // a {once} subscriber has no registry reference after the call; addon_perf names the owner after it
+        if (name_handlers || perf_on || (timed && once))
         {
             lua_rawgeti(L, LUA_REGISTRYINDEX, lua_ref);
             handler_index = lua_gettop(L);
@@ -1470,6 +1543,7 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
         if (once)
             RemoveAt(bus, event, i);
 
+        u64 perf_ticks = 0; // P48: addon_perf
         {
             ZoneScopedN("events/lua_handler"); // Tracy: one Lua subscriber, text = event and source:line
 #ifdef TRACY_ENABLE
@@ -1485,9 +1559,10 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 #endif
             PERF_SPIKE_NAMED(handler_spike, "events/lua_handler", &spike_ctx, &DescribeHandlerSpike, false);
             gw::lua_spike::Probe spike(lua_spike ? L : nullptr, gw::lua_spike::ECategory::EventHandler);
-            const u64 call_t0 = timed ? xray::perf::Ticks() : 0;
+            const u64 call_t0 = timed || perf_on ? xray::perf::Ticks() : 0;
             const int call_status = lua_pcall(L, nargs, 0, 0);
-            const u64 call_ticks = timed ? xray::perf::Ticks() - call_t0 : 0;
+            const u64 call_ticks = timed || perf_on ? xray::perf::Ticks() - call_t0 : 0;
+            perf_ticks = call_ticks;
             if (call_status != 0)
             {
                 const char* error = lua_tostring(L, -1);
@@ -1515,6 +1590,11 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 
         if (profile_handle)
             ProfileEnd(L, profile_handle);
+        if (perf_on)
+        {
+            lua_settop(L, handler_index); // the error message of a failed call goes, the handler copy stays
+            perf::NoteLua(L, handler_index, kind == ESubscriberKind::LuaObject, event.name.c_str(), perf_ticks);
+        }
         lua_settop(L, base);
     }
     // many calls, none slow alone, slow together: one line for the event (not the frame's slowest call)
@@ -1724,6 +1804,7 @@ struct LuaSubscribeOptions
     bool object_filter = false;
     u16 object = 0;
     bool once = false;
+    s32 priority = 0; // P29: {priority = N}
 };
 
 u32 LuaThrottle(lua_State* L, int index)
@@ -1746,6 +1827,15 @@ bool ReadLuaSubscribeOptions(lua_State* L, int index, const Event& event, LuaSub
     lua_pop(L, 1);
     lua_getfield(L, index, "once");
     options.once = lua_toboolean(L, -1) != 0;
+    lua_pop(L, 1);
+    // P29 (plans/addon_api_ideas, group plugin): a number (cut to an integer); anything else is 0
+    lua_getfield(L, index, "priority");
+    if (lua_type(L, -1) == LUA_TNUMBER)
+    {
+        const lua_Number priority = lua_tonumber(L, -1);
+        if (std::isfinite(priority))
+            options.priority = static_cast<s32>(std::clamp<lua_Number>(std::floor(priority), INT_MIN, INT_MAX));
+    }
     lua_pop(L, 1);
 
     lua_getfield(L, index, "object");
@@ -1787,6 +1877,7 @@ void ApplyLuaSubscribeOptions(Bus& bus, Subscriber& subscriber, const LuaSubscri
     subscriber.throttle_ms = options.throttle_ms;
     subscriber.once = options.once;
     subscriber.called = false;
+    subscriber.priority = options.priority; // P29: the caller orders the list (InsertSubscriber / LuaSubscribe)
 }
 
 // event_bus.subscribe(name, handler [, throttle_ms | {throttle_ms = N, object = <object or id>, once = true}]):
@@ -1827,8 +1918,18 @@ int LuaSubscribe(lua_State* L)
         lua_pop(L, 1);
         if (same)
         {
+            const s32 old_priority = subscriber.priority;
             ApplyLuaSubscribeOptions(bus, subscriber, options);
-            lua_pushnumber(L, static_cast<lua_Number>(subscriber.id));
+            const GwpSubscriptionId same_id = subscriber.id; // the sort below may move the entry
+            if (subscriber.priority != old_priority)
+            {
+                // P29: a new priority of the same subscription - its place by it
+                if (event->dispatch_depth == 0)
+                    SortSubscribers(*event);
+                else
+                    event->needs_order = true;
+            }
+            lua_pushnumber(L, static_cast<lua_Number>(same_id));
             return 1;
         }
     }
@@ -1840,7 +1941,7 @@ int LuaSubscribe(lua_State* L)
     lua_pushvalue(L, 2);
     subscriber.lua_ref = luaL_ref(L, LUA_REGISTRYINDEX);
     const GwpSubscriptionId id = subscriber.id;
-    event->subscribers.push_back(std::move(subscriber));
+    InsertSubscriber(*event, std::move(subscriber)); // P29: by priority
     ++event->lua_count;
     bus.lua_subscriptions.emplace(id, event_id);
     lua_pushnumber(L, static_cast<lua_Number>(id));
@@ -2112,6 +2213,7 @@ GwpSubscriptionId SubscribeNative(const GwpPlugin* self, const char* name, const
     subscriber.handler = batch ? nullptr : handler;
     subscriber.user = user;
     subscriber.throttle_ms = options.throttle_ms;
+    subscriber.priority = options.priority; // P29 (0 for a struct of an earlier version: the copy is zeroed)
     subscriber.object_filter = object_filter;
     subscriber.object = object_filter ? options.object : 0;
     if (object_filter)
@@ -2127,7 +2229,7 @@ GwpSubscriptionId SubscribeNative(const GwpPlugin* self, const char* name, const
         ++event->batch_count;
     }
     const GwpSubscriptionId subscription = subscriber.id;
-    event->subscribers.push_back(std::move(subscriber));
+    InsertSubscriber(*event, std::move(subscriber)); // P29: by priority
     ++event->native_count;
     bus.native_subscriptions.emplace(subscription, id);
     return subscription;
@@ -2167,6 +2269,10 @@ GwpSubscriptionId GWP_CALL ApiEventSubscribeEx(const GwpPlugin* self, const char
             else if (options->size >= offsetof(GwpSubscribeOptions, reserved2) + sizeof(copy.reserved2) &&
                 copy.reserved2 != 0)
                 error = "options->reserved2 is not 0";
+            // P29: the same for the tail of the priority step
+            else if (options->size >= offsetof(GwpSubscribeOptions, reserved3) + sizeof(copy.reserved3) &&
+                copy.reserved3 != 0)
+                error = "options->reserved3 is not 0";
         }
         if (error)
         {
@@ -2411,7 +2517,11 @@ void DeliverBatch(Bus& bus, Event& event, GwpEventId id, size_t index, u32 now, 
     call.events = events.data();
     call.count = static_cast<u32>(events.size());
 
-    if (!CallNativeGuarded(call))
+    const u64 perf_t0 = perf::Enabled() ? xray::perf::Ticks() : 0; // P48: addon_perf
+    const bool called = CallNativeGuarded(call);
+    if (perf_t0)
+        perf::NoteNative(PluginAddonId(plugin), event.name.c_str(), xray::perf::Ticks() - perf_t0);
+    if (!called)
     {
         string256 what;
         xr_sprintf(what, "a batch handler of event '%s'", event.name.c_str());

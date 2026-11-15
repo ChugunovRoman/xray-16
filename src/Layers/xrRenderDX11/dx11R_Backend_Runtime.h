@@ -360,6 +360,31 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, 
     PGO(Msg("PGO:DIP:%dv/%df", countV, PC));
 }
 
+IC void CBackend::RenderInstanced(D3DPRIMITIVETYPE T, u32 baseV, u32 /*startV*/, u32 countV, u32 startI, u32 PC,
+    u32 instances)
+{
+    VERIFY(hs == 0 && ds == 0); // the twin passes of render_matrix_items are never tessellated
+    const D3D_PRIMITIVE_TOPOLOGY Topology = TranslateTopology(T);
+    const u32 iIndexCount = GetIndexCount(T, PC);
+
+    stat.render.calls++;
+    stat.render.verts += countV * instances;
+    stat.render.polys += PC * instances;
+
+    ApplyPrimitieTopology(Topology);
+    SRVSManager.Apply(context_id);
+    ApplyRTandZB();
+    ApplyVertexLayout();
+    StateManager.Apply();
+    //  State manager may alter constants
+    constants.flush();
+    if (context_id != CHW::IMM_CTX_ID)
+        deferred_pending = true;
+    HW.get_context(context_id)->DrawIndexedInstanced(iIndexCount, instances, startI, baseV, 0);
+
+    PGO(Msg("PGO:DIPI:%dv/%df x%d", countV, PC, instances));
+}
+
 IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
 {
     //  TODO: DX11: Remove triangle fan usage from the engine

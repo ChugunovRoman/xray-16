@@ -16,6 +16,9 @@ struct Entry
 {
     events::OwnedValue value; // a deep copy: strings, bytes and the items of arrays belong to the entry
     bool persistent = false;
+    // The last writer (data_bus.info, plans/addon_api_ideas P35): "lua", "plugin:<addon id>", "engine", "save" (read
+    // from the loaded game; the save keeps no writer)
+    xr_string writer;
 };
 
 // xr_map: stable order for data_list and the save; nodes never move, and an OwnedValue keeps its parts at their
@@ -96,7 +99,7 @@ bool Erase(const xr_string& key)
 }
 
 // The caller has validated key and value (CheckValue). GWP_T_NIL erases.
-void Set(const xr_string& key, const GwpValue& value, bool persistent)
+void Set(const xr_string& key, const GwpValue& value, bool persistent, pcstr writer)
 {
     if (value.type == GWP_T_NIL)
     {
@@ -117,6 +120,7 @@ void Set(const xr_string& key, const GwpValue& value, bool persistent)
     // A key stays persistent once made so (a writer without the flag, e.g. Lua data_bus.set(key, value) with two
     // arguments, must not drop it from the save); it becomes plain again only through erase.
     entry.persistent = entry.persistent || persistent;
+    entry.writer = writer;
     if (!inserted && events::ValuesEqual(entry.value.view(), stored_value))
         return;
     // Assign copies deeply through a new arena: `value` may point into entry.value itself (data_get + data_set of
@@ -181,7 +185,7 @@ GwpResult GWP_CALL ApiDataSet(const GwpPlugin* self, const char* key, const GwpV
     xr_sprintf(who, "plugin:%s", PluginAddonId(self));
     if (!CheckStorable(*value, key, who))
         return GWP_ERROR_INVALID_ARGUMENT;
-    Set(key, *value, (flags & GWP_DATA_PERSISTENT) != 0);
+    Set(key, *value, (flags & GWP_DATA_PERSISTENT) != 0, who);
     return GWP_OK;
 }
 
@@ -264,7 +268,7 @@ int LuaSet(lua_State* L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    Set(key, value, lua_toboolean(L, 3) != 0);
+    Set(key, value, lua_toboolean(L, 3) != 0, "lua");
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -301,6 +305,23 @@ int LuaKeys(lua_State* L)
         lua_pushlstring(L, it->first.c_str(), it->first.size());
         lua_rawseti(L, -2, ++index);
     }
+    return 1;
+}
+
+// data_bus.info(key): nil without such key, else {persistent = bool, writer = "lua" | "plugin:<addon id>" | "engine" |
+// "save"} - the last writer of the value ("save": read from the loaded game). plans/addon_api_ideas P35: addon_reload
+// erases the plain (not persistent) keys an addon wrote from Lua
+int LuaInfo(lua_State* L)
+{
+    const pcstr key = LuaKey(L, 1, "info");
+    const auto it = key && g_store ? g_store->find(key) : Store::iterator();
+    if (!key || !g_store || it == g_store->end())
+        return 0;
+    lua_createtable(L, 0, 2);
+    lua_pushboolean(L, it->second.persistent ? 1 : 0);
+    lua_setfield(L, -2, "persistent");
+    lua_pushlstring(L, it->second.writer.c_str(), it->second.writer.size());
+    lua_setfield(L, -2, "writer");
     return 1;
 }
 
@@ -341,6 +362,7 @@ void CDataBusScript::script_register(lua_State* L)
         { "erase", &LuaErase },
         { "has", &LuaHas },
         { "keys", &LuaKeys },
+        { "info", &LuaInfo },
     };
     lua_newtable(L);
     for (const luaL_Reg& function : functions)
@@ -362,7 +384,7 @@ void SetPersistentFromEngine(pcstr key, const GwpValue& value)
 {
     if (!IsValidKey(key) || !CheckStorable(value, key, "the engine"))
         return;
-    Set(key, value, true);
+    Set(key, value, true, "engine");
 }
 
 void ResetPersistent()
@@ -445,6 +467,7 @@ void ReadSave(IReader& stream)
         Entry& entry = store[key];
         entry.value = std::move(value);
         entry.persistent = true;
+        entry.writer = "save";
         ++loaded;
     });
     if (IsDebugLog())

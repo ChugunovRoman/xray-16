@@ -11,6 +11,7 @@
 class CSE_ALifeObjectPhysic;
 class CPhysicsElement;
 class moving_bones_snd_player;
+class IPHStaticGeomShell;
 
 class CSE_ALifeObjectPhysic;
 struct SPHNetState;
@@ -141,6 +142,21 @@ protected:
     // reads the ini as before). The getter runs for every physics object near a walking NPC (moving_objects) on the
     // main thread and in the path search on the Game thread; it was a full ltx lookup with a shared_str built per call
     s8 m_is_ai_obstacle = -1;
+    // Section key static_collision (plans/addon_base_building/plan.md 17.8): the object stands as the level - the
+    // static shell of its bone shapes collides, the physics shell is fixed whole, collides with nothing and takes no
+    // hit impulses (PHHit). Read in Load
+    bool m_static_collision = false;
+    IPHStaticGeomShell* m_static_shell = nullptr;
+    void CreateStaticCollision();
+    // Section key npc_collision (plans/addon_base_building/plan.md 17.19), true by default: false - the character
+    // controllers of NPCs and monsters pass through the object (the static shell or the physics shell drops their
+    // contacts, P_IgnoreNpcCharacterContact), the actor collides as before. Also the default of is_ai_obstacle. Read
+    // in Load
+    bool m_npc_collision = true;
+    void IgnoreNpcCollision();
+
+public:
+    virtual void PHHit(SHit& H);
 
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);

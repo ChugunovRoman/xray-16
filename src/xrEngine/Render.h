@@ -712,6 +712,30 @@ public:
     [[nodiscard]] virtual SPreviewSceneSettings PreviewScene_GetSettings() const { return {}; }
     virtual void PreviewScene_ResetDiskCache() {}
 
+    // A live preview (plans/addon_base_building/plan.md 17.16): a slot 0..3 keeps one model created and renders it into
+    // the fixed texture of the slot again when its settings change (a turning model in a UI window), in OnFrame, no
+    // cache entry, no disk. LiveSet - the model and the settings (the same model and settings - nothing to do);
+    // LiveReady - the texture holds the model (false again after a device reset until the next render);
+    // LiveTextureName - "$user$..." for CUIStatic::InitTexture, empty - no preview in this renderer; LiveClear - the
+    // model and the texture go. Default: unsupported
+    virtual void PreviewScene_LiveSet(u32 slot, pcstr model_path, const SPreviewSceneSettings& settings)
+    {
+        (void)slot;
+        (void)model_path;
+        (void)settings;
+    }
+    [[nodiscard]] virtual bool PreviewScene_LiveReady(u32 slot) const
+    {
+        (void)slot;
+        return false;
+    }
+    [[nodiscard]] virtual shared_str PreviewScene_LiveTextureName(u32 slot) const
+    {
+        (void)slot;
+        return shared_str();
+    }
+    virtual void PreviewScene_LiveClear(u32 slot) { (void)slot; }
+
     virtual RenderContext GetCurrentContext() const = 0;
     virtual void MakeContextCurrent(RenderContext context) = 0;
 
@@ -788,6 +812,25 @@ public:
     // Safety join (end of the frame, device reset/teardown): waits for a kicked static part nobody consumed and drops
     // its result. No-op when Calculate() took it.
     virtual void JoinMainBuildEarly() {}
+
+    // Ghost models (level.preview_model_*, xrGame\level_preview_model.cpp; plans/addon_base_building/plan.md 10.3).
+    // model_MakeGhost: every mesh of the instance `visual` (one made by model_Create for this purpose, never a pool
+    // model shared with game objects) gets the translucent forward shader "gw_preview_ghost" (shaders\r3 and
+    // shaders\gl: the base texture of the mesh tinted by a color, drawn in the sorted pass after the scene, no depth
+    // write, no shadow) of the skinning variant of the mesh. False - nothing was changed: no such shader script, a
+    // render without it, or no mesh of the visual has a base texture. Main thread, outside the render of a frame.
+    virtual bool model_MakeGhost(IRenderVisual* visual)
+    {
+        (void)visual;
+        return false;
+    }
+    // The tint of a ghost made by model_MakeGhost: rgb - color 0..1, a - opacity 0..1 (the m_obj_custom_data constant
+    // of every mesh of the instance). Main thread, outside the render of a frame.
+    virtual void model_SetGhostTint(IRenderVisual* visual, const Fvector4& tint)
+    {
+        (void)visual;
+        (void)tint;
+    }
 };
 
 // RAII for IRender::texture_replacements_lock (GAME_RENDER_OVERLAP_PLAN P1.6). Not recursive like

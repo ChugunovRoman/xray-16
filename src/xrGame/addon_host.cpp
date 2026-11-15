@@ -10,6 +10,7 @@
 #include "addon_api_feedback.h"
 #include "addon_api_character.h"
 #include "addon_api_inventory_ext.h"
+#include "addon_api_extra.h" // plans/addon_api_ideas (group plugin)
 #include "addon_alife_hooks.h"
 #include "addon_binders.h"
 #include "addon_callbacks.h"
@@ -19,7 +20,9 @@
 #include "addon_storage.h"
 #include "addon_event_bus.h"
 #include "addon_timers.h"
+#include "addon_user_data.h"
 #include "addon_lua_entry.h"
+#include "addon_lua_console.h"
 #include "addon_slots.h"
 #include "MainMenu.h"
 
@@ -29,6 +32,7 @@
 #include "xrEngine/EngineThreading.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstddef>
 #include <cerrno>
@@ -278,6 +282,10 @@ struct AddonRecord
     xr_string type_name;
     EAddonType type = EAddonType::Unknown;
     xr_vector<AddonDependency> depends; // [addon] depends
+    // [addon] conflicts (the syntax of depends): the addons this one cannot work with. The engine switches neither of a
+    // pair off - the launcher decides (open questions 2026-11-15, 1.2 (B)); CollectConflicts gives the pairs to
+    // addon_list, addons_report.json and the warning of WarnActiveConflicts
+    xr_vector<AddonDependency> conflicts;
     // [addon] load_after: the ids it loads after when they are there (ResolveDependencies), the valid ones only
     xr_vector<xr_string> load_after;
     // [addon] patches: the addons this compatibility patch is made for (15-merge-implementation.md 6.1): it works only
@@ -340,6 +348,9 @@ struct AddonRecord
     bool restart_refused_logged = false;
     bool reload_requested = false; // plugin_reload: at the next frame
     bool addon_reload_requested = false; // addon_reload: at the next frame (ReloadAddon)
+    // log_set_level (plans/addon_api_ideas, group plugin, P57): the lowest level of the lines of `log` this plugin
+    // writes; -1 - the default (debug lines only with -addon_debug). Any thread; reset when the plugin goes
+    mutable std::atomic<s32> log_level{ -1 };
 };
 
 // Heap-allocated on purpose: if Shutdown() is never called, a static vector would unload the plugin libraries
@@ -375,6 +386,7 @@ xr_map<xr_string, SaveChunk> g_save_data;
 constexpr u32 kSaveChunkId = 0x0100;
 constexpr u32 kSaveFormat = 1;
 constexpr u32 kMaxSaveChunk = 64u * 1024u * 1024u;
+static_assert(kMaxSaveChunk == GWP_SAVE_MAX_SIZE, "the limit of save_write documented in gwp_api.h");
 
 #if defined(XR_PLATFORM_WINDOWS)
 constexpr pcstr kPluginOs = "windows";
@@ -923,10 +935,14 @@ void GWP_CALL ApiLog(const GwpPlugin* self, GwpLogLevel level, const char* text)
     const AddonRecord* addon = AddonOf(self);
     const pcstr id = addon ? addon->id.c_str() : "?";
     const pcstr msg = text ? text : "";
+    // P57 (plans/addon_api_ideas): the level of this plugin; errors always pass (log_set_level refuses a higher one)
+    const s32 min_level = addon ? addon->log_level.load(std::memory_order_relaxed) : -1;
+    if (min_level >= 0 && level < min_level && level != GWP_LOG_ERROR)
+        return;
     switch (level)
     {
     case GWP_LOG_DEBUG:
-        if (g_debug_log)
+        if (g_debug_log || min_level == GWP_LOG_DEBUG)
             Msg("  [plugin:%s] %s", id, msg);
         break;
     case GWP_LOG_WARNING: Msg("~ [plugin:%s] %s", id, msg); break;
@@ -1021,6 +1037,16 @@ int GWP_CALL ApiIsMainThread()
 }
 int GWP_CALL ApiIsDebugLog() { return g_debug_log ? 1 : 0; } // set once in Initialize, read-only afterwards
 
+// log_set_level (plans/addon_api_ideas, group plugin, P57)
+GwpResult GWP_CALL ApiLogSetLevel(const GwpPlugin* self, GwpLogLevel min_level)
+{
+    const AddonRecord* addon = AddonOf(self);
+    if (!addon || min_level < GWP_LOG_DEBUG || min_level > GWP_LOG_ERROR)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    addon->log_level.store(min_level, std::memory_order_relaxed);
+    return GWP_OK;
+}
+
 void FillEngineApi()
 {
     g_engine_api = {};
@@ -1058,6 +1084,9 @@ void FillEngineApi()
     feedback::FillEngineApi(g_engine_api);
     character::FillEngineApi(g_engine_api);
     items::FillEngineApi(g_engine_api);
+    user_data::FillEngineApi(g_engine_api);
+    extra::FillEngineApi(g_engine_api);              // plans/addon_api_ideas (group plugin)
+    g_engine_api.log_set_level = &ApiLogSetLevel;    // P57
     g_engine_api.save_write = &ApiSaveWrite;
     g_engine_api.save_read = &ApiSaveRead;
 }
@@ -1261,11 +1290,30 @@ bool ParseManifest(AddonRecord& addon, bool warn = true)
             }
         }
     }
-    // Reserved (plan 26, 4.3): read so that an addon written for a newer engine learns it is ignored here
+    // [addon] conflicts = a, b <2.0.0 (the syntax of depends; open questions 2026-11-15, 1.2 (B)): the engine loads
+    // both addons of a pair - the launcher decides which to keep; addon_list and addons_report.json show the pairs, the
+    // log warns of a pair that works together (WarnActiveConflicts). A wrong value never fails the addon: a warning
+    addon.conflicts.clear();
     {
         xr_string value;
-        if (warn && ini.get("addon", "conflicts", value))
-            Logf("~ ", tag.c_str(), "[addon] conflicts is not supported by this engine yet, ignored");
+        if (ini.get("addon", "conflicts", value))
+        {
+            xr_string conflicts_error;
+            if (!ParseDepends(value, addon.conflicts, conflicts_error))
+            {
+                addon.conflicts.clear();
+                if (warn)
+                    Logf("~ ", tag.c_str(), "invalid [addon] conflicts, ignored: %s", conflicts_error.c_str());
+            }
+            const auto self = [&](const AddonDependency& rule) { return rule.id == addon.id; };
+            if (std::any_of(addon.conflicts.begin(), addon.conflicts.end(), self))
+            {
+                addon.conflicts.erase(std::remove_if(addon.conflicts.begin(), addon.conflicts.end(), self),
+                    addon.conflicts.end());
+                if (warn)
+                    Logf("~ ", tag.c_str(), "[addon] conflicts names the addon itself, that entry is ignored");
+            }
+        }
     }
     // [addon] load_after = a, b: a soft order (wiki/doc/plugins/manifest.md, reserved fields) - the addon loads after
     // those of them that are there, a missing one is no error. The pair rule of the author (13-extension-model.md 4.2,
@@ -2885,6 +2933,12 @@ void StopPlugin(const GwpPlugin* plugin)
     RemovePluginExports(plugin);
     services::RemovePluginServices(plugin);
     feedback::RemovePluginResources(plugin); // its sounds, particle effects and effectors
+    // plans/addon_api_ideas (group plugin): its queued task_async works and their done, its debug shapes, its console
+    // commands (they stay in the console until the unload, but call nothing)
+    threads::CancelPluginTasks(plugin);
+    extra::RemovePluginResources(plugin);
+    console::DisablePluginCommands(plugin);
+    ReleasePluginWeatherLock(plugin);         // engine gaps P11: its weather lock
 }
 
 // StopPlugin and the rest, right before the library goes: the planners are destroyed, the variables and ini files
@@ -2894,9 +2948,12 @@ void ReleasePlugin(AddonRecord& addon)
 {
     const GwpPlugin* plugin = &addon.handle;
     StopPlugin(plugin);
+    threads::WaitPluginTasks(plugin); // plans/addon_api_ideas (P46): no work of task_async runs its code any more
+    addon.log_level.store(-1, std::memory_order_relaxed); // P57: the next instance starts with the default
     goap::RemovePluginPlanners(plugin);
     console::RemovePluginCvars(plugin);
     ini::ClosePluginFiles(plugin);
+    user_data::ReleasePluginLocks(plugin); // after on_unload: the plugin may unlock them itself there
     binders::ForgetPluginCrash(plugin);
     goap::ForgetPluginCrash(plugin);
     if (addon.module_base)
@@ -2912,6 +2969,9 @@ void UnloadPlugin(AddonRecord& addon)
     // The services go first: a consumer may call the interface from its service_on_unregister handler, and after
     // on_unload the state behind it is gone (gwp::Plugin deletes the plugin object there)
     services::RemovePluginServices(&addon.handle);
+    // plans/addon_api_ideas (P46): no queued task_async work of the plugin starts once on_unload runs (the running
+    // ones end in ReleasePlugin: WaitPluginTasks)
+    threads::CancelPluginTasks(&addon.handle);
     if (addon.desc.on_unload)
     {
         UnloadCall call{ addon.desc.on_unload, addon.desc.user };
@@ -3150,6 +3210,17 @@ void ReloadPlugin(AddonRecord& addon)
     LoadPlugin(addon);
 }
 
+// plugin_on_reloaded (plans/addon_api_ideas, group plugin, P34): the plugin of `addon` was loaded again by the console
+// (plugin_reload / addon_reload), at the top of a frame. The new instance subscribed in its gwp_plugin_init, so it
+// gets the event itself; the level name tells it a game runs (it got no alife_on_start of it), nil - the main menu
+void EmitPluginReloaded(const AddonRecord& addon, pcstr how)
+{
+    const shared_str level = g_pGameLevel ? g_pGameLevel->name() : shared_str(); // held until the emit returns
+    const GwpValue args[] = { events::String(addon.id.c_str()), events::String(how),
+        level.size() ? events::String(level.c_str()) : events::Nil() };
+    events::Emit(events::EBuiltin::PluginOnReloaded, args, static_cast<u32>(std::size(args)));
+}
+
 // addon_reload (RequestAddonReload): may it run now. A level that loads runs its loading events frame by frame - the
 // Lua of the level (binders, on_game_load) is half done; a save is written inside one frame, but a console command
 // run from Lua (a save_state handler) may come in the middle of it
@@ -3217,7 +3288,8 @@ void ReloadAddon(AddonRecord& addon)
             if (g_pGameLevel)
                 Logf("~ ", tag.c_str(), "plugin '%s' reloaded inside a game: it got no alife_on_start of this game. "
                     "The objects online keep what the old instance gave them, unless the plugin sets them up again "
-                    "itself; otherwise load a save", addon.plugin_name.c_str());
+                    "itself (plugin_on_reloaded tells it); otherwise load a save", addon.plugin_name.c_str());
+            EmitPluginReloaded(addon, "addon_reload"); // P34
         }
         else if (addon.state == EAddonState::Failed)
             lua_may_load = false; // a required plugin: the addon does not work (addon_list has the reason)
@@ -3248,6 +3320,100 @@ void ReloadAddon(AddonRecord& addon)
     Logf(lua_ok ? "* " : "! ", tag.c_str(), "addon_reload: done%s", lua_ok ? "" :
         " with errors: the Lua part is failed in this Lua state (addons.lua_entries() has the reason), the next Lua "
         "state (a load, a new game) tries it again");
+}
+
+// A rule of [addon] conflicts holds for `other` as the launcher reads it (addon_local.rs check_conflicts): the id is
+// that of `other` and every condition holds on its version - a version that is not MAJOR.MINOR.PATCH meets none
+bool ConflictRuleHolds(const AddonDependency& rule, const AddonRecord& other)
+{
+    if (rule.id != other.id)
+        return false;
+    for (const VersionCondition& condition : rule.conditions)
+    {
+        if (!other.version_valid || !VersionConditionHolds(condition, other.version_parsed))
+            return false;
+    }
+    return true;
+}
+
+// The first rule of [addon] conflicts of `owner` that holds for `other`, nullptr - none
+const AddonDependency* FindConflictRule(const AddonRecord& owner, const AddonRecord& other)
+{
+    for (const AddonDependency& rule : owner.conflicts)
+    {
+        if (ConflictRuleHolds(rule, other))
+            return &rule;
+    }
+    return nullptr;
+}
+
+// The pairs of [addon] conflicts of `addon` (open questions 2026-11-15, 1.2 (B)), both ways: its rules on the other
+// addons and theirs on it. An addon switched off in appdata/addons.ltx (disabled) is left out - the launcher checks
+// the enabled ones only; one entry per id (of the copies of a duplicate id the working one counts)
+void CollectConflicts(const AddonRecord& addon, xr_vector<AddonInfo::ConflictInfo>& out)
+{
+    out.clear();
+    if (!g_addons)
+        return;
+    for (const auto& entry : *g_addons)
+    {
+        const AddonRecord& other = *entry;
+        if (other.id == addon.id || other.state == EAddonState::Disabled)
+            continue;
+        const AddonDependency* mine = FindConflictRule(addon, other);
+        const AddonDependency* theirs = FindConflictRule(other, addon);
+        if (!mine && !theirs)
+            continue;
+        const bool other_active = other.state == EAddonState::Active;
+        const auto found = std::find_if(out.begin(), out.end(),
+            [&](const AddonInfo::ConflictInfo& known) { return known.id == other.id; });
+        if (found != out.end() && (found->active || !other_active))
+            continue;
+        AddonInfo::ConflictInfo& info = found != out.end() ? *found : out.emplace_back();
+        info.id = other.id;
+        info.version = other.version;
+        info.state = AddonStateName(other.state);
+        info.active = other_active;
+        info.declared_by = mine && theirs ? "both" : (mine ? "self" : "other");
+        info.rule = (mine ? mine : theirs)->text;
+    }
+}
+
+// After the start (Initialize): the pairs of [addon] conflicts that work together. The engine switches neither off
+// (open questions 2026-11-15, 1.2 (B)): the launcher refuses such a pair at the install, the player decides; a manual
+// install or -addon_dir gets this warning. One line per rule of the addon that holds (its own rules only: a rule of
+// the other addon is warned by that addon)
+void WarnActiveConflicts()
+{
+    xr_vector<AddonInfo::ConflictInfo> pairs;
+    for (const auto& entry : *g_addons)
+    {
+        const AddonRecord& addon = *entry;
+        if (addon.state != EAddonState::Active || addon.conflicts.empty())
+            continue;
+        CollectConflicts(addon, pairs);
+        for (const AddonInfo::ConflictInfo& pair : pairs)
+        {
+            if (!pair.active || pair.declared_by == "other")
+                continue;
+            Logf("~ ", AddonTag(addon).c_str(), "[addon] conflicts: '%s' %s is active too (rule '%s'). Both are loaded: "
+                "the engine switches neither off, the launcher decides - switch one of them off there (addon_list, "
+                "addons_report.json: conflicts)", pair.id.c_str(), pair.version.c_str(), pair.rule.c_str());
+        }
+    }
+}
+
+// The development commands (open questions 2026-11-15, 1.11): addon_reload, and plugin_reload of a plugin that did not
+// crash. Allowed for a folder of the developer - an addon with trust = local, one not in appdata/addons.ltx
+// (-addon_dir, no launcher list) - and for any addon with -addon_debug (08 4.10, 00-roadmap.md 4.3). The launcher
+// gives trust: an addon of the catalog or of GW is the player's, plugin_reload restarts only its crashed plugin
+bool DevCommandAllowed(const AddonRecord& addon) { return g_debug_log || !addon.listed || addon.trust == "local"; }
+
+// What the console says when DevCommandAllowed refuses
+xr_string DevCommandRefusal(const AddonRecord& addon, const xr_string& what)
+{
+    return what + ": allowed for an addon with trust = local, one not in appdata/addons.ltx (-addon_dir, no "
+        "launcher list) or with -addon_debug; this one has trust = " + addon.trust;
 }
 } // namespace detail
 
@@ -3360,6 +3526,7 @@ void Initialize()
                     dependency.id.c_str());
         }
     }
+    WarnActiveConflicts(); // [addon] conflicts: the pairs that work together (the launcher decides)
 
     u32 active = 0, plugins = 0;
     for (const auto& addon : *g_addons)
@@ -3394,6 +3561,7 @@ void Shutdown()
     data::Shutdown();
     ini::Shutdown();
     console::Shutdown();
+    lua_console::Shutdown(); // the console commands of the Lua parts of addons (gap P03)
     timers::Shutdown();
     binders::Shutdown();
     storage::Shutdown();
@@ -3405,6 +3573,7 @@ void Shutdown()
     ShutdownExports();
     services::Shutdown();
     feedback::Shutdown();
+    threads::Shutdown(); // plans/addon_api_ideas (P46): the task_async threads, every plugin is unloaded above
     events::Shutdown();
     g_initialized = false;
 }
@@ -3535,6 +3704,7 @@ void OnFrame()
     using namespace detail;
     // Sounds and effects of plugins: the ended ones and those of a gone level are released, attached effects follow
     feedback::OnFrame();
+    threads::OnFrame(); // plans/addon_api_ideas (P46): the done of the ended task_async works
     // Only at the top of a frame: a plugin function on the stack would return into an unloaded library
     if (!g_plugin_work || !g_addons || events::PluginCallDepth() != 0)
         return;
@@ -3566,8 +3736,11 @@ void OnFrame()
             {
                 Logf("~ ", AddonTag(addon).c_str(), "plugin '%s' reloaded inside a game: it got no alife_on_start of "
                     "this game. The objects online keep what the old instance gave them, unless the plugin sets them "
-                    "up again itself (gw_npc does); otherwise load a save", addon.plugin_name.c_str());
+                    "up again itself (gw_npc does; plugin_on_reloaded tells it); otherwise load a save",
+                    addon.plugin_name.c_str());
             }
+            if (addon.plugin_state == EPluginState::Loaded)
+                EmitPluginReloaded(addon, "plugin_reload"); // P34
             continue;
         }
         if (addon.plugin_state == EPluginState::Crashed && addon.module)
@@ -3654,6 +3827,15 @@ bool RequestPluginReload(pcstr addon_id, xr_string& reason)
             reason = "its plugin loads only while its location pack / slot provider is active (and works)";
             return false;
         }
+        // Open questions 2026-11-15, 1.11: the player may restart a crashed plugin of any addon ("it crashed - load it
+        // again without leaving the game"); the reload of a working one (or of one that did not load) is a development
+        // command, as addon_reload
+        if (addon.plugin_state != EPluginState::Crashed && !DevCommandAllowed(addon))
+        {
+            reason = DevCommandRefusal(addon, "only a crashed plugin of this addon may be reloaded (its plugin is " +
+                xr_string(PluginStateName(addon.plugin_state)) + "); the reload of any plugin is a development command");
+            return false;
+        }
         addon.reload_requested = true;
         g_plugin_work = true;
         return true;
@@ -3691,10 +3873,9 @@ bool RequestAddonReload(pcstr addon_id, xr_string& reason)
             continue;
         // The development mode (08 4.10, 00-roadmap.md 4.3): a folder of the developer. The launcher gives trust; an
         // addon of the catalog or of GW is reloaded only with -addon_debug
-        if (!g_debug_log && addon.listed && addon.trust != "local")
+        if (!DevCommandAllowed(addon))
         {
-            reason = "a development command: allowed for an addon with trust = local, one not in appdata/addons.ltx "
-                     "(-addon_dir, no launcher list) or with -addon_debug; this one has trust = " + addon.trust;
+            reason = DevCommandRefusal(addon, "a development command");
             return false;
         }
         if (!AddonReloadMomentOk(reason))
@@ -3738,6 +3919,7 @@ xr_vector<AddonInfo> ListAddons()
         info.load_after = addon->load_after;
         for (const detail::AddonDependency& dependency : addon->depends)
             info.depends.push_back(dependency.id);
+        detail::CollectConflicts(*addon, info.conflicts);
         info.patches = addon->patches;
         info.game_version = addon->game_version;
         info.location = addon->location;
@@ -4539,6 +4721,7 @@ void PrintList()
         kPluginArch, static_cast<u32>(g_addons->size()));
     if (g_launcher_list_unreadable)
         Msg("! [addons] %s", kLauncherListUnreadableReason);
+    xr_vector<AddonInfo::ConflictInfo> conflicts;
     for (const auto& addon : *g_addons)
     {
         Msg("-   %-24s %-10s %-10s type=%s plugin=%s (%s) lua=%s trust=%s dir=%s%s%s", addon->id.c_str(),
@@ -4548,6 +4731,23 @@ void PrintList()
             PluginStateName(addon->plugin_state), addon->lua_entry.empty() ? "-" : addon->lua_entry.c_str(),
             addon->trust.c_str(), addon->dir.c_str(),
             addon->reason.empty() ? "" : " reason=", addon->reason.c_str());
+        // [addon] conflicts (open questions 2026-11-15, 1.2 (B)): the engine loads both of a pair, the launcher
+        // decides; a pair that works together is a warning line
+        CollectConflicts(*addon, conflicts);
+        if (conflicts.empty())
+            continue;
+        xr_string text;
+        bool both_active = false;
+        for (const AddonInfo::ConflictInfo& pair : conflicts)
+        {
+            both_active = both_active || (pair.active && addon->state == EAddonState::Active);
+            if (!text.empty())
+                text += ", ";
+            text += pair.id + " " + pair.version + " (" + pair.state + ", rule '" + pair.rule + "' of " +
+                (pair.declared_by == "self" ? "this addon" : pair.declared_by == "other" ? "that addon" : "both") + ")";
+        }
+        Msg("%s     conflicts with: %s%s", both_active ? "~" : "-", text.c_str(),
+            both_active ? " - both are loaded, the launcher decides which to keep" : "");
     }
     PrintStateLegend();
     services::PrintList();

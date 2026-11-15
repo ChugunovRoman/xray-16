@@ -30,6 +30,7 @@
 #include "Bolt.h"
 #include "xrNetServer/NET_Messages.h"
 #include "lua_spike_probe.h"
+#include "xrMessages.h"
 
 CInventoryOwner::CInventoryOwner()
     : m_inventory(xr_new<CInventory>()),
@@ -163,6 +164,14 @@ void CInventoryOwner::net_Destroy()
 
     inventory().Clear();
     inventory().SetActiveSlot(NO_ACTIVE_SLOT);
+    // npc_equipment.md: the flag and the swap are runtime only, the addon sets them again at the next net_spawn
+    if (m_equipment_editable)
+    {
+        m_equipment_editable = false;
+        inventory().SetBeltUseful(false);
+    }
+    ResetEquipmentSwap();
+    m_equipment_enemy_time = 0;
 }
 
 void CInventoryOwner::save(NET_Packet& output_packet)
@@ -599,6 +608,7 @@ bool CInventoryOwner::AllowItemToTrade(CInventoryItem const* item, const SInvIte
 
 void CInventoryOwner::set_money(u32 amount, bool bSendEvent)
 {
+    const u32 old_money = m_money;
     if (InfinitiveMoney())
         m_money = _max(m_money, amount);
     else
@@ -612,6 +622,11 @@ void CInventoryOwner::set_money(u32 amount, bool bSendEvent)
         packet.w_u32(m_money);
         object->u_EventSend(packet);
     }
+
+    // actor_on_money_change (plans/addon_achievements 7.2), after the network event: a subscriber that changes the
+    // money again sends its own. The actor only - a pointer compare for everyone else
+    if (m_money != old_money && g_actor && static_cast<CInventoryOwner*>(g_actor) == this)
+        gw::addons::objevents::ActorMoneyChange(old_money, m_money);
 }
 
 bool CInventoryOwner::use_default_throw_force() { return (true); }
@@ -659,4 +674,98 @@ void CInventoryOwner::deadbody_closed(bool status)
     P.w_u8((m_deadbody_can_take) ? 1 : 0);
     P.w_u8((m_deadbody_closed) ? 1 : 0);
     CGameObject::u_EventSend(P);
+}
+
+// -------------------------------------------------------------------------------------------------
+// The equipment of an NPC set up by the player (plans/addon_companion_extended/npc_equipment.md)
+// -------------------------------------------------------------------------------------------------
+
+void CInventoryOwner::set_equipment_editable(bool value)
+{
+    // the actor sets up its own equipment: the flag is for NPCs only
+    if (smart_cast<CActor*>(this))
+        return;
+    if (m_equipment_editable == value)
+        return;
+
+    m_equipment_editable = value;
+    if (value)
+    {
+        inventory().SetBeltUseful(true);
+        return;
+    }
+
+    // not editable any more: no swap (the weapon taken out stays in the ruck)
+    ResetEquipmentSwap();
+
+    // the belt is off again: what was on it goes to the ruck (copy - Ruck changes m_belt)
+    const TIItemContainer belt = inventory().m_belt;
+    for (PIItem item : belt)
+        inventory().Ruck(item);
+    inventory().SetBeltUseful(false);
+}
+
+bool CInventoryOwner::EquipmentSlotOverride(u16 slot_id) const
+{
+    // CAI_Stalker::CanPutInSlot refuses these two; the rest of its slots are open anyway
+    return m_equipment_editable && (slot_id == OUTFIT_SLOT || slot_id == PDA_SLOT);
+}
+
+namespace
+{
+// the index of the swap of a weapon slot or -1
+int equipment_swap_index(u16 slot_id)
+{
+    return slot_id == INV_SLOT_2 ? 0 : slot_id == INV_SLOT_3 ? 1 : -1;
+}
+} // namespace
+
+u16 CInventoryOwner::EquipmentSwapped(u16 slot_id) const
+{
+    const int i = equipment_swap_index(slot_id);
+    return i < 0 ? u16(-1) : m_equipment_swap[i];
+}
+
+void CInventoryOwner::SetEquipmentSwapped(u16 slot_id, u16 item_id)
+{
+    const int i = equipment_swap_index(slot_id);
+    if (i >= 0)
+        m_equipment_swap[i] = item_id;
+}
+
+bool CInventoryOwner::IsEquipmentSwapped(u16 item_id) const
+{
+    return item_id != u16(-1) && (m_equipment_swap[0] == item_id || m_equipment_swap[1] == item_id);
+}
+
+void CInventoryOwner::ResetEquipmentSwap()
+{
+    m_equipment_swap[0] = u16(-1);
+    m_equipment_swap[1] = u16(-1);
+}
+
+void CInventoryOwner::OnEquipmentEvent(NET_Packet& P, u16 type)
+{
+    if (!m_equipment_editable)
+        return;
+
+    const u16 id = P.r_u16();
+    IGameObject* obj = Level().Objects.net_Find(id);
+    PIItem item = obj ? smart_cast<PIItem>(obj) : nullptr;
+    // only an item that is still ours: the actor menu sends these events to the owner the item had before the move
+    // was processed (CUIActorMenu::SendEvent_Item2*), the item may belong to someone else by now
+    if (!item || obj->getDestroy() || item->m_pInventory != m_inventory || obj->H_Parent() != cast_game_object())
+        return;
+
+    switch (type)
+    {
+    case GEG_PLAYER_ITEM2SLOT:
+    {
+        const u16 slot_id = P.r_u16();
+        inventory().Slot(slot_id, item);
+        break;
+    }
+    case GEG_PLAYER_ITEM2BELT: inventory().Belt(item); break;
+    case GEG_PLAYER_ITEM2RUCK: inventory().Ruck(item); break;
+    }
 }

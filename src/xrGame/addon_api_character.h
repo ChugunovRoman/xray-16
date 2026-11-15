@@ -19,6 +19,11 @@ void FillEngineApi(GwpEngineApi& api);
 // caller returns at once). Without subscribers: true and nothing else.
 bool BeforeHit(CEntityAlive* victim, SHit& hit, bool monster);
 
+// actor_on_before_hit_ex (plans/addon_api_ideas, group plugin, P22): called by CActor::Hit for a living actor (not
+// in god mode) after the Lua callback _G.CActor__BeforeHitCallback (actor_on_before_hit) let the hit through and
+// after the artefacts on the belt took their part. The same result as BeforeHit: a new power, false = cancelled.
+bool ActorBeforeHit(CEntityAlive* actor, SHit& hit);
+
 // relation_on_changed, from the setters of RELATION_REGISTRY (relation_registry.cpp). WantsRelationEvents tells the
 // setter whether to read the old value at all (an emit without subscribers is skipped).
 bool WantsRelationEvents();

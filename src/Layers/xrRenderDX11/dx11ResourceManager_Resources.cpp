@@ -40,6 +40,7 @@ SPass* CResourceManager::_CreatePass(const SPass& proto)
     P->M = proto.M;
 #endif
     P->C = proto.C;
+    P->inst = proto.inst; // GPU instancing: the INSTANCED twin (plans/render_instancing/plan.md)
 
     return P;
 }
@@ -67,6 +68,9 @@ SVS* CResourceManager::_CreateVS(cpcstr shader, u32 flags /*= 0*/)
         xr_strcat(name, "_4");
         break;
     }
+    // GPU instancing (plans/render_instancing/plan.md): the INSTANCED variant is another shader, another cache file
+    if (RImplementation.shader_instanced())
+        xr_strcat(name, "_i");
 
     return CreateShader<SVS>(name, shader, flags);
 }

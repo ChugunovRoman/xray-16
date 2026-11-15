@@ -42,6 +42,14 @@ public:
     // Pre-load disk-cached preview DDS textures into VRAM (called in menu).
     void WarmDiskCacheTextures();
 
+    // Live preview slots (IRender::PreviewScene_Live*, plans/addon_base_building/plan.md 17.16): the model of a slot
+    // stays created, its fixed texture is rendered again in ProcessQueue when the settings change
+    static constexpr u32 kLiveSlots = 4;
+    void LiveSet(u32 slot, pcstr model_path, const SPreviewSceneSettings& settings);
+    [[nodiscard]] bool LiveReady(u32 slot) const;
+    [[nodiscard]] shared_str LiveTextureName(u32 slot) const;
+    void LiveClear(u32 slot);
+
     [[nodiscard]]
     const ref_rt& ColorRT() const
     {
@@ -192,5 +200,22 @@ private:
     u32 m_warmLoaded{};
     u64 m_warmUs{};
     bool m_warmDone{};
+
+    struct SLiveSlot
+    {
+        shared_str model_path;
+        SPreviewSceneSettings settings{};
+        IRenderVisual* visual{};
+        ref_rt color_rt;
+        bool dirty{};
+        bool ready{};
+        bool failed{};
+    };
+    SLiveSlot m_live[kLiveSlots];
+    // Renders the dirty live slots (ProcessQueue, outside of the frame)
+    void ProcessLive();
+    // The textures of the live slots go (a device reset: rendered again after it); keep_models - the slots keep their
+    // model and settings, else they are cleared
+    void DestroyLive(bool keep_models);
 };
 } // namespace xray::render::RENDER_NAMESPACE

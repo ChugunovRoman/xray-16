@@ -280,7 +280,11 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     }
     case iActorBelt:
     {
-        ToBag(itm, false, false);
+        // npc_equipment.md: the belt of the partner - to its ruck, like its slots
+        if (m_pEquipOwner)
+            ToDeadBodyBag(itm, false, false);
+        else
+            ToBag(itm, false, false);
         break;
     }
     case iActorTrade:

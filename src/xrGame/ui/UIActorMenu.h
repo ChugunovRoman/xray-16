@@ -213,6 +213,50 @@ protected:
 public:
     CInventoryOwner* m_pActorInvOwner{};
 
+    // plans/addon_companion_extended/npc_equipment.md - the mode "equipment of the partner" of the exchange window (mode
+    // 4 with a live stalker): the slots and the belt show and take the items of the partner, its bag shows only its
+    // ruck. Lua ActorMenu.set_partner_equipment(id) asks for it before npc:use(db.actor): the request is for the next
+    // opening of the mode with that partner within PARTNER_EQUIPMENT_REQUEST_MS, it is cleared when the window closes
+    void SetPartnerEquipmentRequest(u16 partner_id);
+    bool IsPartnerEquipmentMode() const { return m_pEquipOwner != nullptr; }
+
+protected:
+    static constexpr u32 PARTNER_EQUIPMENT_REQUEST_MS = 3000;
+    u16 m_partner_equipment_request_id{ u16(-1) };
+    u32 m_partner_equipment_request_time{};
+    // the partner whose equipment the slots show (nullptr: the actor's, the usual window)
+    CInventoryOwner* m_pEquipOwner{};
+    // what the slots / belt of the partner held when the window last looked (UpdatePartnerEquipment)
+    xr_vector<u16> m_partner_equipment_slots;
+    xr_vector<u16> m_partner_equipment_belt;
+    u32 m_partner_equipment_frame{};
+    bool m_quick_slot_was_shown{};
+    CUIStatic* m_partner_equipment_caption{};
+
+    // the owner of the slots and the belt of the window: the partner in the equipment mode, the actor otherwise
+    CInventoryOwner* EquipOwner() const { return m_pEquipOwner ? m_pEquipOwner : m_pActorInvOwner; }
+    // the item belongs to the partner of the equipment mode
+    bool IsPartnerEquipItem(PIItem item) const;
+    // asks Lua (actor_menu_inventory.CUIActorMenu_PartnerEquipmentCanMove) and checks that the partner carries an item
+    // of the actor (count: the items of a stack). place: "slot" / "belt" / "ruck"
+    bool PartnerEquipmentCanMove(PIItem item, bool to_npc, pcstr place, u16 slot_id, u32 count = 1);
+    // an item (of the actor or of the partner: its slot, belt) to the ruck of the partner; ask = false - without asking
+    // Lua (a forced move: a slot freed for another item, the belt of a removed outfit)
+    bool ToPartnerRuck(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs, bool ask);
+    void ReadPartnerEquipment(xr_vector<u16>& slots, xr_vector<u16>& belt) const;
+    // remember the slots / belt of the partner; notify = send actor_menu_partner_equipment_changed for the differences
+    void SnapshotPartnerEquipment(bool notify);
+    void FillPartnerEquipmentBag();
+    void InitPartnerEquipmentContents(); // rebuild the side of the partner
+    void UpdatePartnerEquipment();       // every frame of the equipment mode
+    void SendEvent_PartnerItem2Place(PIItem pItem, u16 event_type, u16 slot_id);
+    void SendEvent_PartnerItem2Actor(PIItem pItem);
+    // the player moves a weapon of the slots 2 / 3 of the partner (to such a slot, out of it, or the weapon the partner
+    // swapped out): the temporary swap of the partner is dropped - the will of the player first
+    void NotePartnerWeaponMove(PIItem item, u16 target_slot);
+
+public:
+
     void SetMenuMode(EMenuMode mode);
     EMenuMode GetMenuMode() { return m_currMenuMode; };
     void SetActor(CInventoryOwner* io);
@@ -262,6 +306,8 @@ protected:
 
     void InitCellForSlot(u16 slot_idx);
     void InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyBagList = false);
+    // the slots and the belt of EquipOwner()
+    void InitEquipmentCells();
     void ClearAllLists();
 
     void BindDragDropListEvents(CUIDragDropListEx* lst);
@@ -301,7 +347,7 @@ protected:
     void InitUpgradeMode();
     void DeInitUpgradeMode();
     void InitDeadBodySearchMode();
-    void DeInitDeadBodySearchMode() const;
+    void DeInitDeadBodySearchMode();
 
     void InitActorInfo();
     void InitPartnerInfo();
@@ -361,7 +407,8 @@ protected:
     void SendEvent_Item2Slot(PIItem pItem, u16 parent, u16 slot_id);
     void SendEvent_Item2Belt(PIItem pItem, u16 parent);
     void SendEvent_Item2Ruck(PIItem pItem, u16 parent);
-    void SendEvent_Item_Drop(PIItem pItem, u16 parent);
+    // ask_addons: false - the caller asked actor_on_before_item_drop already (a stack dropped at once)
+    void SendEvent_Item_Drop(PIItem pItem, u16 parent, bool ask_addons = true);
     void SendEvent_Item_Eat(PIItem pItem, u16 parent);
     void SendEvent_ActivateSlot(u16 slot, u16 recipient);
     void DropAllCurrentItem();

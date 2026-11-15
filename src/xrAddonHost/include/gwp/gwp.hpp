@@ -25,6 +25,7 @@
 #include <format>
 #include <functional>
 #include <new>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -76,8 +77,22 @@ public:
     // @group logger @thread any
     bool debug_enabled() const noexcept
     {
+        // A level set with set_level decides (the engine filters by it the same way)
+        if (m_level >= GWP_LOG_DEBUG)
+            return m_level == GWP_LOG_DEBUG;
         return m_api != nullptr && GWP_API_HAS(m_api, is_debug_log) && m_api->is_debug_log != nullptr &&
             m_api->is_debug_log() != 0;
+    }
+
+    // The lowest level of the lines of this plugin (log_set_level of the engine, plans/addon_api_ideas P57):
+    // GWP_LOG_DEBUG shows its debug lines without -addon_debug, GWP_LOG_WARNING hides its info lines... Errors always
+    // pass. false: an engine without log_set_level, or a level above GWP_LOG_ERROR. @group logger @thread any
+    bool set_level(GwpLogLevel level) noexcept
+    {
+        if (m_api == nullptr || !GWP_API_HAS(m_api, log_set_level) || m_api->log_set_level(m_self, level) != GWP_OK)
+            return false;
+        m_level = level;
+        return true;
     }
 
     // GWP_LOG_DEBUG; not even formatted when debug output is off. @group logger @thread any
@@ -146,6 +161,7 @@ public:
 private:
     const GwpEngineApi* m_api = nullptr;
     const GwpPlugin* m_self = nullptr;
+    GwpLogLevel m_level = -1; // set_level: -1 - not set (the engine default)
 };
 /*
  * ValueView: typed read access to one GwpValue (an argument of an event or an export, an item of a GWP_T_ARRAY, the
@@ -969,6 +985,131 @@ public:
         return name ? std::string_view(name) : std::string_view();
     }
 
+    // --- files in the profile of the user (group user_data, wiki/doc/plugins/api/user_data.md) ------------------
+    // The folder <root>/addons/<addon id>/ outside the game and the saves, one for every save and every copy of the
+    // game. The names and the limits are those of user_data_* in gwp_api.h.
+
+    // The engine has the group (an older one: the calls below answer GWP_ERROR_NOT_SUPPORTED, empty results).
+    // @group user_data @thread any
+    bool has_user_data() const noexcept { return m_api != nullptr && GWP_API_HAS(m_api, user_data_list); }
+
+    // The folder of the addon (UTF-8, a trailing separator), created when missing; empty - none (the engine logs why).
+    // @group user_data @thread any
+    std::string user_data_dir() const
+    {
+        if (!has_user_data())
+            return {};
+        const uint32_t length = m_api->user_data_dir(m_self, nullptr, 0);
+        if (length == 0)
+            return {};
+        std::string text(length, '\0');
+        // length + 1: the room of the terminator (data()[size()] of std::string)
+        if (m_api->user_data_dir(m_self, text.data(), length + 1) != length)
+            return {};
+        return text;
+    }
+
+    // The whole file into `out`. GWP_OK; GWP_ERROR_NOT_FOUND - no such file (out is empty); the other codes of
+    // user_data_read. The file may change between the size and the read (another copy of the game): asked again.
+    // @group user_data @thread any
+    GwpResult user_data_read(const char* name, std::string& out) const
+    {
+        out.clear();
+        if (!has_user_data())
+            return GWP_ERROR_NOT_SUPPORTED;
+        uint32_t size = 0;
+        // cap 0 asks the size (an empty file answers GWP_OK at once)
+        GwpResult result = m_api->user_data_read(m_self, name, nullptr, 0, &size);
+        for (int attempt = 0; attempt < 4 && result == GWP_ERROR_INVALID_ARGUMENT && size > 0; ++attempt)
+        {
+            out.resize(size);
+            result = m_api->user_data_read(m_self, name, out.data(), size, &size);
+        }
+        if (result == GWP_OK)
+            out.resize(size); // the file may have become shorter
+        else
+            out.clear();
+        return result;
+    }
+
+    // Replaces the file atomically (user_data_write). @group user_data @thread any
+    GwpResult user_data_write(const char* name, std::string_view data) const
+    {
+        if (!has_user_data() || data.size() > GWP_USER_DATA_MAX_FILE_SIZE)
+            return GWP_ERROR_NOT_SUPPORTED;
+        return m_api->user_data_write(m_self, name, data.data(), static_cast<uint32_t>(data.size()));
+    }
+
+    // GWP_OK, GWP_ERROR_NOT_FOUND - no such file. @group user_data @thread any
+    GwpResult user_data_remove(const char* name) const
+    {
+        return has_user_data() ? m_api->user_data_remove(m_self, name) : GWP_ERROR_NOT_SUPPORTED;
+    }
+
+    // The names of the files of the folder, sorted; empty - none (or a failure, logged by the engine).
+    // @group user_data @thread any
+    std::vector<std::string> user_data_list() const
+    {
+        std::vector<std::string> names;
+        if (!has_user_data())
+            return names;
+        std::string text;
+        uint32_t length = m_api->user_data_list(m_self, nullptr, 0);
+        bool fitted = length == 0;
+        // A file may appear between the calls (another copy of the game): asked again with the new length
+        for (int attempt = 0; attempt < 4 && !fitted; ++attempt)
+        {
+            text.assign(length, '\0');
+            const uint32_t now = m_api->user_data_list(m_self, text.data(), length + 1);
+            fitted = now <= length;
+            text.resize(fitted ? now : 0);
+            length = now;
+        }
+        for (size_t begin = 0; begin < text.size();)
+        {
+            size_t end = text.find('\n', begin);
+            if (end == std::string::npos)
+                end = text.size();
+            names.emplace_back(text, begin, end - begin);
+            begin = end + 1;
+        }
+        return names;
+    }
+
+    // Read - change - write under the lock of the name (user_data_lock), so another copy of the game that does the
+    // same in between loses nothing: fn(const std::string* old) -> std::optional<std::string>, old == nullptr - no
+    // file yet; std::nullopt - leave the file as it is. GWP_OK; GWP_ERROR_INVALID_STATE - the wait for the lock ran
+    // out (another holder: try later); else the first failing code (the read, the write). fn runs on the calling
+    // thread under the lock - keep it short; an exception from it releases the lock and goes on to the caller.
+    // @group user_data @thread any
+    template <typename F>
+    GwpResult user_data_update(const char* name, F&& fn,
+        uint32_t timeout_ms = GWP_USER_DATA_LOCK_TIMEOUT_DEFAULT) const
+    {
+        if (!has_user_data())
+            return GWP_ERROR_NOT_SUPPORTED;
+        GwpUserDataLock lock = GWP_INVALID_USER_DATA_LOCK;
+        const GwpResult locked = m_api->user_data_lock(m_self, name, timeout_ms, &lock);
+        if (locked != GWP_OK)
+            return locked;
+        // The lock goes on every way out, an exception of fn included
+        struct Unlock
+        {
+            const GwpEngineApi* api;
+            const GwpPlugin* self;
+            GwpUserDataLock lock;
+            ~Unlock() { api->user_data_unlock(self, lock); }
+        } unlock{ m_api, m_self, lock };
+        std::string old;
+        const GwpResult read = user_data_read(name, old);
+        if (read != GWP_OK && read != GWP_ERROR_NOT_FOUND)
+            return read;
+        std::optional<std::string> next = fn(read == GWP_OK ? &old : nullptr);
+        if (!next)
+            return GWP_OK;
+        return user_data_write(name, *next);
+    }
+
 protected:
     // --- handlers to override -------------------------------------------------------------------------------
 
@@ -1020,17 +1161,130 @@ protected:
     template <typename F>
     bool subscribe(const char* name, F&& fn)
     {
-        Subscription& sub = m_subscriptions.emplace_back();
-        sub.owner = this;
+        Subscription& sub = acquire_subscription(name);
         sub.fn = std::forward<F>(fn);
-        sub.name = name;
         sub.id = m_api->event_subscribe(m_self, name, &event_trampoline, &sub);
         if (sub.id == GWP_INVALID_SUBSCRIPTION_ID)
         {
-            m_subscriptions.pop_back();
+            release_subscription(sub);
             return false;
         }
         return true;
+    }
+
+    // --- subscriptions with options and their end (plans/addon_api_ideas, P27) --------------------------------
+    // The subscribe_* below return the id of the subscription (GWP_INVALID_SUBSCRIPTION_ID - refused, the reason is
+    // in the log) for unsubscribe(id). A plain subscribe() lives until on_unload, as before.
+
+    // Options of subscribe_ex: every field optional.
+    struct SubscribeOptions
+    {
+        uint32_t throttle_ms = 0;                 // at most one call per interval (game time, ms); 0 = every emit
+        GwpObjectId object = GWP_INVALID_OBJECT_ID; // only the emits whose first argument is this online object
+                                                  // (GWP_SUBSCRIBE_OBJECT); the subscription ends when it goes offline
+        int32_t priority = 0; // a higher one is called earlier among the plugins (GwpSubscribeOptions::priority; an
+                              // engine before that step ignores it - check GWP_API_HAS(api(), task_async))
+    };
+
+    // fn(const EventView&) with options; the id for unsubscribe. A subscription to an object ends by itself when the
+    // object goes offline (the engine removes it); its node here is freed at the next subscribe_* whose object is no
+    // longer online, or by unsubscribe.
+    template <typename F>
+    GwpSubscriptionId subscribe_ex(const char* name, const SubscribeOptions& options, F&& fn)
+    {
+        const bool plain = options.throttle_ms == 0 && options.object == GWP_INVALID_OBJECT_ID && options.priority == 0;
+        if (!plain && !GWP_API_HAS(m_api, event_subscribe_ex))
+            return GWP_INVALID_SUBSCRIPTION_ID;
+        if (options.object != GWP_INVALID_OBJECT_ID)
+            sweep_object_subscriptions();
+        Subscription& sub = acquire_subscription(name);
+        sub.fn = std::forward<F>(fn);
+        sub.object = options.object;
+        if (plain)
+            sub.id = m_api->event_subscribe(m_self, name, &event_trampoline, &sub);
+        else
+        {
+            GwpSubscribeOptions raw{};
+            raw.size = sizeof(raw);
+            raw.throttle_ms = options.throttle_ms;
+            if (options.object != GWP_INVALID_OBJECT_ID)
+            {
+                raw.flags |= GWP_SUBSCRIBE_OBJECT;
+                raw.object = options.object;
+            }
+            raw.priority = options.priority;
+            sub.id = m_api->event_subscribe_ex(m_self, name, &raw, &event_trampoline, &sub);
+        }
+        if (sub.id == GWP_INVALID_SUBSCRIPTION_ID)
+        {
+            release_subscription(sub);
+            return GWP_INVALID_SUBSCRIPTION_ID;
+        }
+        return sub.id;
+    }
+
+    // At most one call of fn per throttle_ms (game time): a frequent event (actor_on_update, npc_on_hit_callback)
+    // without a batch.
+    template <typename F>
+    GwpSubscriptionId subscribe_throttled(const char* name, uint32_t throttle_ms, F&& fn)
+    {
+        SubscribeOptions options;
+        options.throttle_ms = throttle_ms;
+        return subscribe_ex(name, options, std::forward<F>(fn));
+    }
+
+    // Only the emits about one online object (its id is the first argument of the event): an NPC of interest. Ends
+    // by itself when the object goes offline.
+    template <typename F>
+    GwpSubscriptionId subscribe_object(const char* name, GwpObjectId object, F&& fn, uint32_t throttle_ms = 0)
+    {
+        SubscribeOptions options;
+        options.object = object;
+        options.throttle_ms = throttle_ms;
+        return subscribe_ex(name, options, std::forward<F>(fn));
+    }
+
+    // subscribe_batch with the id for unsubscribe (and a priority: the order of the deliveries of one frame).
+    template <typename F>
+    GwpSubscriptionId subscribe_batch_ex(const char* name, uint32_t throttle_ms, uint32_t max_batch, F&& fn,
+        int32_t priority = 0)
+    {
+        if (!GWP_API_HAS(m_api, event_subscribe_ex))
+            return GWP_INVALID_SUBSCRIPTION_ID;
+        Subscription& sub = acquire_subscription(name);
+        sub.batch = std::forward<F>(fn);
+        GwpSubscribeOptions options{};
+        options.size = sizeof(options);
+        options.flags = GWP_SUBSCRIBE_BATCH;
+        options.throttle_ms = throttle_ms;
+        options.max_batch = max_batch;
+        options.batch_handler = &batch_trampoline;
+        options.priority = priority;
+        sub.id = m_api->event_subscribe_ex(m_self, name, &options, nullptr, &sub);
+        if (sub.id == GWP_INVALID_SUBSCRIPTION_ID)
+        {
+            release_subscription(sub);
+            return GWP_INVALID_SUBSCRIPTION_ID;
+        }
+        return sub.id;
+    }
+
+    // Ends a subscription of this plugin made by subscribe_ex / subscribe_throttled / subscribe_object /
+    // subscribe_batch_ex. Safe inside its own handler (the handler object is destroyed after it returns). false - no
+    // such live subscription of this class (ended already, or an id of a plain subscribe).
+    bool unsubscribe(GwpSubscriptionId id)
+    {
+        if (id == GWP_INVALID_SUBSCRIPTION_ID)
+            return false;
+        for (Subscription& sub : m_subscriptions)
+        {
+            if (sub.id != id || sub.dead)
+                continue;
+            m_api->event_unsubscribe(m_self, id); // an id the engine ended already is ignored there (ids never repeat)
+            release_subscription(sub);
+            return true;
+        }
+        return false;
     }
 
     // Batch subscription (GWP_SUBSCRIBE_BATCH): fn(std::span<const GwpEvent>) gets every event collected since the
@@ -1041,10 +1295,8 @@ protected:
     {
         if (!GWP_API_HAS(m_api, event_subscribe_ex))
             return false;
-        Subscription& sub = m_subscriptions.emplace_back();
-        sub.owner = this;
+        Subscription& sub = acquire_subscription(name);
         sub.batch = std::forward<F>(fn);
-        sub.name = name;
         GwpSubscribeOptions options{};
         options.size = sizeof(options);
         options.flags = GWP_SUBSCRIBE_BATCH;
@@ -1054,7 +1306,7 @@ protected:
         sub.id = m_api->event_subscribe_ex(m_self, name, &options, nullptr, &sub);
         if (sub.id == GWP_INVALID_SUBSCRIPTION_ID)
         {
-            m_subscriptions.pop_back();
+            release_subscription(sub);
             return false;
         }
         return true;
@@ -1193,6 +1445,78 @@ private:
         std::string name;
         EventFn fn;
         BatchFn batch;
+        GwpObjectId object = GWP_INVALID_OBJECT_ID; // subscribe_object: the engine ends it with the object
+        uint32_t calls = 0; // handlers of this node running now (an unsubscribe inside keeps fn alive until they end)
+        bool dead = false;  // unsubscribed / refused: free for acquire_subscription once calls is 0
+    };
+
+    // A node for a new subscription: a freed one (no handler of it runs), or a new one. The deque never shrinks: the
+    // engine keeps pointers to its elements.
+    Subscription& acquire_subscription(const char* name)
+    {
+        Subscription* node = nullptr;
+        for (Subscription& sub : m_subscriptions)
+        {
+            if (sub.dead && sub.calls == 0)
+            {
+                node = &sub;
+                break;
+            }
+        }
+        if (!node)
+            node = &m_subscriptions.emplace_back();
+        node->owner = this;
+        node->id = GWP_INVALID_SUBSCRIPTION_ID;
+        node->name = name ? name : "";
+        node->fn = nullptr;
+        node->batch = nullptr;
+        node->object = GWP_INVALID_OBJECT_ID;
+        node->calls = 0;
+        node->dead = false;
+        return *node;
+    }
+
+    // The node is free: its handler is destroyed now, or by the trampoline when the running call returns
+    void release_subscription(Subscription& sub)
+    {
+        sub.dead = true;
+        sub.id = GWP_INVALID_SUBSCRIPTION_ID;
+        sub.object = GWP_INVALID_OBJECT_ID;
+        if (sub.calls == 0)
+        {
+            sub.fn = nullptr;
+            sub.batch = nullptr;
+        }
+    }
+
+    // subscribe_object: the nodes whose object is no longer online - the engine ended those subscriptions
+    void sweep_object_subscriptions()
+    {
+        for (Subscription& sub : m_subscriptions)
+        {
+            if (!sub.dead && sub.object != GWP_INVALID_OBJECT_ID && !m_api->object_exists(sub.object))
+            {
+                m_api->event_unsubscribe(m_self, sub.id); // ignored by the engine: the id has ended
+                release_subscription(sub);
+            }
+        }
+    }
+
+    // Counts a running handler of the node; the last one out destroys the handler of an unsubscribed node
+    struct CallScope
+    {
+        Subscription& sub;
+        explicit CallScope(Subscription& s) : sub(s) { ++sub.calls; }
+        ~CallScope()
+        {
+            if (--sub.calls == 0 && sub.dead)
+            {
+                sub.fn = nullptr;
+                sub.batch = nullptr;
+            }
+        }
+        CallScope(const CallScope&) = delete;
+        CallScope& operator=(const CallScope&) = delete;
     };
 
     struct Binding
@@ -1210,6 +1534,9 @@ private:
     static void GWP_CALL event_trampoline(void* user, const GwpEvent* event) noexcept
     {
         auto* sub = static_cast<Subscription*>(user);
+        if (sub->dead || !sub->fn)
+            return; // unsubscribed earlier in the same dispatch
+        const CallScope scope(*sub);
         try
         {
             sub->fn(EventView(event));
@@ -1244,6 +1571,9 @@ private:
     static void GWP_CALL batch_trampoline(void* user, uint32_t count, const GwpEvent* events, uint32_t stride) noexcept
     {
         auto* sub = static_cast<Subscription*>(user);
+        if (sub->dead || !sub->batch)
+            return;
+        const CallScope scope(*sub);
         try
         {
             std::vector<GwpEvent> copy;

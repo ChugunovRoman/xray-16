@@ -24,6 +24,8 @@
 #include "addon_host.h"
 #include "addon_event_bus.h"
 #include "addon_lua_entry.h"
+#include "addon_api_world.h"
+#include "addon_api_feedback.h"
 #include "alife_time_skip.h"
 
 #ifdef DEBUG
@@ -157,6 +159,9 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
         const bool level_change = gw::addons::events::TakeLevelChangeMark() && save_exists;
         const pcstr reason = !save_exists ? "new_game" : level_change ? "level_change" : "load";
         const GwpValue args[] = { gw::addons::events::String(reason) };
+        // engine gaps P11/P13: the weather lock and the HUD texts of plugins outlive a level change only
+        gw::addons::WeatherLockOnGameStart(level_change);
+        gw::addons::feedback::OnGameStartHudTexts(level_change);
         // A plugin stopped by a crash in the previous session is loaded again first: it gets this event too
         gw::addons::OnGameStart();
         gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnStart, args, 1);

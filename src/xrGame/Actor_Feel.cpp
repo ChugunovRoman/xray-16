@@ -17,6 +17,7 @@
 #include "xrCDB/ISpatial.h"
 #include "clsid_game.h"
 #include "HUDManager.h"
+#include "addon_object_events.h"
 
 #define PICKUP_INFO_COLOR 0xFFDDDDDD
 
@@ -131,7 +132,9 @@ void CActor::PickupModeUpdate()
         m_pUsableObject->nonscript_usable() && !Level().m_feel_deny.is_object_denied(m_pObjectWeLookingAt))
     {
         m_pUsableObject->use(this);
-        Game().SendPickUpEvent(ID(), m_pObjectWeLookingAt->ID());
+        // actor_on_before_item_take (engine gaps P30): a subscriber may keep the item where it lies
+        if (gw::addons::objevents::ActorBeforeItemTake(m_pObjectWeLookingAt))
+            Game().SendPickUpEvent(ID(), m_pObjectWeLookingAt->ID());
     }
 
     feel_touch_update(Position(), m_fPickupInfoRadius);
@@ -251,7 +254,12 @@ void CActor::PickupModeUpdate_COD()
             pUsableObject->use(this);
 
         //подбирание объекта
-        Game().SendPickUpEvent(ID(), pNearestItem->object().ID());
+        // actor_on_before_item_take (engine gaps P30): cancelled - not picked up, and not asked again until the use
+        // key is pressed again
+        if (gw::addons::objevents::ActorBeforeItemTake(&pNearestItem->object()))
+            Game().SendPickUpEvent(ID(), pNearestItem->object().ID());
+        else
+            m_bPickupMode = false;
 
         if (!psActorFlags.test(AF_MULTI_ITEM_PICKUP))
             m_bPickupMode = false;

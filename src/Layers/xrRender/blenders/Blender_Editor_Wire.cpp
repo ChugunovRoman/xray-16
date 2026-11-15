@@ -54,11 +54,15 @@ void CBlender_Editor_Wire::Compile(CBlender_Compile& C)
 {
     IBlender::Compile(C);
 
+    // The fixed function pass exists only on DX9 (R1). DX11 and OpenGL have no FFP: a pass without shaders crashed
+    // CBackend::set_Pass when the debug renderer (dxDebugRender: level.draw_*, debug lines) drew with this shader
+#if !defined(USE_DX11) && !defined(USE_OGL)
     if (!ps_r1_flags.is_any(R1FLAG_FFP_LIGHTMAPS | R1FLAG_DLIGHTS))
     {
         CompileForEditor(C);
         return;
     }
+#endif
 
     C.PassBegin();
     {

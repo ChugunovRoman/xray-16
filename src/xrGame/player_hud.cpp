@@ -45,6 +45,13 @@ BOOL debug_ui_item_cell = 0;
 
 extern ENGINE_API shared_str current_player_hud_sect;
 
+extern int g_3d_scope_type;
+// Ослабление пинка выстрела в прицеливании (console_commands.cpp), см. player_hud::apply_shot_aim_kick.
+extern int g_hud_shot_aim_mode;
+extern float g_hud_shot_aim_factor;
+extern float g_hud_shot_aim_kick_time;
+extern float g_hud_shot_aim_kick_fade;
+
 // --#SM+# Begin--
 #define PITCH_OFFSET_R         0.0f     // Насколько сильно ствол смещается вбок (влево) при вертикальных поворотах камеры	--#SM+#--
 #define PITCH_OFFSET_N         0.0f     // Насколько сильно ствол поднимается\опускается при вертикальных поворотах камеры	--#SM+#--
@@ -718,6 +725,11 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
 
     m_attach_place_idx = pSettings->read_if_exists<u16>(m_sect_name, "attach_place_idx", 0);
 
+    // Переопределения ослабления пинка выстрела в прицеливании; отрицательное - берётся cvar.
+    m_shot_aim_factor = pSettings->read_if_exists<float>(m_sect_name, "shot_aim_hud_factor", -1.f);
+    m_shot_aim_kick_time = pSettings->read_if_exists<float>(m_sect_name, "shot_aim_hud_kick_time", -1.f);
+    m_shot_aim_kick_fade = pSettings->read_if_exists<float>(m_sect_name, "shot_aim_hud_kick_fade", -1.f);
+
     auto visual = hands_model->dcast_PKinematics();
 
     IKinematicsAnimated* animatedHudItem;
@@ -759,7 +771,12 @@ void attachable_hud_item::set_static_idle_pose(
         return;
 
     CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
-    if (!wpn || !wpn->bUseAttachmentSystem)
+    if (!wpn)
+        return;
+
+    // Помимо системы аттачей поза прицеливания нужна ослаблению пинка выстрела
+    // (player_hud::apply_shot_aim_kick) у любого немонолитного худа.
+    if (!wpn->bUseAttachmentSystem && m_monolithic)
         return;
 
     // Обе опорные позы обязаны найти хоть какую-то анимацию, иначе одна модель осталась бы
@@ -801,6 +818,100 @@ void attachable_hud_item::rest_bone_transform(u16 bone_id, float zoom_factor, Fm
     }
 
     blend_rest_pose(dst, hip_model->LL_GetTransform(bone_id), aim_model->LL_GetTransform(bone_id), zoom_factor);
+}
+
+float attachable_hud_item::shot_aim_kick_weight()
+{
+    CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
+    if (!wpn || m_monolithic || g_hud_shot_aim_mode <= 0)
+    {
+        m_shot_aim_phase = 0.f;
+        return 0.f;
+    }
+
+    const float kick_time = m_shot_aim_kick_time >= 0.f ? m_shot_aim_kick_time : g_hud_shot_aim_kick_time;
+    const float kick_fade = m_shot_aim_kick_fade >= 0.f ? m_shot_aim_kick_fade : g_hud_shot_aim_kick_fade;
+
+    // Окно пинка: от старта анимации выстрела фаза 1 до kick_time, затем линейно до 0 за kick_fade.
+    // Дальше (передёргивание затвора, возврат) анимация идёт как есть.
+    const shared_str& motion = wpn->CurrentHudMotion();
+    const u32 start = wpn->CurrentHudMotionStartTime();
+    const bool shot_motion = start != 0 && motion.size() &&
+        0 == strncmp(motion.c_str(), "anm_shot", sizeof("anm_shot") - 1);
+
+    if (shot_motion)
+    {
+        if (start != m_shot_aim_motion_start)
+        {
+            // Окно задано во времени анимации, а таймер идёт в реальном: учитываем скорость
+            // проигрывания так же, как player_hud::motion_length().
+            m_shot_aim_motion_start = start;
+            float speed = 1.f;
+            if (const CMotionDef* md = wpn->CurrentHudMotionDef())
+                speed *= md->Speed();
+            if (const player_hud_motion* pm = m_hand_motions.find_motion(motion))
+                speed *= CalcMotionSpeed(pm->m_base_name, pm->m_anim_speed);
+            m_shot_aim_motion_speed = speed > EPS ? speed : 1.f;
+        }
+
+        const float t = float(Device.dwTimeGlobal - start) * m_shot_aim_motion_speed;
+        if (t <= kick_time)
+            m_shot_aim_phase = 1.f;
+        else if (kick_fade > EPS)
+            m_shot_aim_phase = clampr(1.f - (t - kick_time) / kick_fade, 0.f, 1.f);
+        else
+            m_shot_aim_phase = 0.f;
+    }
+    else if (m_shot_aim_phase > 0.f)
+    {
+        // Анимацию выстрела сменила другая раньше конца окна: доводим затухание по реальному
+        // времени, иначе поза за один кадр вернулась бы к полной амплитуде.
+        m_shot_aim_phase = kick_fade > EPS ? std::max(0.f, m_shot_aim_phase - Device.fTimeDelta * 1000.f / kick_fade) : 0.f;
+    }
+
+    if (m_shot_aim_phase <= 0.f)
+        return 0.f;
+
+    // Режим подствольника: прицел и опорная поза другие, не трогаем.
+    if (const auto* gl = smart_cast<const CWeaponMagazinedWGrenade*>(wpn); gl && gl->m_bGrenadeMode)
+        return 0.f;
+
+    // Режим 1 - только 3D-прицелы (у них окуляр в нескольких см от камеры), 2 - любое прицеливание.
+    if (g_hud_shot_aim_mode == 1 && (g_3d_scope_type == 0 || !wpn->IsScopeAttached()))
+        return 0.f;
+
+    const float w_ads = clampr(wpn->GetZRotatingFactor(), 0.f, 1.f);
+    if (w_ads <= EPS)
+        return 0.f;
+
+    // Доля пинка, которая остаётся: секция прицела-аддона, иначе hud-секция, иначе cvar.
+    float factor = m_shot_aim_factor >= 0.f ? m_shot_aim_factor : g_hud_shot_aim_factor;
+
+    shared_str scope_sect;
+    if (wpn->bUseAttachmentSystem)
+    {
+        const auto addon = wpn->GetAddonMainScope();
+        if (addon.second)
+            scope_sect = addon.second->addon_item_name;
+    }
+    else if (wpn->IsScopeAttached())
+        scope_sect = wpn->GetScopeName();
+
+    if (scope_sect != m_shot_aim_scope_sect)
+    {
+        m_shot_aim_scope_sect = scope_sect;
+        m_shot_aim_scope_factor = scope_sect.size() && pSettings->section_exist(scope_sect) ?
+            pSettings->read_if_exists<float>(scope_sect, "shot_aim_hud_factor", -1.f) :
+            -1.f;
+    }
+    if (m_shot_aim_scope_factor >= 0.f)
+        factor = m_shot_aim_scope_factor;
+
+    factor = clampr(factor, 0.f, 1.f);
+
+    // smoothstep: на стыке окна и затухания коэффициент меняется без излома.
+    const float w_shot = m_shot_aim_phase * m_shot_aim_phase * (3.f - 2.f * m_shot_aim_phase);
+    return w_ads * w_shot * (1.f - factor);
 }
 
 void attachable_hud_item::calc_addon_aim_offset()
@@ -1256,6 +1367,10 @@ void player_hud::update(const Fmatrix& cam_trans)
         m_model_3->UpdateTracks();
         m_model_3->dcast_PKinematics()->CalculateBones_Invalidate();
         m_model_3->dcast_PKinematics()->CalculateBones(TRUE);
+
+        // После костей рук и до обновления предмета: предмет строится от m_transform.
+        if (item0)
+            apply_shot_aim_kick(*item0);
     }
 
     if (item0)
@@ -1493,6 +1608,9 @@ void player_hud::attach_item(CHudItem* item)
         m_attached_item = pi;
 
         pi->m_parent_hud_item = item;
+        // Окно пинка выстрела предыдущего владельца элемента пула не должно доигрываться.
+        pi->m_shot_aim_phase = 0.f;
+        pi->m_shot_aim_motion_start = 0;
         // В конструкторе m_parent_hud_item ещё не задан и позы покоя не примируются; без этого
         // вызова после hot reload худа и до первого eShowing опорные модели стояли бы в bind-позе.
         pi->set_rest_poses();
@@ -1594,6 +1712,38 @@ void player_hud::detach_item(CHudItem* item)
         detach_item_idx();
 
     after_detach_item_idx(item);
+}
+
+void player_hud::apply_shot_aim_kick(attachable_hud_item& item)
+{
+    // Монолитные худы сюда не попадают (нет костей-якорей), см. player_hud::update.
+    const float weight = item.shot_aim_kick_weight();
+    if (weight <= EPS_L)
+        return;
+
+    if (item.m_attach_place_idx >= m_ancors.size())
+        return;
+    const u16 bone_id = m_ancors[item.m_attach_place_idx];
+    if (bone_id == BI_NONE)
+        return;
+
+    // Якорь в текущей позе анимации и в статической позе прицеливания (первый кадр anm_idle_aim,
+    // attachable_hud_item::set_idle_anm_for_second_model). Пространство модели рук одно и то же.
+    const Fmatrix& anim_anchor = m_model->dcast_PKinematics()->LL_GetTransform(bone_id);
+    const Fmatrix& rest_anchor = m_model_2->dcast_PKinematics()->LL_GetTransform(bone_id);
+
+    // Целевой якорь: на пути rest -> anim остаётся доля 1 - weight. При weight -> 0 он совпадает
+    // с анимацией, поэтому на конце окна пинка скачка нет.
+    Fmatrix target_anchor;
+    poses_interpolation(rest_anchor, anim_anchor).pose(target_anchor, 1.f - weight);
+
+    // correction * anim_anchor = target_anchor. Сдвигаем всю модель рук: оружие висит на якоре
+    // и уезжает вместе с ней жёстко, руки от оружия не отрываются.
+    Fmatrix anim_inv;
+    anim_inv.invert(anim_anchor);
+    Fmatrix correction;
+    correction.mul_43(target_anchor, anim_inv);
+    m_transform.mulB_43(correction);
 }
 
 void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmatrix& result, Fmatrix& result2, Fmatrix& result3) const

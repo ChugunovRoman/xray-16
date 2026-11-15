@@ -3,6 +3,8 @@
 #include "addon_host.h"
 #include "addon_content.h"
 #include "addon_api_console.h"
+#include "addon_lua_console.h"
+#include "addon_object_events.h"
 #include "level_pack.h"
 #include "GamePersistent.h"
 #include "xrCore/FMesh.hpp"
@@ -679,10 +681,14 @@ void CGamePersistent::OnFrame()
         PERF_STAGE("persistent/event_batches", persist_event_batches);
         gw::addons::events::FlushBatches();
     }
+    // engine gaps P11 (plans/addon_api_ideas/spec.md): weather_on_changed when the weather or its effect changed
+    gw::addons::objevents::WeatherFrame();
     // Addons: console commands of plugins queued with console_execute_deferred (they may unload the level).
     {
         PERF_STAGE("persistent/addons_console", persist_addons);
         gw::addons::console::OnFrame();
+        // addons.register_command: commands typed outside the logic thread, removed commands (gap P03)
+        gw::addons::lua_console::OnFrame();
     }
     // 10-location-packs.md: a switch of the location pack asked for (Lua level_pack.switch, the start of the game)
     gw::OnFrameLevelPacks();

@@ -5,6 +5,8 @@
 #include "Common/object_broker.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "xrUICore/XML/UITextureMaster.h"
+#include "xrUICore/ScrollView/UIScrollView.h"
+#include "xrUICore/Cursor/UICursor.h"
 
 CUIEditKeyBind::CUIEditKeyBind(bool primary, bool isGamepadBinds /*= false*/)
     : CUIStatic("CUIEditKeyBind")
@@ -95,16 +97,18 @@ bool CUIEditKeyBind::OnMouseDown(int mouse_btn)
 {
     if (m_isEditMode)
     {
-        string64 message;
+        // "<action>=<key>": an addon key action ("<group>.<id>", AddonKeyRegister) is up to 129 chars - not string64
+        string256 message;
 
         m_keyboard = DikToPtr(mouse_btn, true);
         if (!m_keyboard)
             return true;
 
+        m_cleared = false;
         SetValue();
         OnFocusLost();
 
-        xr_strcpy(message, m_action->action_name);
+        xr_strcpy(message, ActionName());
         xr_strcat(message, "=");
         xr_strcat(message, m_keyboard->key_name);
         SendMessage2Group("key_binding", message);
@@ -126,9 +130,11 @@ bool CUIEditKeyBind::OnKeyboardAction(int dik, EUIMessages keyboard_action)
     if (CUIStatic::OnKeyboardAction(dik, keyboard_action))
         return true;
 
-    string64 message;
+    string256 message; // see OnMouseDown
     if (m_isEditMode)
     {
+        // The cell waits for a key: Delete is bound as any other key (the clearing is Delete over a hovered cell that
+        // does not wait - below), so no key is lost for the bindings
         const bool is_gamepad_key = dik > XR_CONTROLLER_BUTTON_INVALID && dik < XR_CONTROLLER_BUTTON_MAX;
 
         // strictly separate keyboard/mouse from gamepad bindings
@@ -139,13 +145,22 @@ bool CUIEditKeyBind::OnKeyboardAction(int dik, EUIMessages keyboard_action)
         if (!m_keyboard)
             return true;
 
+        m_cleared = false;
         SetValue();
 
-        xr_strcpy(message, m_action->action_name);
+        xr_strcpy(message, ActionName());
         xr_strcat(message, "=");
         xr_strcat(message, m_keyboard->key_name);
         OnFocusLost();
         SendMessage2Group("key_binding", message);
+        return true;
+    }
+
+    // Delete over a cell without the wait for a key clears it too. The keys go to every cell (no window captures the
+    // keyboard), only the hovered one takes Delete; the menu navigation has no Delete (kUI_* actions)
+    if (dik == SDL_SCANCODE_DELETE && keyboard_action == WINDOW_KEY_PRESSED && IsCursorOverVisibleCell())
+    {
+        ClearKey();
         return true;
     }
     return false;
@@ -166,10 +181,11 @@ bool CUIEditKeyBind::OnControllerAction(int axis, const ControllerAxisState& sta
         if (!m_keyboard)
             return true;
 
+        m_cleared = false;
         SetValue();
 
-        string64 message;
-        xr_strcpy(message, m_action->action_name);
+        string256 message; // see OnMouseDown
+        xr_strcpy(message, ActionName());
         xr_strcat(message, "=");
         xr_strcat(message, m_keyboard->key_name);
         OnFocusLost();
@@ -208,7 +224,57 @@ void CUIEditKeyBind::SetEditMode(bool b)
 void CUIEditKeyBind::AssignProps(const shared_str& entry, const shared_str& group)
 {
     CUIOptionsItem::AssignProps(entry, group);
+    // An engine action never has a dot in its name, an addon key action always has one ("<group>.<id>")
+    if (entry.size() && strchr(entry.c_str(), '.'))
+    {
+        m_addon_action = entry;
+        m_action = nullptr;
+        return;
+    }
     m_action = ActionNameToPtr(entry.c_str());
+}
+
+pcstr CUIEditKeyBind::ActionName() const
+{
+    if (m_action)
+        return m_action->action_name;
+    return m_addon_action.size() ? m_addon_action.c_str() : "";
+}
+
+void CUIEditKeyBind::ClearKey()
+{
+    m_keyboard = nullptr;
+    m_cleared = true;
+    SetValue();
+    // No message to the group "key_binding": no key, nothing to take from the other rows
+    if (m_isEditMode)
+        OnFocusLost(); // as after a key: out of the wait, the text alpha back
+}
+
+bool CUIEditKeyBind::IsCursorOverVisibleCell() const
+{
+    if (!CursorOverWindow())
+        return false;
+    // CUIWindow::OnKeyboardAction goes to the enabled children, the hidden ones too (a tab not shown); Update skips a
+    // hidden window and leaves its m_bCursorOverWindow as it was
+    for (const CUIWindow* it = this; it; it = it->GetParent())
+    {
+        if (!it->IsShown())
+            return false;
+    }
+    // A row scrolled out of the list is still updated (CUIScrollView::Update) and may lie under the cursor outside
+    // the list: the cursor must be inside the scroll view too
+    for (const CUIWindow* it = GetParent(); it; it = it->GetParent())
+    {
+        if (dynamic_cast<const CUIScrollView*>(it))
+        {
+            Frect r;
+            it->GetAbsoluteRect(r);
+            Fvector2 cursor = UI().GetUICursor().GetCursorPosition();
+            return !!r.in(cursor);
+        }
+    }
+    return true;
 }
 
 void CUIEditKeyBind::SetValue()
@@ -221,6 +287,13 @@ void CUIEditKeyBind::SetValue()
 
 void CUIEditKeyBind::SetCurrentOptValue()
 {
+    m_cleared = false;
+    if (m_addon_action.size())
+    {
+        m_keyboard = AddonKeyGet(m_addon_action.c_str(), m_primary ? 0 : 1);
+        SetValue();
+        return;
+    }
     VERIFY(m_action);
     if (!m_action)
         return;
@@ -242,11 +315,13 @@ void CUIEditKeyBind::SaveBackUpOptValue()
 {
     CUIOptionsItem::SaveBackUpOptValue();
     m_opt_backup_value = m_keyboard;
+    m_cleared = false;
 }
 
 void CUIEditKeyBind::UndoOptValue()
 {
     m_keyboard = m_opt_backup_value;
+    m_cleared = false;
     CUIOptionsItem::UndoOptValue();
 }
 
@@ -257,6 +332,17 @@ bool CUIEditKeyBind::IsChangedOptValue() const
 
 void CUIEditKeyBind::BindAction2Key()
 {
+    const bool cleared = m_cleared;
+    m_cleared = false;
+    if (m_addon_action.size())
+    {
+        // nullptr too: a key taken by another row of the group (OnMessage) or cleared by Delete leaves the action
+        // without it (bind_addon ... - in user.ltx)
+        AddonKeySet(m_addon_action.c_str(), m_primary ? 0 : 1, m_keyboard);
+        return;
+    }
+    if (!m_action)
+        return;
     if (m_keyboard)
     {
         xr_string comm_bind = (!m_isGamepadBinds) ? ((m_primary) ? "bind " : "bind_sec ") : "bind_gpad ";
@@ -264,6 +350,14 @@ void CUIEditKeyBind::BindAction2Key()
         comm_bind += " ";
         comm_bind += m_keyboard->key_name;
         Console->Execute(comm_bind.c_str());
+    }
+    else if (cleared)
+    {
+        // Only a cell the player cleared: a cell emptied by OnMessage keeps the key in the engine (one key may serve
+        // several actions). CCC_Bind::Save writes the unbind to user.ltx if default_controls gives the slot a key
+        xr_string comm_unbind = (!m_isGamepadBinds) ? ((m_primary) ? "unbind " : "unbind_sec ") : "unbind_gpad ";
+        comm_unbind += m_action->action_name;
+        Console->Execute(comm_unbind.c_str());
     }
 }
 
@@ -278,12 +372,25 @@ void CUIEditKeyBind::OnMessage(LPCSTR message)
     if (0 != xr_strcmp(m_keyboard->key_name, message + eq + 1))
         return;
 
-    string64 command;
+    string256 command; // see OnMouseDown
     xr_strcpy(command, message);
     command[eq] = 0;
 
-    if (0 == xr_strcmp(m_action->action_name, command))
+    if (0 == xr_strcmp(ActionName(), command))
         return; // fuck
+
+    // Addon key actions: a key of a group with mode = true (the addon takes it only while its mode is on) may repeat
+    // the keys of other groups and of the game actions - only a row of the same group gives the key up
+    shared_str own_group, other_group;
+    bool own_mode = false, other_mode = false;
+    const bool own_addon = m_addon_action.size() && AddonKeyFind(m_addon_action.c_str(), &own_group, &own_mode);
+    const bool other_addon = strchr(command, '.') && AddonKeyFind(command, &other_group, &other_mode);
+    if (own_addon || other_addon)
+    {
+        const bool same_group = own_addon && other_addon && own_group == other_group;
+        if (!same_group && (own_mode || other_mode))
+            return;
+    }
 
     // game_action* other_action = ActionNameToPtr(command);
 

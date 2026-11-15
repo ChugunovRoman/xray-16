@@ -75,6 +75,8 @@ bool SPass::equal(const SPass& other) const
     if (M != other.M)
         return false;
 #endif
+    if (inst != other.inst)
+        return false; // GPU instancing: a pass with the instanced twin is not the same pass as one without it
     return true;
 }
 
@@ -163,6 +165,7 @@ size_t SPass::hash() const
 #ifdef _EDITOR
     h = resource_hash_combine(h, resource_hash_value(M._get()));
 #endif
+    h = resource_hash_combine(h, resource_hash_value(inst._get()));
     return h;
 }
 

@@ -346,6 +346,22 @@ ICF void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV,
     PGO(Msg("PGO:DIP:%dv/%df", countV, PC));
 }
 
+ICF void CBackend::RenderInstanced(D3DPRIMITIVETYPE T, u32 baseV, u32 /*startV*/, u32 countV, u32 startI, u32 PC,
+    u32 instances)
+{
+    const GLenum Topology = TranslateTopology(T);
+    const u32 iIndexCount = GetIndexCount(T, PC);
+
+    stat.render.calls++;
+    stat.render.verts += countV * instances;
+    stat.render.polys += PC * instances;
+    constants.flush();
+    // GL 3.2 (the context is 4.1 core): no base instance needed, gl_InstanceID starts at 0
+    CHK_GL(glDrawElementsInstancedBaseVertex(Topology, iIndexCount, GL_UNSIGNED_SHORT,
+        (void*)(startI * sizeof(GLushort)), instances, baseV));
+    PGO(Msg("PGO:DIPI:%dv/%df x%d", countV, PC, instances));
+}
+
 ICF void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
 {
     GLenum Topology = TranslateTopology(T);

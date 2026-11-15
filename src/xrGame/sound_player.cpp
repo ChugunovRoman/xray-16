@@ -45,6 +45,20 @@ void CSoundPlayer::clear()
     m_sound_mask = 0;
 }
 
+void CSoundPlayer::on_visual_changed()
+{
+    // The model of the object was replaced (CAI_Stalker::ChangeVisual): a sound that plays (or waits to start) follows
+    // a bone by its id in the old model - the id is looked up again by name, the root if the new model has no such bone
+    IKinematics* kinematics = m_object ? smart_cast<IKinematics*>(m_object->Visual()) : nullptr;
+    if (!kinematics)
+        return;
+    for (CSoundSingle& sound : m_playing_sounds)
+    {
+        const u16 bone_id = kinematics->LL_BoneID(sound.m_bone_name);
+        sound.m_bone_id = (bone_id != BI_NONE) ? bone_id : kinematics->LL_GetBoneRoot();
+    }
+}
+
 void CSoundPlayer::reinit() {}
 void CSoundPlayer::reload(LPCSTR section)
 {

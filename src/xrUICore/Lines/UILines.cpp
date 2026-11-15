@@ -67,6 +67,71 @@ bool next_line_break_in_scan(pcstr pszSearch, size_t& out_off, size_t& out_skip)
     out_skip = best_skip;
     return true;
 }
+
+// Word wrap of one logical line (the text between two line breaks, color tags already removed).
+// Fills 'out_breaks' with the byte offsets where the second, third, ... visual lines start.
+// A line is broken after a space/tab, so a word goes to the next line whole; only a word wider than
+// the whole line is cut, by codepoints (never inside a multi-byte UTF-8 sequence). Spaces at the end
+// of a line stay on it (they may hang over the edge), so no byte of the text is dropped.
+// Widths are per codepoint (CGameFont::WidthOf + letter spacing); a text that is not valid UTF-8 is
+// measured as Windows-1251, the way CGameFont converts it for output.
+void uilines_word_wrap_breaks(CGameFont* font, float target_width, const xr_string& text, xr_vector<size_t>& out_breaks)
+{
+    out_breaks.clear();
+    const size_t size = text.size();
+    if (!size)
+        return;
+
+    pcstr str = text.c_str();
+    const bool utf8 = XRay::Utf8::IsValid(str);
+    const float spacing = font->GetLetterSpacing();
+
+    size_t line_start = 0;
+    size_t break_pos = 0; // offset after the last space that follows a word on the current line, 0 - none
+    bool word_seen = false; // the current line has a non-space character
+    float width = 0.f;
+    size_t pos = 0;
+    while (pos < size)
+    {
+        size_t len = 1;
+        u32 cp;
+        if (utf8)
+        {
+            cp = XRay::Utf8::Decode(str + pos, len);
+            if (!len)
+                len = 1;
+        }
+        else
+            cp = XRay::Utf8::CP1251ByteToCodepoint(static_cast<u8>(str[pos]));
+
+        const float advance = font->WidthOf(static_cast<int>(cp)) + spacing;
+        if (cp == ' ' || cp == '\t')
+        {
+            width += advance;
+            pos += len;
+            if (word_seen)
+                break_pos = pos;
+            continue;
+        }
+
+        if (pos > line_start && width + advance > target_width)
+        {
+            // Move the current word to the next line; a word that started the line is cut here.
+            const size_t brk = (break_pos > line_start) ? break_pos : pos;
+            out_breaks.push_back(brk);
+            line_start = brk;
+            break_pos = 0;
+            word_seen = false;
+            width = 0.f;
+            pos = brk;
+            continue;
+        }
+
+        width += advance;
+        pos += len;
+        word_seen = true;
+    }
+}
 } // namespace
 
 CUILines::CUILines()
@@ -181,16 +246,60 @@ void CUILines::ParseText(bool force)
         line = std::move(tmp_line);
     }
 
-    // All TTF/OTF fonts are multibyte; use the UTF-8 aware SplitByWidth path.
-    constexpr size_t UBUFFER_SIZE = 256;
-    u16 aMarkers[UBUFFER_SIZE];
-    char szTempLine[MAX_MB_CHARS];
     float fTargetWidth = 1.0f;
     UI().ClientToScreenScaledWidth(fTargetWidth);
     VERIFY((m_wndSize.x > 0) && (fTargetWidth > 0));
     fTargetWidth = m_wndSize.x / fTargetWidth;
     size_t vsz = line.m_subLines.size();
     VERIFY(vsz);
+
+    if (!uFlags.test(flCutWordsMode))
+    {
+        // Wrap by words. Each logical line (up to a line break) is wrapped as a whole: its colored parts share
+        // the width and a word with a color change inside is not torn at the tag.
+        xr_string logical_text;
+        xr_vector<std::pair<size_t, u32>> color_runs; // end offset in logical_text and color of each subline
+        xr_vector<size_t> breaks;
+        for (size_t i = 0; i < vsz; i++)
+        {
+            const CUISubLine& subLine = line.m_subLines[i];
+            logical_text += subLine.m_text;
+            color_runs.emplace_back(logical_text.size(), subLine.m_color);
+            if (!subLine.m_last_in_line && i != (vsz - 1))
+                continue;
+
+            uilines_word_wrap_breaks(m_pFont, fTargetWidth, logical_text, breaks);
+            breaks.push_back(logical_text.size());
+
+            size_t from = 0;
+            for (const size_t to : breaks)
+            {
+                CUILine visual_line;
+                size_t run_from = 0;
+                for (const auto& [run_to, run_color] : color_runs)
+                {
+                    const size_t a = std::max(from, run_from);
+                    const size_t b = std::min(to, run_to);
+                    if (a < b)
+                        visual_line.AddSubLine(logical_text.substr(a, b - a), run_color);
+                    run_from = run_to;
+                }
+                if (visual_line.IsEmpty()) // an empty line (e.g. two line breaks in a row)
+                    visual_line.AddSubLine(xr_string{}, color_runs.front().second);
+                m_lines.emplace_back(std::move(visual_line));
+                from = to;
+            }
+            logical_text.clear();
+            color_runs.clear();
+        }
+        uFlags.set(flNeedReparse, false);
+        return;
+    }
+
+    // Cut words mode (edit boxes, chat): split by codepoints, the UTF-8 aware SplitByWidth path.
+    constexpr size_t UBUFFER_SIZE = 256;
+    u16 aMarkers[UBUFFER_SIZE];
+    char szTempLine[MAX_MB_CHARS];
     if ((vsz > 1) && (!bNewLines))
     { // only colored line
         for (auto& subLine : line.m_subLines)

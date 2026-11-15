@@ -66,6 +66,11 @@
 #include "smart_cover_animation_selector.h"
 #include "smart_cover_animation_planner.h"
 #include "smart_cover_planner_target_selector.h"
+#include "Level.h"
+#include "alife_simulator.h"
+#include "alife_object_registry.h"
+#include "stalker_animation_data_storage.h"
+#include "stalker_animation_data.h"
 
 #ifdef DEBUG
 #include "alife_simulator.h"
@@ -728,6 +733,10 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
 
     m_group_behaviour = !!tpHuman->m_flags.test(CSE_ALifeObject::flGroupBehaviour);
 
+    // ChangeVisual: until the end of the spawn a new model is only set, the rest is done below
+    m_net_spawn_complete = false;
+    m_visual_swapped_on_spawn = false;
+
     if (!CObjectHandler::net_Spawn(DC) || !inherited::net_Spawn(DC))
         return (false);
 
@@ -803,43 +812,7 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
     m_fRankDisperison =
         expirienced_rank_dispersion + (novice_rank_dispersion - expirienced_rank_dispersion) * (1 - rank_k);
 
-    // Faction-editor immunity overrides per (faction, rank) and leader
-    if (pSettingsFE)
-    {
-        LPCSTR fe_faction = CharacterInfo().Community().id().c_str();
-        LPCSTR fe_rank    = CharacterInfo().Rank().id().c_str();
-        if (fe_faction && xr_strlen(fe_faction) && fe_rank && xr_strlen(fe_rank))
-        {
-            string_path fe_sec;
-            strconcat(sizeof(fe_sec), fe_sec, fe_faction, "_", fe_rank);
-            if (pSettingsFE->section_exist(fe_sec))
-            {
-                if (pSettingsFE->line_exist(fe_sec, "fire_wound_immunity"))
-                {
-                    float coef = pSettingsFE->r_float(fe_sec, "fire_wound_immunity");
-                    conditions().SetHitImmunity(ALife::eHitTypeFireWound, coef);
-                }
-                if (pSettingsFE->line_exist(fe_sec, "explosion_immunity"))
-                {
-                    float coef = pSettingsFE->r_float(fe_sec, "explosion_immunity");
-                    conditions().SetHitImmunity(ALife::eHitTypeExplosion, coef);
-                }
-            }
-            if (SpecificCharacter().IsLeader() && pSettingsFE->section_exist(fe_faction))
-            {
-                if (pSettingsFE->line_exist(fe_faction, "fire_wound_immunity_leader"))
-                {
-                    float coef = pSettingsFE->r_float(fe_faction, "fire_wound_immunity_leader");
-                    conditions().SetHitImmunity(ALife::eHitTypeFireWound, coef);
-                }
-                if (pSettingsFE->line_exist(fe_faction, "explosion_immunity_leader"))
-                {
-                    float coef = pSettingsFE->r_float(fe_faction, "explosion_immunity_leader");
-                    conditions().SetHitImmunity(ALife::eHitTypeExplosion, coef);
-                }
-            }
-        }
-    }
+    apply_faction_editor_immunities();
 
     if (!fis_zero(SpecificCharacter().panic_threshold()))
         m_panic_threshold = SpecificCharacter().panic_threshold();
@@ -865,6 +838,15 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
 
     m_pPhysics_support->in_NetSpawn(e);
 
+    m_net_spawn_complete = true;
+    // A model set by the Lua net_spawn (set_visual_name / set_visual in the binder): the animations, physics, immunities,
+    // particles and the eye bone above already took it; the bone ids taken before the binder are taken again
+    if (m_visual_swapped_on_spawn)
+    {
+        m_visual_swapped_on_spawn = false;
+        on_visual_swapped(true);
+    }
+
     return (true);
 }
 
@@ -873,6 +855,7 @@ void CAI_Stalker::net_Destroy()
     // 37-destroy-relcase-smooth.md: net_Destroy of a stalker (~54 us an object in the offline wave, objects/net_destroy/*)
     ZoneScopedN("stalker_net_Destroy");
     PERF_SCOPE(stalker_net_destroy);
+    m_net_spawn_complete = false; // ChangeVisual from now on: the model only, nothing is rebuilt for a leaving object
     inherited::net_Destroy();
     {
         ZoneScopedN("stalker_net_Destroy/inventory");
@@ -2658,4 +2641,247 @@ void CAI_Stalker::ResetBoneProtections(pcstr imm_sect, pcstr bone_sect)
             m_boneHitProtection->reload(bone_sect, pKinematics);
         }
     }
+}
+
+// Faction-editor immunity overrides per (faction, rank) and leader: on spawn and after the immunities of a new model
+void CAI_Stalker::apply_faction_editor_immunities()
+{
+    if (pSettingsFE)
+    {
+        LPCSTR fe_faction = CharacterInfo().Community().id().c_str();
+        LPCSTR fe_rank    = CharacterInfo().Rank().id().c_str();
+        if (fe_faction && xr_strlen(fe_faction) && fe_rank && xr_strlen(fe_rank))
+        {
+            string_path fe_sec;
+            strconcat(sizeof(fe_sec), fe_sec, fe_faction, "_", fe_rank);
+            if (pSettingsFE->section_exist(fe_sec))
+            {
+                if (pSettingsFE->line_exist(fe_sec, "fire_wound_immunity"))
+                {
+                    float coef = pSettingsFE->r_float(fe_sec, "fire_wound_immunity");
+                    conditions().SetHitImmunity(ALife::eHitTypeFireWound, coef);
+                }
+                if (pSettingsFE->line_exist(fe_sec, "explosion_immunity"))
+                {
+                    float coef = pSettingsFE->r_float(fe_sec, "explosion_immunity");
+                    conditions().SetHitImmunity(ALife::eHitTypeExplosion, coef);
+                }
+            }
+            if (SpecificCharacter().IsLeader() && pSettingsFE->section_exist(fe_faction))
+            {
+                if (pSettingsFE->line_exist(fe_faction, "fire_wound_immunity_leader"))
+                {
+                    float coef = pSettingsFE->r_float(fe_faction, "fire_wound_immunity_leader");
+                    conditions().SetHitImmunity(ALife::eHitTypeFireWound, coef);
+                }
+                if (pSettingsFE->line_exist(fe_faction, "explosion_immunity_leader"))
+                {
+                    float coef = pSettingsFE->r_float(fe_faction, "explosion_immunity_leader");
+                    conditions().SetHitImmunity(ALife::eHitTypeExplosion, coef);
+                }
+            }
+        }
+    }
+
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Model change online (plans/addon_companion_extended/npc_visual.md)
+// ---------------------------------------------------------------------------------------------------------------------
+// cNameVisual_set alone replaces only the model: the managers keep what they took from the old one - the blends of the
+// animation pairs (so nothing plays on the new model and it "rolls into a ball"), the bone callbacks of the head and
+// spine, the bone ids of the weapon, feet, sounds and particles, the hit factors stored in the bones, the IK controller
+// and the death / hit animations. ChangeVisual swaps the model and takes all of it again (on_visual_swapped).
+
+// A model a stalker can live with: animated, with the bones its managers look up by name and with stalker animations
+bool CAI_Stalker::visual_fits_stalker() const
+{
+    IKinematicsAnimated* const animated = smart_cast<IKinematicsAnimated*>(Visual());
+    IKinematics* const kinematics = smart_cast<IKinematics*>(Visual());
+    if (!animated || !kinematics || !animated->LL_MotionsSlotCount())
+        return false;
+
+    // The sight (head, shoulder, spine callbacks), the weapon in the hands, the sounds (the head)
+    static constexpr pcstr bone_lines[] = {
+        "bone_head", "bone_shoulder", "bone_spin", "weapon_bone0", "weapon_bone1", "weapon_bone2"};
+    for (pcstr line : bone_lines)
+    {
+        if (kinematics->LL_BoneID(pSettings->r_string(cNameSect().c_str(), line)) == BI_NONE)
+            return false;
+    }
+
+    // The first head animation is read by every start of the animation manager (CStalkerAnimationManager::reload)
+    const CStalkerAnimationData* const data = stalker_animation_data_storage().object(animated);
+    return data && !data->m_head_animations.A.empty() && data->m_head_animations.A.front().valid();
+}
+
+// As a spawn with this model: the immunities of the section, of the model, of the faction editor; the bone armour of
+// the model (no bone_protection in the model - no armour, as a stalker spawned with it)
+void CAI_Stalker::reload_visual_protections()
+{
+    conditions().LoadImmunities(pSettings->r_string(cNameSect().c_str(), "immunities_sect"), pSettings);
+
+    IKinematics* const kinematics = smart_cast<IKinematics*>(Visual());
+    VERIFY(kinematics);
+    CInifile* const ini = kinematics->LL_UserData();
+    if (ini && ini->section_exist("immunities"))
+        conditions().LoadImmunities(ini->r_string("immunities", "immunities_sect"), pSettings);
+
+    apply_faction_editor_immunities();
+
+    if (ini && ini->line_exist("bone_protection", "bones_protection_sect"))
+    {
+        if (!m_boneHitProtection)
+            m_boneHitProtection = xr_new<SBoneProtections>();
+        m_boneHitProtection->reload(ini->r_string("bone_protection", "bones_protection_sect"), kinematics);
+    }
+    else
+        xr_delete(m_boneHitProtection);
+}
+
+// The model was replaced: everything taken from the old one is taken again. spawn_in_progress - the end of net_Spawn
+// after a model set by the Lua net_spawn: only what was taken before the binder (reinit / reload), the rest of the
+// spawn (animations, physics, immunities, particles, the eye bone) already used the new model
+void CAI_Stalker::on_visual_swapped(bool spawn_in_progress)
+{
+    IKinematics* const kinematics = smart_cast<IKinematics*>(Visual());
+    VERIFY(kinematics);
+    LPCSTR const section = cNameSect().c_str();
+
+    // The bones of the weapon in the hands (CWeapon::UpdateXForm asks them every frame)
+    CObjectHandler::on_visual_changed();
+    // The feet and the step sounds; the blend of the step animation is set again when the legs start below
+    CStepManager::reload(section);
+    // The hit factors live in the bones of the model (CDamageManager::init_bones): as CEntity::reload and net_Spawn,
+    // without them a hit in the new model deals no damage
+    CDamageManager::reload(section, "damage", pSettings);
+    if (CInifile* const ini = kinematics->LL_UserData(); ini && ini->section_exist("damage_section"))
+        CDamageManager::reload(pSettings->r_string("damage_section", "damage"), ini);
+    // Critical wounds: the bones of the body parts
+    m_bones_body_parts.clear();
+    if (m_critical_wound_threshold >= 0)
+        load_critical_wound_bones();
+    // Attached items (a torch...) by the bone name; a sound playing from the head follows the new bone
+    reattach_items();
+    sound().on_visual_changed();
+
+    if (spawn_in_progress)
+        return;
+
+    // The eyes (vision)
+    eye_bone = kinematics->LL_BoneID(pSettings->r_string(section, "bone_head"));
+    // Immunities and bone armour of the new model
+    reload_visual_protections();
+    // Particles on the bones (blood, burning): the bones are listed by the model, the running effects are stopped
+    if (CParticlesPlayer::IsPlaying())
+    {
+        CParticlesPlayer::net_DestroyParticles();
+        CParticlesPlayer::net_SpawnParticles();
+    }
+    CParticlesPlayer::LoadParticles(kinematics);
+    // IK, death and hit animations, the ragdoll prebuilt for the old model (a live stalker has no shell); before the
+    // animations: the start of the legs animation passes its blend to the new IK controller
+    m_pPhysics_support->in_ChangeVisual();
+    // A script-controlled stalker (script_entity actions) starts its animation again on the new model
+    m_tpScriptAnimation.invalidate();
+    // The animations: the pairs drop the blends of the old model, the current animations start on the new one now
+    animation().on_visual_changed();
+    // The pose of the new model at once, before its first draw
+    kinematics->CalculateBones_Invalidate();
+    kinematics->CalculateBones(TRUE);
+}
+
+namespace
+{
+// The server object of a stalker keeps its model: the save, going offline and coming online (CSE_Visual::visual_name)
+void StalkerVisualToServer(u16 id, shared_str const& visual)
+{
+    if (!ai().get_alife())
+        return;
+    CSE_Abstract* const server = ai().alife().objects().object(id, true);
+    if (CSE_Visual* const server_visual = server ? smart_cast<CSE_Visual*>(server) : nullptr)
+        server_visual->set_visual(visual.c_str());
+}
+} // namespace
+
+bool CAI_Stalker::ChangeVisual(shared_str const& visual, bool save_to_server)
+{
+    if (!visual.size())
+        return false;
+
+    // B2.2 (plans/optimization_mt/16-b2-overlap-races.md): Lua or a plugin on the Game thread runs beside the render,
+    // which draws the model now - the whole change is done at the end of the frame (as CActor::ChangeVisual). The server
+    // object is written then too: only a model that was really set gets into the save
+    if (ShouldDeferToPostJoin())
+    {
+        PostJoinForObject(ID(), [visual, save_to_server](CGameObject& obj) {
+            if (CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&obj))
+                stalker->ChangeVisual(visual, save_to_server);
+        });
+        return true;
+    }
+
+    if (cNameVisual() == visual)
+    {
+        if (save_to_server)
+            StalkerVisualToServer(ID(), visual); // set online only before (set_visual_name)
+        return true;
+    }
+
+    const shared_str previous = cNameVisual();
+    IRenderVisual* const before = Visual();
+
+    if (!m_net_spawn_complete)
+    {
+        // Inside net_Spawn (the Lua net_spawn of the binder): the rest of the spawn sets the model up, the bone ids
+        // taken before it are taken again at its end (on_visual_swapped(true) there)
+        cNameVisual_set(visual);
+        if (Visual() == before)
+            return false; // model_Create failed (logged), the old model stays
+        m_visual_swapped_on_spawn = true;
+        if (!visual_fits_stalker())
+        {
+            Msg("! [visual] stalker [%s]: the model [%s] has not the bones or the animations of a stalker, [%s] is put "
+                "back",
+                cName().c_str(), visual.c_str(), previous.c_str());
+            cNameVisual_set(previous);
+            return false;
+        }
+        if (save_to_server)
+            StalkerVisualToServer(ID(), visual);
+        return true;
+    }
+
+    if (!g_Alive() || PPhysicsShell() || !Visual() || getDestroy())
+    {
+        Msg("! [visual] stalker [%s]: only a live stalker without a physics shell changes its model online, [%s] refused",
+            cName().c_str(), visual.c_str());
+        return false;
+    }
+
+    // The pipelined bones tasks may still compute the old model (CCharacterPhysicsSupport::in_ChangeVisual does the same)
+    CLevel::BonesPrepassEarlyJoin();
+    // A root-mover animation (smart cover, wounded, script) holds the root bone of the old model: let go while the
+    // model is ours (CGameObject::OnChangeVisual would do it after the old model is deleted); the movement comes back
+    if (animation_movement())
+        destroy_anim_mov_ctrl();
+
+    cNameVisual_set(visual);
+    if (Visual() == before)
+        return false; // model_Create failed (logged), the old model stays and nothing was replaced
+
+    bool result = true;
+    if (!visual_fits_stalker())
+    {
+        Msg("! [visual] stalker [%s]: the model [%s] has not the bones or the animations of a stalker, [%s] is put back",
+            cName().c_str(), visual.c_str(), previous.c_str());
+        // A new instance of the old model: set up below like any other
+        cNameVisual_set(previous);
+        result = false;
+    }
+
+    on_visual_swapped(false);
+    if (result && save_to_server)
+        StalkerVisualToServer(ID(), visual);
+    return result;
 }

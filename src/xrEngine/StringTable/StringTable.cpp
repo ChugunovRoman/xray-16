@@ -21,6 +21,8 @@ std::mutex CStringTable::pDataMutex;
 xr_unique_ptr<STRING_TABLE_DATA> CStringTable::pData{};
 u32 CStringTable::LanguageID = std::numeric_limits<u32>::max();
 string32 CStringTable::LanguageIDInLTX{};
+string32 CStringTable::ActiveLanguage{};
+string32 CStringTable::PendingLanguage{};
 xr_vector<xr_token> CStringTable::languagesToken;
 
 void CStringTable::Destroy()
@@ -57,9 +59,37 @@ void CStringTable::Init()
     FillLanguageToken();
     SetLanguage();
 
+    xr_vector<StringTableFile> files;
+    CollectFiles(pData->m_sLanguage.c_str(), files);
+
+    xr_parallel_for_each(files, [this](StringTableFile& file)
+    {
+        Load(file, pData->m_sLanguage.c_str());
+    });
+
+    Merge(files);
+    // plans/addon_api_ideas (gap P39): the ids this language has not are taken from the fallback languages
+    LoadFallbackLanguages();
+
+    if (!translate("st_currency", pData->m_sCurrency) &&
+        !translate("ui_st_money_descr", pData->m_sCurrency) && // OGSR
+        !translate("ui_st_money_regional", pData->m_sCurrency)) // xp-dev
+    {
+        pData->m_sCurrency = pSettingsOpenXRay->read_if_exists<pcstr>("gameplay", "currency", "RU");
+    }
+
+#ifndef MASTER_GOLD
+    Msg("StringTable: loaded %d files", files.size());
+#endif
+}
+
+// The files of text\<language>\ (subfolders included) in the order of the merge: by the layer of the file system
+// (the base first, then the layers as mounted), by the name inside a layer
+void CStringTable::CollectFiles(pcstr language, xr_vector<StringTableFile>& files) const
+{
     FS_FileSet fset;
     string_path files_mask;
-    xr_sprintf(files_mask, "text" DELIMITER "%s" DELIMITER "*.xml", pData->m_sLanguage.c_str());
+    xr_sprintf(files_mask, "text" DELIMITER "%s" DELIMITER "*.xml", language);
     FS.file_list(fset, "$game_config$", FS_ListFiles, files_mask);
 
     // plans/addons_api_support/09-content-addons-vfs.md 5.2: the files are parsed in parallel, then merged in the
@@ -67,11 +97,10 @@ void CStringTable::Init()
     // an id given twice takes the value of the later file, whatever thread parsed it first. The mask takes the
     // subfolders of text\<lang>\ too: a file is opened by its path relative to text\<lang>\.
     string_path language_folder;
-    xr_sprintf(language_folder, "text" DELIMITER "%s" DELIMITER, pData->m_sLanguage.c_str());
+    xr_sprintf(language_folder, "text" DELIMITER "%s" DELIMITER, language);
     xr_fs_strlwr(language_folder); // as the index spells the names: the case stays where the file system keeps it
     const size_t language_folder_length = xr_strlen(language_folder);
 
-    xr_vector<StringTableFile> files;
     files.reserve(fset.size());
     for (const FS_File& it : fset)
     {
@@ -93,24 +122,68 @@ void CStringTable::Init()
             return a.layer < b.layer;
         return a.name < b.name;
     });
+}
 
-    xr_parallel_for_each(files, [this](StringTableFile& file)
+// plans/addon_api_ideas (gap P39). [string_table] fallback_language of localization.ltx: a list of languages
+// ("eng, rus"). An id the current language has not is taken from the first language of the list that has it (the
+// current language itself is skipped), with the rules of the current language inside that language (layers, the later
+// file wins, XMLOverride). An addon that ships one language shows its text in every language then, not the id. The
+// strings taken so do not count as conflicts or as replaced strings of the base. No key - no fallback (as before).
+// The cost: the files of each fallback language are parsed too (in parallel) at every Init - the start, a language
+// change, a change of the content.
+void CStringTable::LoadFallbackLanguages()
+{
+    ZoneScoped;
+
+    if (!pSettings || !pSettings->line_exist("string_table", "fallback_language"))
+        return;
+    const pcstr list = pSettings->r_string("string_table", "fallback_language");
+    if (!list || !list[0])
+        return;
+    const u32 count = _GetItemCount(list);
+    for (u32 i = 0; i < count; ++i)
     {
-        Load(file);
-    });
+        string32 language;
+        _GetItem(list, i, language);
+        _Trim(language);
+        if (!language[0] || 0 == xr_strcmp(language, pData->m_sLanguage.c_str()))
+            continue;
+        const auto installed = std::find_if(languagesToken.begin(), languagesToken.end(), [&language](const xr_token& token)
+        {
+            return token.name && 0 == xr_strcmp(token.name, language);
+        });
+        if (installed == languagesToken.end())
+        {
+            Msg("~ StringTable: fallback language '%s' has no strings (no folder text\\%s\\), skipped", language,
+                language);
+            continue;
+        }
 
-    Merge(files);
+        xr_vector<StringTableFile> files;
+        CollectFiles(language, files);
+        xr_parallel_for_each(files, [this, &language](StringTableFile& file)
+        {
+            Load(file, language);
+        });
 
-    if (!translate("st_currency", pData->m_sCurrency) &&
-        !translate("ui_st_money_descr", pData->m_sCurrency) && // OGSR
-        !translate("ui_st_money_regional", pData->m_sCurrency)) // xp-dev
-    {
-        pData->m_sCurrency = pSettingsOpenXRay->read_if_exists<pcstr>("gameplay", "currency", "RU");
+        // The later file wins inside the fallback language, as in the current one; only the ids still missing go in
+        STRING_TABLE_MAP missing;
+        for (const StringTableFile& file : files)
+        {
+            for (const StringTableEntry& entry : file.strings)
+            {
+                if (pData->m_StringTable.find(entry.id) == pData->m_StringTable.end())
+                    missing[entry.id] = entry.value;
+            }
+        }
+        for (const auto& [id, value] : missing)
+            pData->m_StringTable.emplace(id, value);
+        if (!missing.empty())
+        {
+            Msg("* StringTable: %u string ids missing in '%s' are taken from the fallback language '%s'",
+                u32(missing.size()), pData->m_sLanguage.c_str(), language);
+        }
     }
-
-#ifndef MASTER_GOLD
-    Msg("StringTable: loaded %d files", fset.size());
-#endif
 }
 
 void CStringTable::FillLanguageToken()
@@ -179,7 +252,38 @@ void CStringTable::SetLanguage()
     // Before introducing a console command to change the language,
     // mods used to change localization.ltx. We detect that
     // by saving the last value in LanguageIDInLTX
-    if (LanguageID != std::numeric_limits<u32>::max() && xr_strcmp(LanguageIDInLTX, defined_language) == 0)
+    bool console_choice = LanguageID != std::numeric_limits<u32>::max() && xr_strcmp(LanguageIDInLTX, defined_language) == 0;
+    if (console_choice)
+    {
+        // plans/addon_api_ideas (gap P39): the language is kept by its name, not by LanguageID - the index into the
+        // list of the folders text\<language>\, which changes when an addon brings a language folder of its own (the
+        // list is built again at every change of the content). A language asked for while it was not installed
+        // (g_language of user.ltx runs before the addons are mounted) is taken as soon as it is
+        const auto find_language = [](pcstr name) -> const xr_token*
+        {
+            for (const xr_token& token : languagesToken)
+            {
+                if (token.name && 0 == xr_strcmp(token.name, name))
+                    return &token;
+            }
+            return nullptr;
+        };
+        const xr_token* wanted = PendingLanguage[0] ? find_language(PendingLanguage) : nullptr;
+        if (wanted)
+        {
+            Msg("* StringTable: language '%s' asked for earlier is installed now, switched to it", PendingLanguage);
+            PendingLanguage[0] = 0;
+        }
+        if (!wanted && ActiveLanguage[0])
+            wanted = find_language(ActiveLanguage);
+        if (!wanted && LanguageID + 1 < languagesToken.size()) // the last token is the terminator
+            wanted = &languagesToken[LanguageID];
+        if (wanted)
+            LanguageID = static_cast<u32>(wanted->id);
+        else
+            console_choice = false; // the language is gone with its addon: the one of localization.ltx
+    }
+    if (console_choice)
     {
         pData->m_sLanguage = languagesToken.at(LanguageID).name;
 
@@ -220,6 +324,15 @@ void CStringTable::SetLanguage()
             LanguageID = it->id;
     }
     xr_strcpy(LanguageIDInLTX, defined_language);
+    xr_strcpy(ActiveLanguage, pData->m_sLanguage.c_str());
+}
+
+void CStringTable::SetPendingLanguage(pcstr language)
+{
+    if (language && language[0])
+        xr_strcpy(PendingLanguage, language);
+    else
+        PendingLanguage[0] = 0;
 }
 
 shared_str CStringTable::GetCurrentLanguage() const
@@ -239,13 +352,13 @@ shared_str CStringTable::GetCurrency() const
 
 xr_token* CStringTable::GetLanguagesToken() const { return languagesToken.data(); }
 
-void CStringTable::Load(StringTableFile& file) const
+void CStringTable::Load(StringTableFile& file, pcstr language) const
 {
     ZoneScoped;
 
     XMLDocument uiXml;
     string_path _s;
-    strconcat(sizeof(_s), _s, "text" DELIMITER, pData->m_sLanguage.c_str());
+    strconcat(sizeof(_s), _s, "text" DELIMITER, language);
 
     uiXml.Load(CONFIG_PATH, _s, file.name.c_str());
 
@@ -378,6 +491,8 @@ void CStringTable::ReloadLanguage()
 {
     if (0 == xr_strcmp(languagesToken.at(LanguageID).name, pData->m_sLanguage.c_str()))
         return;
+    // SetLanguage keeps the language by its name (gap P39): the one the console chose
+    xr_strcpy(ActiveLanguage, languagesToken.at(LanguageID).name);
 
     Destroy();
     Init();

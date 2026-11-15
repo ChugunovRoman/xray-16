@@ -35,6 +35,78 @@ void CCF_Skeleton::SElement::center(Fvector& center) const
     }
 }
 
+bool CCF_Skeleton::SElement::surface_normal(const Fvector& point, Fvector& normal) const
+{
+    switch (type)
+    {
+    case SBoneShape::stBox:
+    {
+        // The point in the box space; the face is the axis where the point is the nearest to the box side (the
+        // biggest |coordinate| / half size). b_IM is world -> box, its inverse turns the axis back into the world
+        Fvector local;
+        b_IM.transform_tiny(local, point);
+        int axis = -1;
+        float best = -1.f;
+        for (int a = 0; a < 3; ++a)
+        {
+            if (b_hsize[a] <= EPS_S)
+                continue;
+            const float ratio = _abs(local[a]) / b_hsize[a];
+            if (ratio > best)
+            {
+                best = ratio;
+                axis = a;
+            }
+        }
+        if (axis < 0)
+            return false;
+        Fvector local_normal{0.f, 0.f, 0.f};
+        local_normal[axis] = local[axis] < 0.f ? -1.f : 1.f;
+        Fmatrix box_to_world;
+        if (!box_to_world.invert_b(b_IM))
+            return false;
+        box_to_world.transform_dir(normal, local_normal);
+        break;
+    }
+    case SBoneShape::stSphere: normal.sub(point, s_sphere.P); break;
+    case SBoneShape::stCylinder:
+    {
+        // The cap when the point is past the half height relatively more than past the radius, else the side
+        const Fvector& dir = c_cylinder.m_direction;
+        Fvector v;
+        v.sub(point, c_cylinder.m_center);
+        const float along = v.dotproduct(dir);
+        Fvector radial;
+        radial.mad(v, dir, -along);
+        const float half = c_cylinder.m_height * 0.5f;
+        const float cap = half > EPS_S ? _abs(along) / half : 0.f;
+        const float side = c_cylinder.m_radius > EPS_S ? radial.magnitude() / c_cylinder.m_radius : 0.f;
+        if (cap >= side)
+            normal.set(dir).mul(along < 0.f ? -1.f : 1.f);
+        else
+            normal.set(radial);
+        break;
+    }
+    default: return false;
+    }
+    if (!_valid(normal) || normal.square_magnitude() < EPS_S)
+        return false;
+    normal.normalize();
+    return true;
+}
+
+bool CCF_Skeleton::_ElementNormal(u16 elem_id, const Fvector& point, Fvector& normal)
+{
+    std::lock_guard<std::mutex> guard(m_skeletonQueryCS);
+    const auto it = std::lower_bound(elements.begin(), elements.end(), elem_id, [](const SElement& E, u16 elem)
+    {
+        return E.elem_id < elem;
+    });
+    if (it == elements.end() || it->elem_id != elem_id || !it->valid())
+        return false;
+    return it->surface_normal(point, normal);
+}
+
 bool CCF_Skeleton::_ElementCenter(u16 elem_id, Fvector& e_center)
 {
     std::lock_guard<std::mutex> guard(m_skeletonQueryCS);
@@ -42,7 +114,8 @@ bool CCF_Skeleton::_ElementCenter(u16 elem_id, Fvector& e_center)
     {
         return E.elem_id < elem;
     });
-    if (it->elem_id == elem_id)
+    // end(): no element with this id (ray_pick_surface asks it after _ElementNormal failed - the id may be missing)
+    if (it != elements.end() && it->elem_id == elem_id)
     {
         it->center(e_center);
         return true;

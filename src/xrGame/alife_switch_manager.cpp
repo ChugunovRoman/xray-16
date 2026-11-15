@@ -505,9 +505,21 @@ u32 CALifeSwitchManager::switch_offline_estimate(const CSE_ALifeDynamicObject* o
         }
         return count;
     }
-    if (actor && actor->o_Position.distance_to(object->o_Position) <= offline)
+    // D6 (plans/addon_base_building/plan.md section 15.2): a single object - its own offline distance (the squad branch
+    // above stays on the global one, as CSE_ALifeOnlineOfflineGroup::try_switch_offline)
+    if (actor && actor->o_Position.distance_to(object->o_Position) <= offline_distance(object))
         return 0;
     return client_objects(object);
+}
+
+float CALifeSwitchManager::online_distance(const CSE_ALifeObject* object) const noexcept
+{
+    return object->m_switch_distance > 0.f ? object->m_switch_distance * (1.f - m_switch_factor) : m_online_distance;
+}
+
+float CALifeSwitchManager::offline_distance(const CSE_ALifeObject* object) const noexcept
+{
+    return object->m_switch_distance > 0.f ? object->m_switch_distance * (1.f + m_switch_factor) : m_offline_distance;
 }
 
 void CALifeSwitchManager::switch_online(CSE_ALifeDynamicObject* object)

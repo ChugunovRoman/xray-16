@@ -28,6 +28,30 @@ CUIMapWnd* GetMapWnd() { return g_map_wnd; }
 
 namespace
 {
+// The live map windows (the PDA and the faction editor): ~CUIWindow of any window asks them to forget it as the
+// owner of their hint (OnWindowDestroyed). The owner is a window the map does not own - a spot, a task list item
+// (UITaskListWnd::UpdateList deletes them), a level map - and a dangling owner crashed DrawHint (smart_cast on a
+// deleted window, crash 2026-11-13)
+xr_vector<CUIMapWnd*> g_live_map_wnds;
+
+void on_ui_window_destroyed(CUIWindow* window)
+{
+    for (CUIMapWnd* wnd : g_live_map_wnds)
+        wnd->OnWindowDestroyed(window);
+}
+} // namespace
+
+void CUIMapWnd::OnWindowDestroyed(CUIWindow* window)
+{
+    // Pointer comparisons only: the window is half destroyed
+    if (m_map_location_hint && window != m_map_location_hint && m_map_location_hint->GetOwner() == window)
+        m_map_location_hint->SetOwner(nullptr);
+    if (m_hint_spot == window)
+        m_hint_spot = nullptr;
+}
+
+namespace
+{
 EPdaMapLayer g_lastPdaMapLayer = EPdaMapLayer::Surface;
 
 constexpr size_t layer_index(EPdaMapLayer layer) { return static_cast<size_t>(layer); }
@@ -172,6 +196,8 @@ CUIMapWnd::CUIMapWnd(UIHint* hint)
     m_nav_timing = Device.dwTimeGlobal;
     hint_wnd = hint;
     g_map_wnd = this;
+    g_live_map_wnds.push_back(this);
+    CUIWindow::SetDestroyHook(&on_ui_window_destroyed);
     m_cur_location = nullptr;
     m_externalDataSource = nullptr;
     m_externalDataRevision = 0;
@@ -185,6 +211,10 @@ CUIMapWnd::CUIMapWnd(UIHint* hint)
 
 CUIMapWnd::~CUIMapWnd()
 {
+    // Out of the list first: the hint and the children of this window are deleted below and in ~CUIWindow
+    g_live_map_wnds.erase(std::remove(g_live_map_wnds.begin(), g_live_map_wnds.end(), this), g_live_map_wnds.end());
+    if (g_live_map_wnds.empty())
+        CUIWindow::SetDestroyHook(nullptr);
     ClearExternalSpots();
     delete_data(m_ActionPlanner);
     for (auto& globalMap : m_GlobalMaps)

@@ -313,6 +313,53 @@ void ForAllActionKeys(EGameActions action_id, Invocable&& invocable)
     }
 }
 
+// Addon key actions (plans/addons_api_support/19-addon-key-groups.md; Lua - addons.register_key_group, gw_keys.script).
+// Rebindable keys of addons outside the engine actions (EGameActions): a group with a caption and its actions, each with
+// a caption and up to two keys (keyboard / mouse; gamepads are not supported). Options -> Controls shows every group
+// after the groups of ui_keybinding.xml (CUIKeyBinding::FillUpList); the keys a player changed are the console command
+// bind_addon in user.ltx, default_controls returns the defaults. The engine dispatches nothing: the addon compares the
+// key it got (on_key_press, level_input_on_key_press) with the key of its action - AddonKeyIs.
+// Names: a group - 1..64 of [A-Za-z0-9_-]; an action - "<group>.<id>" (the dot keeps them apart from engine actions).
+// A key the player set for an action that no addon registers now (its addon is off) is kept and saved back.
+struct addon_key_action_view
+{
+    shared_str name; // "<group>.<id>"
+    shared_str label; // string id of the caption
+};
+
+struct addon_key_group_view
+{
+    shared_str name;
+    shared_str title; // string id of the caption
+    // true - the keys work only in a mode of the addon (it takes them while the mode is on): in Options -> Controls they
+    // do not clear the same key of other groups and of the game actions (and the other way round), only inside the group
+    bool mode;
+    xr_vector<addon_key_action_view> actions;
+};
+
+// A group, or new caption / mode of the group. false - a bad name (one log line)
+ENGINE_API bool AddonKeyGroupRegister(pcstr group, pcstr title, bool mode);
+// An action of a registered group (again - new caption / defaults / group, the keys the player set stay). key, key_sec
+// - default keys (DIK_keys / SDL scancode, MOUSE_n), 0 or an unknown code - none. false - bad name or no such group
+ENGINE_API bool AddonKeyRegister(pcstr group, pcstr action, pcstr label, int key, int key_sec);
+// Drops every group (the actions keep only the keys the player set): a new Lua state registers them again
+// (RunLuaEntries of xrGame\addon_lua_entry.cpp)
+ENGINE_API void AddonKeyGroupsClear();
+// The groups in the order of registration, the actions of a group too
+ENGINE_API void AddonKeyGroups(xr_vector<addon_key_group_view>& groups);
+// Whether `action` is a registered addon action; its group and the mode of the group
+ENGINE_API bool AddonKeyFind(pcstr action, shared_str* group = nullptr, bool* mode = nullptr);
+// The key of the slot idx (0 - primary, 1 - secondary) of a registered action, nullptr - none
+ENGINE_API keyboard_key* AddonKeyGet(pcstr action, int idx);
+// Sets the key of the slot (nullptr - none); the default key makes the slot "not changed" (not saved)
+ENGINE_API void AddonKeySet(pcstr action, int idx, keyboard_key* key);
+// Whether dik is one of the keys of a registered action
+ENGINE_API bool AddonKeyIs(pcstr action, int dik);
+// The keys of a registered action for a hint, localized: "Q", "Q, Delete"; "" - no key / no action
+ENGINE_API xr_string AddonKeyText(pcstr action);
+// The localized name of a key (as Options -> Controls shows it); "" - unknown code
+ENGINE_API xr_string DikToLocalName(int dik);
+
 extern ENGINE_API void CCC_RegisterInput();
 extern ENGINE_API void CCC_DeregisterInput();
 

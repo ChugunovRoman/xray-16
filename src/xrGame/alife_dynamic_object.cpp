@@ -196,7 +196,8 @@ void CSE_ALifeDynamicObject::try_switch_online()
     if (switch_actor)
     {
         const float switch_distance = switch_actor->o_Position.distance_to(o_Position);
-        const float online_distance = alife().online_distance();
+        // D6 (plans/addon_base_building/plan.md §15.2): the own alife_switch_distance of the object if it has one
+        const float online_distance = alife().online_distance(this);
         if (switch_distance <= online_distance)
         {
             if (!alife_switch_profiled_can_online(this))
@@ -243,10 +244,10 @@ void CSE_ALifeDynamicObject::try_switch_online()
     }
 
     const float actor_distance = alife().graph().actor()->o_Position.distance_to(o_Position);
-    if (actor_distance > alife().online_distance())
+    if (actor_distance > alife().online_distance(this))
     {
         // 36-spawn-model-load.md (the model prefetch): near the online distance - read its model files ahead
-        if (model_prefetch_in_margin(actor_distance, alife().online_distance()))
+        if (model_prefetch_in_margin(actor_distance, alife().online_distance(this)))
             model_prefetch_object(this);
         on_failed_switch_online();
         return;
@@ -264,7 +265,7 @@ void CSE_ALifeDynamicObject::try_switch_offline()
     // Without the actor - as near (the old sequence went offline only on can_switch_offline && !can_switch_online and
     // read the position of the actor otherwise)
     const CSE_ALifeCreatureActor* switch_actor = alife().graph().actor();
-    if (!switch_actor || switch_actor->o_Position.distance_to(o_Position) <= alife().offline_distance())
+    if (!switch_actor || switch_actor->o_Position.distance_to(o_Position) <= alife().offline_distance(this))
     {
         if (alife_switch_profiled_can_online(this))
         {

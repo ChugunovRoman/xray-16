@@ -367,6 +367,49 @@ void CSavedGameWrapper::script_register(lua_State* luaState)
             static xr_string owner;
             owner = gw::addons::AddonScriptModuleOwner(module);
             return owner.c_str();
+        }),
+        // plans/addon_api_ideas/spec.md P06 (Lua addons.list / addons.api_version, gw_addon_info.script):
+        // addons(): { {id, version, type, state, reason, dir, lua_entry, plugin, plugin_state, depends, load_after,
+        // game_version}, ... } - every discovered addon (content, Lua, plugin; working or not) in the order of the
+        // addons, as addon_list and addons_report.json show it; state: discovered, active, failed, skipped, disabled;
+        // depends / load_after - arrays of ids
+        def("addons", +[](lua_State* L) -> luabind::object
+        {
+            const auto to_array = [L](const xr_vector<xr_string>& ids)
+            {
+                luabind::object array = luabind::newtable(L);
+                int i = 0;
+                for (const xr_string& id : ids)
+                    array[++i] = id.c_str();
+                return array;
+            };
+            luabind::object result = luabind::newtable(L);
+            int index = 0;
+            for (const gw::addons::AddonInfo& addon : gw::addons::ListAddons())
+            {
+                luabind::object item = luabind::newtable(L);
+                item["id"] = addon.id.c_str();
+                item["version"] = addon.version.c_str();
+                item["type"] = addon.type.c_str();
+                item["state"] = addon.state.c_str();
+                item["reason"] = addon.reason.c_str();
+                item["dir"] = addon.dir.c_str();
+                item["lua_entry"] = addon.lua_entry.c_str();
+                item["plugin"] = addon.plugin.c_str();
+                item["plugin_state"] = addon.plugin_state.c_str();
+                item["game_version"] = addon.game_version.c_str();
+                item["depends"] = to_array(addon.depends);
+                item["load_after"] = to_array(addon.load_after);
+                result[++index] = item;
+            }
+            return result;
+        }),
+        // api_version(): the version of the Addons API (= Plugin API) of the engine, "MAJOR.MINOR.PATCH"
+        def("api_version", +[]() -> pcstr
+        {
+            static string32 version;
+            xr_sprintf(version, "%u.%u.%u", GWP_API_VERSION_MAJOR, GWP_API_VERSION_MINOR, GWP_API_VERSION_PATCH);
+            return version;
         })
     ];
 }

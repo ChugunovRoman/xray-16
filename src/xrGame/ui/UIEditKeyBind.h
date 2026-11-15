@@ -12,8 +12,14 @@ class CUIEditKeyBind final : public CUIStatic, public CUIOptionsItem
     bool m_primary;
     bool m_isGamepadBinds;
     game_action* m_action;
+    // An addon key action ("<group>.<id>", AddonKeyRegister in xr_level_controller.h) instead of an engine action:
+    // m_action stays nullptr, the key goes to AddonKeySet, not to the console command bind
+    shared_str m_addon_action;
     keyboard_key* m_keyboard;
     keyboard_key* m_opt_backup_value;
+    // The player cleared the cell (Delete, ClearKey): "Accept" runs unbind / unbind_sec / unbind_gpad. A cell emptied
+    // by OnMessage (its key was given to another row) keeps it false - the engine binding stays as it was
+    bool m_cleared{};
 
 public:
     CUIEditKeyBind(bool primary, bool isGamepadBinds = false);
@@ -46,6 +52,12 @@ public:
 
 protected:
     void BindAction2Key();
+    // The name in the messages "<action>=<key>" of the group key_binding: an engine action or an addon key action
+    pcstr ActionName() const;
+    // Delete: the cell without a key, out of the wait for a key. The key Delete itself is never bound from the menu
+    void ClearKey();
+    // The cursor is over this cell and over the visible part of its scroll list (a row scrolled out is not "hovered")
+    bool IsCursorOverVisibleCell() const;
 
     bool m_isEditMode;
 };

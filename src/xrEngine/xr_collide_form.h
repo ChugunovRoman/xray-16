@@ -145,6 +145,9 @@ public:
         SElement(u16 id, u16 t) : type(t), elem_id(id) {}
         bool valid() const { return (elem_id != (u16(-1))) && (type != 0); }
         void center(Fvector& center) const;
+        // The outward normal of the shape at the world point `point` (a hit on its surface): a box - its face,
+        // a sphere - from the centre, a cylinder - its cap or its side. false: no shape or a degenerate one
+        bool surface_normal(const Fvector& point, Fvector& normal) const;
     };
     using ElementVec = xr_vector<SElement>;
 
@@ -165,6 +168,9 @@ public:
 
     virtual bool _RayQuery(const collide::ray_defs& Q, collide::rq_results& R);
     bool _ElementCenter(u16 elem_id, Fvector& e_center);
+    // The normal of the element (bone) surface at the hit point, see SElement::surface_normal (plans/addon_base_building
+    // D2: rq_result.normal of a ray hit on an object). false: no such element or no normal
+    bool _ElementNormal(u16 elem_id, const Fvector& point, Fvector& normal);
     const ElementVec& _GetElements() { return elements; }
 #ifdef DEBUG
     void _dbg_refresh()

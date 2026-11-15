@@ -264,6 +264,8 @@ extern ECORE_API int ps_r__main_parallel_submit_min;
 // 31-svp-scope.md (a tunable, not saved): the circle radius of the L0 lens crop of the scope build's frustum in % of the
 // screen height.
 extern ECORE_API int ps_r__svp_lens_margin_pct;
+// GPU instancing of rigid models (plans/render_instancing/plan.md): 1 (default) - on, 0 - the emergency switch.
+extern ECORE_API int ps_r__instancing;
 
 extern void xrRender_initconsole();
 extern BOOL xrRender_test_hw();

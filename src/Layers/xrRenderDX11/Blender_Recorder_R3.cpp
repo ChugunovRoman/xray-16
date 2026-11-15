@@ -136,6 +136,7 @@ void CBlender_Compile::r_Pass(LPCSTR _vs, LPCSTR _gs, LPCSTR _ps, bool bFog, BOO
 {
     RS.Invalidate();
     ctable.clear();
+    bInstTwin = false; // GPU instancing: only the 2-argument r_Pass records the twin
     passTextures.clear();
     passMatrices.clear();
     passConstants.clear();

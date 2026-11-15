@@ -26,6 +26,17 @@ public:
         obj_data = &obj_data_self;
     }
 
+    // A copy of a visual (dxRender_Visual::Copy - every model instance of the pool) copies the pointer obj_data too:
+    // the instance then shares the data of the model it was copied from. This gives it its own (a copy of what it
+    // used), so a write into *obj_data changes this visual only (the ghost tint, level_preview_model.cpp)
+    void own_obj_data()
+    {
+        if (obj_data == &obj_data_self)
+            return;
+        obj_data_self = *obj_data;
+        obj_data = &obj_data_self;
+    }
+
     IC void clear()
     {
         sphere.P.set(0, 0, 0);

@@ -443,6 +443,18 @@ PERF_COUNTER(rmain_skin_repeat, "render/main/skin_repeat")      // hw draw of a 
 PERF_COUNTER(rmain_skin_models, "render/main/skin_models")      // distinct GPU-skinned models per frame (= hw - repeat)
 PERF_COUNTER(rmain_skel_full, "render/main/skel_full")          // skeletons the main-view build added with their full mesh
 PERF_COUNTER(rmain_skel_lod, "render/main/skel_lod")            // ...with the character LOD mesh (m_lod)
+// GPU instancing (plans/render_instancing/plan.md), render_matrix_items of every pass - the main view, the sun cascades,
+// the light shadow maps, the scope view: instanced draws, the copies they drew, and the items of the dynamic groups
+// drawn one by one (why). r__instancing 0 - all zero.
+PERF_COUNTER(inst_batches, "render/inst/batches")               // DrawIndexedInstanced / glDrawElementsInstanced calls
+PERF_COUNTER(inst_instances, "render/inst/instances")           // copies they drew
+PERF_COUNTER(inst_smap_batches, "render/inst/smap_batches")     // the shadow-map share of the two above
+PERF_COUNTER(inst_smap_instances, "render/inst/smap_instances")
+PERF_COUNTER(inst_fallback_single, "render/inst/fallback_single") // rigid mesh, but the only copy of it in the group
+PERF_COUNTER(inst_fallback_nokey, "render/inst/fallback_nokey") // the pass has a twin, the visual is not one rigid draw
+PERF_COUNTER(inst_fallback_nopass, "render/inst/fallback_nopass") // the pass has no twin (not a rigid model shader)
+PERF_COUNTER(rmain_inst_batches, "render/main/inst_batches")    // the main view's share of render/inst/batches
+PERF_COUNTER(rmain_inst_instances, "render/main/inst_instances")
 PERF_COUNTER(bones_calls, "bones/calls")
 PERF_COUNTER(bones_fast_out, "bones/fast_out")
 PERF_COUNTER(bones_slow_skip, "bones/slow_skip")

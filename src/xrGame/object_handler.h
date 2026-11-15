@@ -59,6 +59,8 @@ public:
     virtual ~CObjectHandler();
     virtual void Load(LPCSTR section);
     virtual void reinit(CAI_Stalker* object);
+    // The model of the stalker was replaced (CAI_Stalker::ChangeVisual): the bone ids of the weapon are taken again
+    void on_visual_changed();
     virtual void reload(LPCSTR section);
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void update();

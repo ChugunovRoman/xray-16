@@ -26,5 +26,9 @@ void OnGameStart();
 // The plugin stops (StopPlugin: unload, crash, reload): its sounds stop, its effects and effectors are removed.
 // Safe to call any number of times.
 void RemovePluginResources(const GwpPlugin* plugin);
+// engine gaps P13: ALife starts (alife_simulator.cpp) - the lasting HUD texts of plugins (hud_text_set) go with a new
+// game or a load and stay through a level change (OnFrame shows them on the HUD of the new level). The texts of a
+// plugin also go in RemovePluginResources.
+void OnGameStartHudTexts(bool level_change);
 void Shutdown();
 } // namespace gw::addons::feedback

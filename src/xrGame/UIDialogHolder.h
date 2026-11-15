@@ -59,6 +59,10 @@ public:
     CUIDialogWnd* TopInputReceiver();
     void AddDialogToRender(CUIWindow* pDialog);
     void RemoveDialogToRender(CUIWindow* pDialog);
+    // RS12 (plans/addon_runtime_smarts): pDialog is in the list of the dialogs to render and not removed from it
+    // (AddDialogToRender, no RemoveDialogToRender since). Compares the pointers only: a destroyed window is never
+    // touched
+    bool IsDialogToRender(const CUIWindow* pDialog) const;
     void SetMainInputReceiver(CUIDialogWnd* ir, bool _find_remove);
     virtual void OnFrame();
     virtual bool UseIndicators() { return true; }

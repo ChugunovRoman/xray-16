@@ -764,6 +764,17 @@ public:
     void shader_option_skinning(s32 mode) { shader_skinning_tl() = mode; }
     [[nodiscard]] s32 shader_skinning() const { return shader_skinning_tl(); }
 
+    // GPU instancing (plans/render_instancing/plan.md): the INSTANCED variant of the vertex shaders being created now
+    // (the "_i" suffix of _CreateVS/_CreatePP, the INSTANCED define of shader_compile), per thread like the skinning
+    // variant above. Set only around the twin pass of CBlender_Compile::r_Pass.
+    static bool& shader_instanced_tl()
+    {
+        thread_local bool instanced = false;
+        return instanced;
+    }
+    void shader_option_instanced(bool instanced) { shader_instanced_tl() = instanced; }
+    [[nodiscard]] bool shader_instanced() const { return shader_instanced_tl(); }
+
     // Information
     void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) override;
     ref_shader getShader(int id);
@@ -805,6 +816,8 @@ public:
     IRenderVisual* model_Duplicate(IRenderVisual* V) override;
     void model_Delete(IRenderVisual*& V, bool bDiscard) override;
     void model_Delete(IRender_DetailModel*& F);
+    bool model_MakeGhost(IRenderVisual* visual) override; // level.preview_model_* (r2.cpp)
+    void model_SetGhostTint(IRenderVisual* visual, const Fvector4& tint) override;
     void model_Logging(bool bEnable) override { Models->Logging(bEnable); }
     void models_Prefetch() override;
     void models_Clear(bool b_complete) override;
@@ -932,6 +945,10 @@ public:
     void PreviewScene_SetSettings(const SPreviewSceneSettings& settings) override;
     [[nodiscard]] SPreviewSceneSettings PreviewScene_GetSettings() const override;
     void PreviewScene_ResetDiskCache() override;
+    void PreviewScene_LiveSet(u32 slot, pcstr model_path, const SPreviewSceneSettings& settings) override;
+    [[nodiscard]] bool PreviewScene_LiveReady(u32 slot) const override;
+    [[nodiscard]] shared_str PreviewScene_LiveTextureName(u32 slot) const override;
+    void PreviewScene_LiveClear(u32 slot) override;
 
     [[nodiscard]]
     const ref_rt& PreviewScene_ColorRT() const;

@@ -54,6 +54,34 @@ void CSkeletonX_PM::Render(CBackend& cmd_list, float LOD, bool use_fast_geo)
     _Render(cmd_list, rm_geom, SW.num_verts, SW.offset, SW.num_tris);
 }
 void CSkeletonX_ST::Render(CBackend& cmd_list, float /*LOD*/, bool use_fast_geo) { _Render(cmd_list, rm_geom, vCount, 0, dwPrimitives); }
+// GPU instancing (plans/render_instancing/plan.md): only the one-bone children (RM_SINGLE) are rigid meshes - the draw
+// of CSkeletonX::_Render with W = object * bone. The palette-skinned and software-skinned ones are not.
+bool CSkeletonX_PM::instancing_get(CBackend&, const Fmatrix& xform, float LOD, bool, instancing_draw& draw,
+    Fmatrix& world)
+{
+    if (RenderMode != RM_SINGLE && RenderMode != RM_SINGLE_HQ)
+        return false;
+    int lod_id = inherited1::last_lod; // as Render() above
+    if (LOD >= 0.f)
+    {
+        clamp(LOD, 0.f, 1.f);
+        lod_id = iFloor((1.f - LOD) * float(nSWI.count - 1) + 0.5f);
+        inherited1::last_lod = lod_id;
+    }
+    VERIFY(lod_id >= 0 && lod_id < int(nSWI.count));
+    const FSlideWindow& SW = nSWI.sw[lod_id];
+    draw = { rm_geom._get(), 0, SW.num_verts, SW.offset, SW.num_tris };
+    world.mul_43(xform, Parent->LL_GetTransform_R(u16(RMS_boneid)));
+    return draw.geom != nullptr;
+}
+bool CSkeletonX_ST::instancing_get(CBackend&, const Fmatrix& xform, float, bool, instancing_draw& draw, Fmatrix& world)
+{
+    if (RenderMode != RM_SINGLE && RenderMode != RM_SINGLE_HQ)
+        return false;
+    draw = { rm_geom._get(), 0, vCount, 0, dwPrimitives };
+    world.mul_43(xform, Parent->LL_GetTransform_R(u16(RMS_boneid)));
+    return draw.geom != nullptr;
+}
 //////////////////////////////////////////////////////////////////////
 void CSkeletonX_PM::Release() { inherited1::Release(); }
 void CSkeletonX_ST::Release() { inherited1::Release(); }

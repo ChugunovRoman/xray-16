@@ -525,16 +525,19 @@ public:
         constants.seta(C, std::forward<Args>(args)...);
     }
 
-#ifdef USE_DX11
     // `count` consecutive float4 elements of an array constant from element `e`, one write per buffer
-    // (bone palette of CSkeletonX) - same result as `count` set_ca calls.
+    // (bone palette of CSkeletonX, the copies of an instanced draw) - same result as `count` set_ca calls.
+    // GL (plans/render_instancing/plan.md): one glProgramUniform4fv for the whole range.
     ICF void set_ca_rows(R_constant* C, u32 e, const Fvector4* rows, u32 count)
     {
         if (!C)
             return;
+#ifdef USE_OGL
+        if (!GLAD_GL_ARB_separate_shader_objects)
+            VERIFY(C->pp.program == pp);
+#endif
         constants.seta_rows(C, e, rows, count);
     }
-#endif
 
     // constants - raw string (slow)
     template<typename... Args>
@@ -573,6 +576,10 @@ public:
     // Rendering
     ICF void Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC);
     ICF void Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC);
+    // GPU instancing (plans/render_instancing/plan.md): the indexed draw of Render() above, `instances` times
+    // (DrawIndexedInstanced / glDrawElementsInstancedBaseVertex). The vertex shader tells the copies apart by
+    // SV_InstanceID / gl_InstanceID. No tessellation.
+    ICF void RenderInstanced(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC, u32 instances);
 
     ICF void submit()
     {

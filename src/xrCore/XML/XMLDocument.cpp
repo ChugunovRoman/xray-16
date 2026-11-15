@@ -188,6 +188,15 @@ pcstr XmlTextToUtf8(pcstr text, xr_string& converted, pcstr file_name)
 //                       DLTX over an existing section)
 //   override="replace"  the matched node is replaced by this one
 //   override="remove"   the matched node is removed
+//   override="modify"   the matched node stays: the attributes of this node (but override, override_remove and the
+//                       id / name it is matched by) are set on it, the attributes listed in override_remove="a, b" are
+//                       removed from it, a text of this node replaces its text, and the children of this node are
+//                       applied to it as the children of a node without override (plans/addon_api_ideas, gap P41).
+//                       Each attribute and the text are atoms of their own ("<node>/@<attribute>", "<node>/text()"):
+//                       two addons changing different attributes of one node do not conflict
+// The top of the document is its root element: the readers take the first element of the document, so a second root
+// (add) is never read and a document without one (remove) is not loaded - these two are refused there; replace and
+// modify of the root work, the nodes under the root take every mode.
 // A string of a string table - <string id="..."> right under the root <string_table> - without override is set: added,
 // or the string of that id replaced. A patch of a table is a list of strings, as a table of its own: a table of an
 // addon named mod_<x>_*.xml next to <x>.xml (taken as its patch) keeps its new ids. Such a string is marked for the
@@ -199,6 +208,7 @@ enum class XmlOverrideMode : u8
     Add,
     Replace,
     Remove,
+    Modify, // gap P41
     Unknown,
 };
 
@@ -213,6 +223,8 @@ XmlOverrideMode XmlOverrideModeOf(const TiXmlElement* element)
         return XmlOverrideMode::Replace;
     if (0 == xr_strcmpi(mode, "remove"))
         return XmlOverrideMode::Remove;
+    if (0 == xr_strcmpi(mode, "modify"))
+        return XmlOverrideMode::Modify;
     return XmlOverrideMode::Unknown;
 }
 
@@ -369,6 +381,72 @@ void XmlOverrideSetTableString(XmlOverridePatch& patch, TiXmlNode* base_parent, 
     ++patch.strings_added;
 }
 
+void XmlOverrideApply(XmlOverridePatch& patch, TiXmlNode* base_parent, TiXmlNode* patch_parent,
+    const xr_string& path);
+
+// override="modify" (gap P41): target keeps its place and its children; the attributes and the text of element are put on
+// it, override_remove takes attributes away, the children of element are applied to it
+void XmlOverrideModifyNode(XmlOverridePatch& patch, TiXmlElement* element, TiXmlElement* target, const xr_string& label)
+{
+    pcstr key_value;
+    const pcstr key = XmlOverrideKey(element, key_value); // the attribute the node is matched by: it has it already
+    for (const TiXmlAttribute* attribute = element->FirstAttribute(); attribute; attribute = attribute->Next())
+    {
+        const pcstr name = attribute->Name();
+        if (0 == xr_strcmp(name, "override") || 0 == xr_strcmp(name, "override_remove") ||
+            (key && 0 == xr_strcmp(name, key)))
+        {
+            continue;
+        }
+        target->SetAttribute(name, attribute->Value());
+        XmlOverrideRecord(patch, label + "/@" + name);
+    }
+    if (const pcstr removed = element->Attribute("override_remove"))
+    {
+        // "a, b" or "a b": the names of the attributes to take away
+        xr_string list = removed;
+        for (char& c : list)
+        {
+            if (c == ',' || c == '\t')
+                c = ' ';
+        }
+        for (size_t start = 0; start < list.size();)
+        {
+            const size_t end = std::min(list.find(' ', start), list.size());
+            if (end > start)
+            {
+                const xr_string name = list.substr(start, end - start);
+                if (key && name == key)
+                    XmlOverrideWarn(patch, "override_remove: the attribute the node is matched by stays:", label);
+                else if (target->Attribute(name.c_str()))
+                {
+                    target->RemoveAttribute(name.c_str());
+                    XmlOverrideRecord(patch, label + "/@" + name);
+                }
+            }
+            start = end + 1;
+        }
+    }
+    // A text of the node replaces the text of the target (its text children; the elements stay)
+    const pcstr text = element->GetText();
+    if (text && text[0])
+    {
+        for (TiXmlNode* child = target->FirstChild(); child;)
+        {
+            TiXmlNode* next = child->NextSibling();
+            if (child->ToText())
+            {
+                target->UnlinkChild(child);
+                xr_delete(child);
+            }
+            child = next;
+        }
+        target->LinkBeforeChild(target->FirstChild(), xr_new<TiXmlText>(text));
+        XmlOverrideRecord(patch, label + "/text()");
+    }
+    XmlOverrideApply(patch, target, element, label);
+}
+
 // The children of patch_parent applied to base_parent (the nodes of the patch with an override move to the base)
 void XmlOverrideApply(XmlOverridePatch& patch, TiXmlNode* base_parent, TiXmlNode* patch_parent,
     const xr_string& path)
@@ -456,8 +534,19 @@ void XmlOverrideApply(XmlOverridePatch& patch, TiXmlNode* base_parent, TiXmlNode
             XmlOverrideRecord(patch, label);
             break;
         }
+        case XmlOverrideMode::Modify:
+        {
+            TiXmlElement* target = XmlOverrideFind(base_parent, element);
+            if (!target)
+            {
+                XmlOverrideWarn(patch, "override=\"modify\": no node", label);
+                break;
+            }
+            XmlOverrideModifyNode(patch, element, target, label);
+            break;
+        }
         case XmlOverrideMode::Unknown:
-            XmlOverrideWarn(patch, "override must be add, replace or remove:", label);
+            XmlOverrideWarn(patch, "override must be add, replace, remove or modify:", label);
             break;
         }
     }

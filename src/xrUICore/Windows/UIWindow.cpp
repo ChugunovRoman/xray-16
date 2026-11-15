@@ -52,8 +52,18 @@ CUIWindow::CUIWindow(pcstr window_name) : m_windowName(window_name)
     Enable(true);
 }
 
+namespace
+{
+CUIWindow::DestroyHook s_destroy_hook = nullptr;
+}
+
+void CUIWindow::SetDestroyHook(DestroyHook hook) { s_destroy_hook = hook; }
+
 CUIWindow::~CUIWindow()
 {
+    if (s_destroy_hook)
+        s_destroy_hook(this);
+
     VERIFY(!(GetParent() && IsAutoDelete()));
 
     CUIWindow* parent = GetParent();
@@ -367,6 +377,15 @@ void CUIWindow::SetCapture(CUIWindow* pChildWindow, bool capture_status)
     {
         m_pMouseCapturer = NULL;
     }
+}
+
+void CUIWindow::ReleaseMouseCaptureTree()
+{
+    // down the chain first: every capturer forgets its own capturer, no messages (the windows are being hidden)
+    CUIWindow* capturer = m_pMouseCapturer;
+    m_pMouseCapturer = nullptr;
+    if (capturer)
+        capturer->ReleaseMouseCaptureTree();
 }
 
 //реакция на клавиатуру

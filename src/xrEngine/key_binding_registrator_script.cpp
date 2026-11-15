@@ -18,6 +18,36 @@ void key_binding_registrator::script_register(lua_State* luaState)
         def("bind_to_dik", +[](int action) { return GetActionDik((EGameActions)action);}),
         def("bind_to_dik", +[](int action, int idx) { return GetActionDik((EGameActions)action, idx);}),
 
+        // Addon key actions (xr_level_controller.h; the Lua facade - addons.register_key_group, gw_keys.script)
+        def("addon_key_group_register", +[](pcstr group, pcstr title, bool mode) -> bool
+            { return AddonKeyGroupRegister(group, title, mode); }),
+        def("addon_key_register", +[](pcstr group, pcstr action, pcstr label, int key, int key_sec) -> bool
+            { return AddonKeyRegister(group, action, label, key, key_sec); }),
+        // the key of the slot (0 - primary, 1 - secondary), 0 - none
+        def("addon_key_dik", +[](pcstr action, int idx) -> int
+            {
+                const keyboard_key* key = AddonKeyGet(action, idx);
+                return key ? key->dik : 0;
+            }),
+        def("addon_key_is", +[](pcstr action, int dik) -> bool { return AddonKeyIs(action, dik); }),
+        // Strings go to Lua as pcstr: luabind here has no converter for std::string/xr_string
+        // ("Trying to use unregistered class: std::string" at the call). Lua copies the text
+        // on the push, so a static buffer is enough (Lua calls these from one thread).
+        // the keys of the action for a hint, localized ("Q, Delete"); "" - none
+        def("addon_key_text", +[](pcstr action) -> pcstr
+            {
+                static xr_string text;
+                text = AddonKeyText(action);
+                return text.c_str();
+            }),
+        // the localized name of a key code (DIK_keys); "" - unknown
+        def("dik_to_local_name", +[](int dik) -> pcstr
+            {
+                static xr_string text;
+                text = DikToLocalName(dik);
+                return text.c_str();
+            }),
+
         class_<EnumGameActionsContexts>("key_bindings_context")
             .enum_("context")
             [

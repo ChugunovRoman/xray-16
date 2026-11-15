@@ -8,6 +8,17 @@
 #include "Actor.h"
 #include "xrEngine/xr_level_controller.h"
 #include "xrEngine/CustomHUD.h"
+#include "addon_object_events.h"
+
+namespace
+{
+// engine gaps P09 (plans/addon_api_ideas/spec.md): GUI_on_show / GUI_on_hide of the event bus
+void SendGuiEvent(CUIDialogWnd* dialog, bool shown)
+{
+    const shared_str name = dialog->WindowName();
+    gw::addons::objevents::GuiDialog(name.c_str(), dialog->GetDebugType(), shown);
+}
+} // namespace
 
 dlgItem::dlgItem(CUIWindow* pWnd)
 {
@@ -78,6 +89,8 @@ void CDialogHolder::StartMenu(CUIDialogWnd* pDialog, bool bDoHideIndicators)
             A->IR_OnKeyboardRelease(kWPN_FIRE);
         }
     }
+
+    SendGuiEvent(pDialog, true);
 }
 
 void CDialogHolder::StopMenu(CUIDialogWnd* pDialog)
@@ -101,6 +114,8 @@ void CDialogHolder::StopMenu(CUIDialogWnd* pDialog)
 
     RemoveDialogToRender(pDialog);
     pDialog->SetHolder(NULL);
+
+    SendGuiEvent(pDialog, false);
 }
 
 void CDialogHolder::AddDialogToRender(CUIWindow* pDialog)
@@ -124,6 +139,21 @@ void CDialogHolder::AddDialogToRender(CUIWindow* pDialog)
         m_dialogsToRender.push_back(itm);
 
     pDialog->Show(true);
+}
+
+bool CDialogHolder::IsDialogToRender(const CUIWindow* pDialog) const
+{
+    for (const dlgItem& item : m_dialogsToRender)
+    {
+        if (item.wnd == pDialog && item.enabled)
+            return true;
+    }
+    for (const dlgItem& item : m_dialogsToRender_new)
+    {
+        if (item.wnd == pDialog && item.enabled)
+            return true;
+    }
+    return false;
 }
 
 void CDialogHolder::RemoveDialogToRender(CUIWindow* pDialog)

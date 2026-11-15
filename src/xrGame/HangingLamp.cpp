@@ -76,6 +76,10 @@ bool CHangingLamp::net_Spawn(CSE_Abstract* DC)
     CSE_Abstract* e = (CSE_Abstract*)(DC);
     CSE_ALifeObjectHangingLamp* lamp = smart_cast<CSE_ALifeObjectHangingLamp*>(e);
     R_ASSERT(lamp);
+    // D5 (plans/addon_base_building/plan.md 10.5): the use hint from the section (a string id), as CPhysicObject -
+    // before inherited::net_Spawn, so that the Lua binder and the net spawn subscribers may still change it
+    if (pSettings->line_exist(cNameSect(), "tip_text"))
+        set_tip_text(pSettings->r_string(cNameSect(), "tip_text"));
     inherited::net_Spawn(DC);
 
     // set bone id

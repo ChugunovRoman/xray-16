@@ -150,6 +150,10 @@ public:
     flags32 m_flags;
     ALife::_STORY_ID m_story_id;
     ALife::_SPAWN_STORY_ID m_spawn_story_id;
+    // D6 (plans/addon_base_building/plan.md section 15.2): the own online/offline switch distance of the object, the
+    // key alife_switch_distance of its section (metres); 0 - the global [alife] switch_distance. Read from the section
+    // in the constructor (alife():create and the load of a save alike), never saved: the save format does not change
+    float m_switch_distance = 0.f;
 
 #ifdef XRGAME_EXPORTS
     CALifeSimulator* m_alife_simulator;

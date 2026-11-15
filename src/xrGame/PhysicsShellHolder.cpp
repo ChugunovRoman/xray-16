@@ -346,6 +346,15 @@ void CPhysicsShellHolder::OnChangeVisual()
         xr_delete(m_pPhysicsShell);
         VERIFY(0 == m_pPhysicsShell);
     }
+    else if (m_pPhysicsShell && m_pPhysicsShell->PKinematics() &&
+        m_pPhysicsShell->PKinematics() != renderable.visual->dcast_PKinematics())
+    {
+        // The model changed under a live physics shell: the shell stays on the bones of the old model, which went to
+        // the model pool - ZeroCallbacks / hits of the shell touch a model that is no longer ours and may be freed
+        // (plans/addon_base_building/plan.md 17.25). The caller must rebuild the shell (CWeapon::UpdateAltScope)
+        Msg("! [physics] [%s] (id %u): the model changed to [%s] under a physics shell built on the old model",
+            cName().c_str(), ID(), cNameVisual().c_str());
+    }
 }
 
 void CPhysicsShellHolder::UpdateCL()

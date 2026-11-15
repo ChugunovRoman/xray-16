@@ -125,10 +125,264 @@ static void render_normal_items(CBackend& cmd_list, SPass* pass, const _NormalIt
     }
 }
 
+// One item of a dynamic (mapMatrix) group with its own world transform, the pass already set.
+static void render_matrix_item(CBackend& cmd_list, const _MatrixItem& item, const glod_range_t& glod,
+    bool use_fast_geo, [[maybe_unused]] bool perf_main)
+{
+    cmd_list.set_xform_world(item.Matrix);
+    {
+        PERF_SCOPE_IF(perf_main, rmain_dyn_apply_object);
+        RImplementation.apply_object(cmd_list, item.pObject);
+    }
+    cmd_list.apply_lmaterial();
+
+    const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R, glod);
+#ifdef USE_DX11
+    cmd_list.LOD.set_LOD(LOD);
+#endif
+    // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
+    // RCache.hemi.c_update(item.pVisual);
+
+    {
+        PERF_SCOPE_IF(perf_main, rmain_dyn_visual_render);
+        item.pVisual->Render(cmd_list, LOD, use_fast_geo);
+    }
+}
+
+// GPU instancing of rigid models (plans/render_instancing/plan.md). A dynamic group is the items of one SPass; the
+// pass of a rigid model shader has an INSTANCED twin (SPass::inst, CBlender_Compile::r_Pass). The items whose visual
+// is one draw of a rigid mesh (dxRender_Visual::instancing_get: Fvisual, FProgressive, the one-bone children of
+// skeletons) are grouped by that draw, and every run of two or more copies is drawn by the twin with one instanced
+// draw: the vertex shader reads the matrices and the lighting of copy SV_InstanceID / gl_InstanceID from the gw_inst
+// array (gw_instancing.h). Every pass draws through here (the main view and its parallel pieces, the sun cascades,
+// the light shadow maps, the scope view), the culling of the build stays per copy.
+namespace
+{
+#if defined(USE_DX11)
+constexpr u32 inst_max_full = 128; // r3/gw_instancing.h: GW_INST_MAX of gw_inst
+constexpr u32 inst_max_shadow = 256; // ...of gw_inst_s (GW_INST_SHADOW)
+#else
+constexpr u32 inst_max_full = 16; // gl/gw_instancing.h: GL 4.1 guarantees 256 vertex uniform vectors
+constexpr u32 inst_max_shadow = 48;
+#endif
+// The rows of one copy: m_WVP (4), m_WV (3), m_W (3), hemi_cube_pos_faces + sun, hemi_cube_neg_faces + hemi; the shadow
+// shaders read m_WVP only.
+constexpr u32 inst_rows_full = 12;
+constexpr u32 inst_rows_shadow = 4;
+
+struct inst_entry
+{
+    instancing_draw draw;
+    Fmatrix world;
+    u32 item; // index in the group (the group is SSA-sorted: the tie-break keeps that order within a run)
+};
+
+ICF bool inst_same_draw(const instancing_draw& a, const instancing_draw& b)
+{
+    return a.geom == b.geom && a.startI == b.startI && a.PC == b.PC && a.baseV == b.baseV && a.countV == b.countV;
+}
+
+bool inst_entry_less(const inst_entry& a, const inst_entry& b)
+{
+    if (a.draw.geom != b.draw.geom)
+        return std::less<const SGeometry*>()(a.draw.geom, b.draw.geom);
+    if (a.draw.startI != b.draw.startI)
+        return a.draw.startI < b.draw.startI;
+    if (a.draw.PC != b.draw.PC)
+        return a.draw.PC < b.draw.PC;
+    if (a.draw.baseV != b.draw.baseV)
+        return a.draw.baseV < b.draw.baseV;
+    if (a.draw.countV != b.draw.countV)
+        return a.draw.countV < b.draw.countV;
+    return a.item < b.item;
+}
+
+// Scratch of the thread that records the group (the main thread, a parallel piece, a cascade or light task, the SVP
+// worker): each records into its own backend, with its own constant buffers.
+struct inst_scratch
+{
+    xr_vector<inst_entry> entries;
+    xr_vector<u32> singles;
+    xr_vector<Fvector4> rows;
+};
+
+inst_scratch& inst_scratch_tl()
+{
+    thread_local inst_scratch scratch;
+    return scratch;
+}
+
+const shared_str& inst_c_full()
+{
+    static const shared_str name("gw_inst");
+    return name;
+}
+
+const shared_str& inst_c_shadow()
+{
+    static const shared_str name("gw_inst_s");
+    return name;
+}
+
+// The rows R_constants writes for a float4x4 / float3x4 constant (dx11ConstantBuffer::set, GL R_constants::set).
+ICF void inst_rows_4x4(Fvector4* r, const Fmatrix& A)
+{
+    r[0].set(A._11, A._21, A._31, A._41);
+    r[1].set(A._12, A._22, A._32, A._42);
+    r[2].set(A._13, A._23, A._33, A._43);
+    r[3].set(A._14, A._24, A._34, A._44);
+}
+
+ICF void inst_rows_3x4(Fvector4* r, const Fmatrix& A)
+{
+    r[0].set(A._11, A._21, A._31, A._41);
+    r[1].set(A._12, A._22, A._32, A._42);
+    r[2].set(A._13, A._23, A._33, A._43);
+}
+
+u32 render_matrix_items_instanced(CBackend& cmd_list, SPass* pass, const _MatrixItem* items, size_t count,
+    const glod_range_t& glod, bool use_fast_geo, [[maybe_unused]] bool perf_main)
+{
+    cmd_list.set_Pass(pass); // instancing_get looks at the pass (the tessellation test of Fvisual)
+    PERF_ADD_IF(perf_main, rmain_dyn_passes, 1);
+
+    inst_scratch& s = inst_scratch_tl();
+    s.entries.clear();
+    s.singles.clear();
+    u32 corpses = 0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const _MatrixItem& item = items[i];
+        if (item.pObject && item.pObject->renderable_ForceLodCharacter())
+            ++corpses;
+        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R, glod);
+        inst_entry& entry = s.entries.emplace_back();
+        entry.item = static_cast<u32>(i);
+        if (!item.pVisual->instancing_get(cmd_list, item.Matrix, LOD, use_fast_geo, entry.draw, entry.world))
+        {
+            s.entries.pop_back();
+            s.singles.push_back(static_cast<u32>(i));
+        }
+    }
+    [[maybe_unused]] const size_t nokey = s.singles.size();
+    PERF_ADD(inst_fallback_nokey, nokey);
+
+    // Runs of equal draws; a run of one copy is drawn alone too
+    std::sort(s.entries.begin(), s.entries.end(), inst_entry_less);
+    size_t batched = 0;
+    for (size_t b = 0, n = s.entries.size(); b < n;)
+    {
+        size_t e = b + 1;
+        while (e < n && inst_same_draw(s.entries[e].draw, s.entries[b].draw))
+            ++e;
+        if (e - b == 1)
+            s.singles.push_back(s.entries[b].item);
+        else
+        {
+            for (size_t k = b; k < e; ++k)
+                s.entries[batched++] = s.entries[k];
+        }
+        b = e;
+    }
+    s.entries.resize(batched);
+    PERF_ADD(inst_fallback_single, s.singles.size() - nokey);
+
+    // The items drawn alone: in the group's order, with the pass set above
+    std::sort(s.singles.begin(), s.singles.end());
+    for (const u32 i : s.singles)
+        render_matrix_item(cmd_list, items[i], glod, use_fast_geo, perf_main);
+    if (s.entries.empty())
+        return corpses;
+
+    cmd_list.set_Pass(pass->inst._get());
+    R_constant* c_inst = cmd_list.get_c(inst_c_full())._get();
+    const bool full = c_inst != nullptr;
+    if (!full)
+        c_inst = cmd_list.get_c(inst_c_shadow())._get();
+    if (!c_inst)
+    {
+        // A twin without the copy array (not one of the gw_instancing.h shaders): one draw per copy
+        VERIFY(!"GPU instancing: the twin pass has no gw_inst array");
+        cmd_list.set_Pass(pass);
+        for (const inst_entry& entry : s.entries)
+            render_matrix_item(cmd_list, items[entry.item], glod, use_fast_geo, perf_main);
+        return corpses;
+    }
+    // L_material.w - the material of the pass's base texture; the hemi and sun of the copies go in their rows
+    cmd_list.apply_lmaterial();
+
+    const u32 stride = full ? inst_rows_full : inst_rows_shadow;
+    const u32 cap = full ? inst_max_full : inst_max_shadow;
+    s.rows.resize(size_t(cap) * stride);
+    const Fmatrix& V = cmd_list.xforms.m_v;
+    const Fmatrix& P = cmd_list.xforms.m_p;
+    [[maybe_unused]] const bool smap = use_fast_geo; // render_graph: PHASE_SMAP
+    for (size_t b = 0, n = s.entries.size(); b < n;)
+    {
+        size_t e = b + 1;
+        while (e < n && inst_same_draw(s.entries[e].draw, s.entries[b].draw))
+            ++e;
+        const instancing_draw& draw = s.entries[b].draw;
+        for (size_t first = b; first < e; first += cap)
+        {
+            const u32 copies = static_cast<u32>(std::min<size_t>(cap, e - first));
+            Fvector4* r = s.rows.data();
+            for (u32 k = 0; k < copies; ++k, r += stride)
+            {
+                const inst_entry& entry = s.entries[first + k];
+                // R_xforms::set_W: the same products, so the copy lands where its own draw would
+                Fmatrix wv, wvp;
+                wv.mul_43(V, entry.world);
+                wvp.mul(P, wv);
+                inst_rows_4x4(r, wvp);
+                if (!full)
+                    continue;
+                inst_rows_3x4(r + 4, wv);
+                inst_rows_3x4(r + 7, entry.world);
+                {
+                    PERF_SCOPE_IF(perf_main, rmain_dyn_apply_object);
+                    RImplementation.apply_object(cmd_list, items[entry.item].pObject);
+                }
+                // apply_lmaterial of the copy: hemi_cube_pos/neg_faces, L_material.x (hemi) and .y (sun)
+                const float* cube = cmd_list.o_hemi_cube;
+                r[10].set(cube[CROS_impl::CUBE_FACE_POS_X], cube[CROS_impl::CUBE_FACE_POS_Y],
+                    cube[CROS_impl::CUBE_FACE_POS_Z], cmd_list.o_sun);
+                r[11].set(cube[CROS_impl::CUBE_FACE_NEG_X], cube[CROS_impl::CUBE_FACE_NEG_Y],
+                    cube[CROS_impl::CUBE_FACE_NEG_Z], cmd_list.o_hemi);
+            }
+            {
+                PERF_SCOPE_IF(perf_main, rmain_dyn_visual_render);
+                cmd_list.set_ca_rows(c_inst, 0, s.rows.data(), copies * stride);
+                cmd_list.set_Geometry(draw.geom);
+                cmd_list.RenderInstanced(D3DPT_TRIANGLELIST, draw.baseV, 0, draw.countV, draw.startI, draw.PC, copies);
+            }
+            PERF_INC(inst_batches);
+            PERF_ADD(inst_instances, copies);
+            PERF_ADD_IF(smap, inst_smap_batches, 1);
+            PERF_ADD_IF(smap, inst_smap_instances, copies);
+            PERF_ADD_IF(perf_main, rmain_inst_batches, 1);
+            PERF_ADD_IF(perf_main, rmain_inst_instances, copies);
+        }
+        b = e;
+    }
+    return corpses;
+}
+} // namespace
+
 // Returns the number of items whose object is forced to the character LOD (BasicStats.CorpseRegularSubmissions).
 static u32 render_matrix_items(CBackend& cmd_list, SPass* pass, const _MatrixItem* items, size_t count,
     const glod_range_t& glod, bool use_fast_geo, [[maybe_unused]] bool perf_main)
 {
+    if (ps_r__instancing)
+    {
+        if (pass->inst && count >= 2)
+            return render_matrix_items_instanced(cmd_list, pass, items, count, glod, use_fast_geo, perf_main);
+        if (pass->inst)
+            PERF_ADD(inst_fallback_single, count);
+        else
+            PERF_ADD(inst_fallback_nopass, count);
+    }
+
     cmd_list.set_Pass(pass);
     PERF_ADD_IF(perf_main, rmain_dyn_passes, 1);
 
@@ -136,24 +390,7 @@ static u32 render_matrix_items(CBackend& cmd_list, SPass* pass, const _MatrixIte
     for (size_t i = 0; i < count; ++i)
     {
         const _MatrixItem& item = items[i];
-        cmd_list.set_xform_world(item.Matrix);
-        {
-            PERF_SCOPE_IF(perf_main, rmain_dyn_apply_object);
-            RImplementation.apply_object(cmd_list, item.pObject);
-        }
-        cmd_list.apply_lmaterial();
-
-        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R, glod);
-#ifdef USE_DX11
-        cmd_list.LOD.set_LOD(LOD);
-#endif
-        // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
-        // RCache.hemi.c_update(item.pVisual);
-
-        {
-            PERF_SCOPE_IF(perf_main, rmain_dyn_visual_render);
-            item.pVisual->Render(cmd_list, LOD, use_fast_geo);
-        }
+        render_matrix_item(cmd_list, item, glod, use_fast_geo, perf_main);
         if (item.pObject && item.pObject->renderable_ForceLodCharacter())
             ++corpses;
     }
@@ -1002,7 +1239,10 @@ void __fastcall render_item(u32 context_id, const T& item)
     dsgraph.cmd_list.apply_lmaterial();
     hud_transform_helper::apply_custom_state(dsgraph.cmd_list);
     //--#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
-    //RCache.hemi.c_update(V);
+    // Sorted / HUD / emissive / distort items only (not the deferred groups): the object constants m_obj_*_data of
+    // vis_data::obj_data - the tint of a ghost model (gw_preview_ghost, CRender::model_MakeGhost). Three null checks
+    // for a pass that does not declare them (R_hemi binds them per constant table)
+    dsgraph.cmd_list.hemi.c_update(V);
     V->Render(dsgraph.cmd_list, calcLOD(item.first, V->vis.sphere.R, pass_glod(dsgraph.o)),
         dsgraph.o.phase == CRender::PHASE_SMAP);
 }

@@ -36,6 +36,7 @@
 #include "PDA.h"
 #include "actor_defs.h"
 #include "script_game_object_impl.h"
+#include "addon_object_events.h"
 
 #include "xrCore/Threading/ParallelFor.hpp"
 
@@ -154,9 +155,13 @@ void CUIActorMenu::SendEvent_Item_Eat(PIItem pItem, u16 recipient)
     clear_highlight_lists();
 };
 
-void CUIActorMenu::SendEvent_Item_Drop(PIItem pItem, u16 recipient)
+void CUIActorMenu::SendEvent_Item_Drop(PIItem pItem, u16 recipient, bool ask_addons)
 {
     if (!pItem)
+        return;
+    // actor_on_before_item_drop (engine gaps P30): a subscriber may keep the item in the inventory
+    if (ask_addons && recipient == m_pActorInvOwner->object_id() &&
+        !gw::addons::objevents::ActorBeforeItemDrop(&pItem->object()))
         return;
 
 #if defined(XR_PLATFORM_WINDOWS)
@@ -209,6 +214,13 @@ void CUIActorMenu::DropAllCurrentItem()
             SetCurrentItem(NULL);
             return;
         }
+        // actor_on_before_item_drop (engine gaps P30): asked once for the stack (its first item), before its cells
+        // are taken apart
+        if (!gw::addons::objevents::ActorBeforeItemDrop(&current->object()))
+        {
+            SetCurrentItem(NULL);
+            return;
+        }
 
         u32 const cnt = current_cell->ChildsCount();
         for (u32 i = 0; i < cnt; ++i)
@@ -218,10 +230,10 @@ void CUIActorMenu::DropAllCurrentItem()
                 break;
             PIItem iitm = (PIItem)itm->m_pData;
             if (iitm)
-                SendEvent_Item_Drop(iitm, m_pActorInvOwner->object_id());
+                SendEvent_Item_Drop(iitm, m_pActorInvOwner->object_id(), false);
         }
 
-        SendEvent_Item_Drop(current, m_pActorInvOwner->object_id());
+        SendEvent_Item_Drop(current, m_pActorInvOwner->object_id(), false);
     }
     SetCurrentItem(NULL);
 }
@@ -245,15 +257,18 @@ bool CUIActorMenu::DropAllItemsFromRuck(bool quest_force)
         {
             continue;
         }
+        // actor_on_before_item_drop (engine gaps P30): once per stack, before its cells are taken apart
+        if (!gw::addons::objevents::ActorBeforeItemDrop(&item->object()))
+            continue;
 
         u32 const cnt = ci->ChildsCount();
         for (u32 j = 0; j < cnt; ++j)
         {
             CUICellItem* child_ci = ci->PopChild(NULL);
             PIItem child_item = (PIItem)child_ci->m_pData;
-            SendEvent_Item_Drop(child_item, m_pActorInvOwner->object_id());
+            SendEvent_Item_Drop(child_item, m_pActorInvOwner->object_id(), false);
         }
-        SendEvent_Item_Drop(item, m_pActorInvOwner->object_id());
+        SendEvent_Item_Drop(item, m_pActorInvOwner->object_id(), false);
     }
 
     SetCurrentItem(NULL);
@@ -319,6 +334,53 @@ void CUIActorMenu::OnInventoryAction(PIItem pItem, u16 action_type)
     case GE_TRADE_BUY:
     case GE_OWNERSHIP_TAKE:
     {
+        if (m_pEquipOwner)
+        {
+            // npc_equipment.md: an item of the partner goes where it lies (its slot, belt, bag), an item of the actor -
+            // to the bag of the actor (its slots are not shown; the window sends it to the ruck, ITEM2RUCK follows)
+            CUIDragDropListEx* lst_to_add = nullptr;
+            const SInvItemPlace pl = pItem->m_ItemCurrPlace;
+            if (IsPartnerEquipItem(pItem))
+            {
+                if (pl.type == eItemPlaceSlot)
+                    lst_to_add = GetSlotList(pl.slot_id);
+                else if (pl.type == eItemPlaceBelt)
+                    lst_to_add = GetListByType(iActorBelt);
+                else
+                    lst_to_add = GetListByType(iDeadBodyBag);
+            }
+            else if (pItem->parent_id() == m_pActorInvOwner->object_id())
+                lst_to_add = GetListByType(iActorBag);
+
+            bool b_already = false;
+            for (CUIDragDropListEx* curr : all_lists)
+            {
+                if (!curr)
+                    continue;
+                CUICellItem* ci = nullptr;
+                if (FindItemInList(curr, pItem, ci))
+                {
+                    if (lst_to_add != curr)
+                        RemoveItemFromList(curr, pItem);
+                    else
+                        b_already = true;
+                }
+            }
+            CUICellItem* ci = nullptr;
+            if (FindItemInList(m_pLists[eSearchLootBagList], pItem, ci))
+            {
+                if (lst_to_add != m_pLists[eSearchLootBagList])
+                    RemoveItemFromList(m_pLists[eSearchLootBagList], pItem);
+                else
+                    b_already = true;
+            }
+            if (!b_already && lst_to_add)
+                lst_to_add->SetItem(create_cell_item(pItem));
+            if (m_pActorInvOwner && m_pQuickSlot)
+                m_pQuickSlot->ReloadReferences(m_pActorInvOwner);
+            break;
+        }
+
         bool b_already = false;
 
         CUIDragDropListEx* lst_to_add = nullptr;
@@ -401,6 +463,9 @@ void CUIActorMenu::OnInventoryAction(PIItem pItem, u16 action_type)
                 break;
             }
         }
+        // npc_equipment.md: the bag of the partner is not in all_lists
+        if (m_pEquipOwner)
+            RemoveItemFromList(m_pLists[eSearchLootBagList], pItem);
 
         if (m_pActorInvOwner && m_pQuickSlot)
             m_pQuickSlot->ReloadReferences(m_pActorInvOwner);
@@ -471,7 +536,8 @@ void CUIActorMenu::DetachAddon(LPCSTR addon_name, PIItem itm)
 void CUIActorMenu::InitCellForSlot(u16 slot_idx)
 {
     //VERIFY(KNIFE_SLOT <= slot_idx && slot_idx <= LAST_SLOT);
-    PIItem item = m_pActorInvOwner->inventory().ItemFromSlot(slot_idx);
+    // npc_equipment.md: the slots of the partner in the equipment mode
+    PIItem item = EquipOwner()->inventory().ItemFromSlot(slot_idx);
     if (!item)
         return;
 
@@ -526,6 +592,18 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
     if (onlyBagList)
         return;
 
+    InitEquipmentCells();
+
+    if (m_pQuickSlot)
+        m_pQuickSlot->ReloadReferences(m_pActorInvOwner);
+}
+
+void CUIActorMenu::InitEquipmentCells()
+{
+    // npc_equipment.md: the slots and the belt of the partner in the equipment mode, of the actor otherwise
+    CInventoryOwner* equip_owner = EquipOwner();
+    CUIDragDropListEx* curr_list = nullptr;
+
     // Slots
     InitCellForSlot(INV_SLOT_2);
     InitCellForSlot(INV_SLOT_3);
@@ -536,30 +614,30 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
     InitCellForSlot(BACKPACK_SLOT);
 
     //Alundaio
-    if (!m_pActorInvOwner->inventory().SlotIsPersistent(KNIFE_SLOT))
+    if (!equip_owner->inventory().SlotIsPersistent(KNIFE_SLOT))
         InitCellForSlot(KNIFE_SLOT);
-    if (!m_pActorInvOwner->inventory().SlotIsPersistent(BOLT_SLOT))
+    if (!equip_owner->inventory().SlotIsPersistent(BOLT_SLOT))
         InitCellForSlot(BOLT_SLOT);
-    if (!m_pActorInvOwner->inventory().SlotIsPersistent(BINOCULAR_SLOT))
+    if (!equip_owner->inventory().SlotIsPersistent(BINOCULAR_SLOT))
         InitCellForSlot(BINOCULAR_SLOT);
-    if (!m_pActorInvOwner->inventory().SlotIsPersistent(ARTEFACT_SLOT))
+    if (!equip_owner->inventory().SlotIsPersistent(ARTEFACT_SLOT))
         InitCellForSlot(ARTEFACT_SLOT);
-    if (!m_pActorInvOwner->inventory().SlotIsPersistent(PDA_SLOT))
+    if (!equip_owner->inventory().SlotIsPersistent(PDA_SLOT))
         InitCellForSlot(PDA_SLOT);
     //if (!m_pActorInvOwner->inventory().SlotIsPersistent(TORCH_SLOT))
     //    InitCellForSlot(TORCH_SLOT); // Alundaio: TODO find out why this crash when you unequip
 
     //for custom slots that exist past LAST_SLOT
-    for (u16 i = SLOTS_COUNT; i <= m_pActorInvOwner->inventory().LastSlot(); ++i)
+    for (u16 i = SLOTS_COUNT; i <= equip_owner->inventory().LastSlot(); ++i)
     {
-        if (!m_pActorInvOwner->inventory().SlotIsPersistent(i))
+        if (!equip_owner->inventory().SlotIsPersistent(i))
             InitCellForSlot(i);
     }
     //-Alundaio
 
     curr_list = m_pLists[eInventoryBeltList];
-    TIItemContainer::iterator itb = m_pActorInvOwner->inventory().m_belt.begin();
-    TIItemContainer::iterator ite = m_pActorInvOwner->inventory().m_belt.end();
+    TIItemContainer::iterator itb = equip_owner->inventory().m_belt.begin();
+    TIItemContainer::iterator ite = equip_owner->inventory().m_belt.end();
     for (; itb != ite; ++itb)
     {
         CUICellItem* itm = create_cell_item(*itb);
@@ -567,9 +645,6 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
         if (m_currMenuMode == mmTrade && m_pPartnerInvOwner)
             ColorizeItem(itm, !CanMoveToPartner(*itb));
     }
-
-    if (m_pQuickSlot)
-        m_pQuickSlot->ReloadReferences(m_pActorInvOwner);
 }
 
 bool CUIActorMenu::TryActiveSlot(CUICellItem* itm)
@@ -615,21 +690,30 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
     CUIDragDropListEx* old_owner = itm->OwnerList();
     PIItem iitem = (PIItem)itm->m_pData;
 
-    bool b_own_item = (iitem->parent_id() == m_pActorInvOwner->object_id());
+    // npc_equipment.md: in the equipment mode the slots belong to the partner
+    CInventoryOwner* equip_owner = EquipOwner();
+    const bool partner_equip = m_pEquipOwner != nullptr;
+
+    bool b_own_item = (iitem->parent_id() == equip_owner->object_id());
     if (slot_id == HELMET_SLOT)
     {
-        CCustomOutfit* pOutfit = m_pActorInvOwner->GetOutfit();
+        CCustomOutfit* pOutfit = equip_owner->GetOutfit();
         if (pOutfit && !pOutfit->IsHelmetAllowed())
             return false;
     }
 
-    if (m_pActorInvOwner->inventory().CanPutInSlot(iitem, slot_id))
+    if (equip_owner->inventory().CanPutInSlot(iitem, slot_id))
     {
         CUIDragDropListEx* new_owner = GetSlotList(slot_id);
 
         //Alundaio
         if (!new_owner)
             return true;
+
+        if (partner_equip && !PartnerEquipmentCanMove(iitem, true, "slot", slot_id))
+            return false;
+        if (partner_equip)
+            NotePartnerWeaponMove(iitem, slot_id);
 
         /*if (slot_id == GRENADE_SLOT || !new_owner)
         {
@@ -644,12 +728,17 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
                 if (helmet_list && helmet_list->ItemsCount() == 1)
                 {
                     CUICellItem* helmet_cell = helmet_list->GetItemIdx(0);
-                    ToBag(helmet_cell, false, false);
+                    // npc_equipment.md: the helmet of the partner goes to its ruck
+                    if (partner_equip)
+                        ToPartnerRuck(helmet_cell, false, false, false);
+                    else
+                        ToBag(helmet_cell, false, false);
                 }
             }
         }
 
-        [[maybe_unused]] const bool result = !b_own_item || m_pActorInvOwner->inventory().Slot(slot_id, iitem);
+        // the partner's own item does not activate the slot: its planner chooses what is in the hands
+        [[maybe_unused]] const bool result = !b_own_item || equip_owner->inventory().Slot(slot_id, iitem, partner_equip);
         VERIFY(result);
 
         CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
@@ -662,9 +751,23 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
 
         new_owner->SetItem(i);
 
-        SendEvent_Item2Slot(iitem, m_pActorInvOwner->object_id(), slot_id);
+        if (partner_equip)
+        {
+            // an item of the actor moves to the partner, which puts it to the slot (CInventoryOwner::OnEquipmentEvent)
+            if (!b_own_item)
+                SendEvent_PartnerItem2Place(iitem, GEG_PLAYER_ITEM2SLOT, slot_id);
+            else
+            {
+                PlaySnd(eItemToSlot);
+                clear_highlight_lists();
+            }
+        }
+        else
+        {
+            SendEvent_Item2Slot(iitem, m_pActorInvOwner->object_id(), slot_id);
 
-        SendEvent_ActivateSlot(slot_id, m_pActorInvOwner->object_id());
+            SendEvent_ActivateSlot(slot_id, m_pActorInvOwner->object_id());
+        }
 
         // ColorizeItem						( itm, false );
         if (slot_id == OUTFIT_SLOT)
@@ -677,23 +780,23 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
         if (!force_place || slot_id == NO_ACTIVE_SLOT)
             return false;
 
-        if (m_pActorInvOwner->inventory().SlotIsPersistent(slot_id) && (slot_id != DETECTOR_SLOT && slot_id != BINOCULAR_SLOT))
+        if (equip_owner->inventory().SlotIsPersistent(slot_id) && (slot_id != DETECTOR_SLOT && slot_id != BINOCULAR_SLOT))
             return false;
 
-        if (slot_id == KNIFE_SLOT && m_pActorInvOwner->inventory().CanPutInSlot(iitem, KNIFE_SLOT))
+        if (slot_id == KNIFE_SLOT && equip_owner->inventory().CanPutInSlot(iitem, KNIFE_SLOT))
             return ToSlot(itm, force_place, KNIFE_SLOT);
 
-        if (slot_id == INV_SLOT_2 && m_pActorInvOwner->inventory().CanPutInSlot(iitem, INV_SLOT_3) && CallOfPripyatMode)
+        if (slot_id == INV_SLOT_2 && equip_owner->inventory().CanPutInSlot(iitem, INV_SLOT_3) && CallOfPripyatMode)
             return ToSlot(itm, force_place, INV_SLOT_3);
 
-        if (slot_id == INV_SLOT_3 && m_pActorInvOwner->inventory().CanPutInSlot(iitem, INV_SLOT_2) && CallOfPripyatMode)
+        if (slot_id == INV_SLOT_3 && equip_owner->inventory().CanPutInSlot(iitem, INV_SLOT_2) && CallOfPripyatMode)
             return ToSlot(itm, force_place, INV_SLOT_2);
 
         CUIDragDropListEx* slot_list = GetSlotList(slot_id);
         if (!slot_list)
             return false;
 
-        const PIItem _iitem = m_pActorInvOwner->inventory().ItemFromSlot(slot_id);
+        const PIItem _iitem = equip_owner->inventory().ItemFromSlot(slot_id);
 
         CUIDragDropListEx* invlist = GetListByType(iActorBag);
         if (invlist != slot_list)
@@ -705,7 +808,16 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
             if (!(slot_cell && static_cast<PIItem>(slot_cell->m_pData) == _iitem))
                 return false;
 
-            if (ToBag(slot_cell, false, false) == false)
+            // npc_equipment.md: what the slot of the partner held goes to the ruck of the partner (asked first: the
+            // slot is not freed for an item that may not go there)
+            if (partner_equip)
+            {
+                if (!PartnerEquipmentCanMove(iitem, true, "slot", slot_id))
+                    return false;
+                if (!ToPartnerRuck(slot_cell, false, false, false))
+                    return false;
+            }
+            else if (ToBag(slot_cell, false, false) == false)
                 return false;
         }
         else
@@ -730,7 +842,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
         }
 
         bool result = ToSlot(itm, false, slot_id);
-        if (b_own_item && result && slot_id == DETECTOR_SLOT)
+        if (!partner_equip && b_own_item && result && slot_id == DETECTOR_SLOT)
         {
             CCustomDetector* det = smart_cast<CCustomDetector*>(iitem);
             det->ToggleDetector(g_player_hud[0]->attached_item() != NULL
@@ -746,6 +858,13 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
 bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs)
 {
     PIItem iitem = (PIItem)itm->m_pData;
+
+    // npc_equipment.md: an item of the partner (its bag, slot, belt) to the bag of the actor - may it go (Lua)
+    const bool from_partner = IsPartnerEquipItem(iitem);
+    if (from_partner && !PartnerEquipmentCanMove(iitem, false, "ruck", 0))
+        return false;
+    if (from_partner)
+        NotePartnerWeaponMove(iitem, NO_ACTIVE_SLOT);
 
     bool b_own_item = (iitem->parent_id() == m_pActorInvOwner->object_id());
 
@@ -784,7 +903,9 @@ bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_
                 else
                     new_owner->SetItem(ichld);
 
-                if (!b_already || !b_own_item)
+                if (from_partner)
+                    SendEvent_PartnerItem2Actor(iitem2);
+                else if (!b_already || !b_own_item)
                     SendEvent_Item2Ruck(iitem2, m_pActorInvOwner->object_id());
 
                 if (m_currMenuMode == mmTrade && m_pPartnerInvOwner)
@@ -801,7 +922,9 @@ bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_
         else
             new_owner->SetItem(i);
 
-        if (!b_already || !b_own_item)
+        if (from_partner)
+            SendEvent_PartnerItem2Actor(iitem);
+        else if (!b_already || !b_own_item)
             SendEvent_Item2Ruck(iitem, m_pActorInvOwner->object_id());
 
         if (m_currMenuMode == mmTrade && m_pPartnerInvOwner)
@@ -839,10 +962,16 @@ bool CUIActorMenu::ToBeltScript(CScriptGameObject* GO, bool b_use_cursor_pos)
 bool CUIActorMenu::ToBelt(CUICellItem* itm, bool b_use_cursor_pos)
 {
     PIItem iitem = (PIItem)itm->m_pData;
-    bool b_own_item = (iitem->parent_id() == m_pActorInvOwner->object_id());
+    // npc_equipment.md: in the equipment mode the belt belongs to the partner
+    CInventoryOwner* equip_owner = EquipOwner();
+    const bool partner_equip = m_pEquipOwner != nullptr;
+    bool b_own_item = (iitem->parent_id() == equip_owner->object_id());
 
-    if (m_pActorInvOwner->inventory().CanPutInBelt(iitem))
+    if (equip_owner->inventory().CanPutInBelt(iitem))
     {
+        if (partner_equip && !PartnerEquipmentCanMove(iitem, true, "belt", 0))
+            return false;
+
         CUIDragDropListEx* old_owner = itm->OwnerList();
         CUIDragDropListEx* new_owner = NULL;
         if (b_use_cursor_pos)
@@ -853,7 +982,7 @@ bool CUIActorMenu::ToBelt(CUICellItem* itm, bool b_use_cursor_pos)
         else
             new_owner = m_pLists[eInventoryBeltList];
 
-        [[maybe_unused]] bool result = !b_own_item || m_pActorInvOwner->inventory().Belt(iitem);
+        [[maybe_unused]] bool result = !b_own_item || equip_owner->inventory().Belt(iitem);
         VERIFY(result);
         CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
 
@@ -863,14 +992,21 @@ bool CUIActorMenu::ToBelt(CUICellItem* itm, bool b_use_cursor_pos)
             new_owner->SetItem(i);
 
         if (!b_own_item)
-            SendEvent_Item2Belt(iitem, m_pActorInvOwner->object_id());
+        {
+            if (partner_equip)
+                SendEvent_PartnerItem2Place(iitem, GEG_PLAYER_ITEM2BELT, 0);
+            else
+                SendEvent_Item2Belt(iitem, m_pActorInvOwner->object_id());
+        }
+        else if (partner_equip)
+            PlaySnd(eItemToBelt);
 
         // ColorizeItem						(itm, false);
         return true;
     }
     else
     { // in case belt slot is busy
-        if (!iitem->Belt() || m_pActorInvOwner->inventory().BeltWidth() == 0)
+        if (!iitem->Belt() || equip_owner->inventory().BeltWidth() == 0)
             return false;
 
         CUIDragDropListEx* belt_list = NULL;
@@ -888,7 +1024,18 @@ bool CUIActorMenu::ToBelt(CUICellItem* itm, bool b_use_cursor_pos)
         CUICellItem* slot_cell = belt_list->GetCellAt(belt_cell_pos).m_item;
         //		VERIFY								(slot_cell && ((PIItem)slot_cell->m_pData)==_iitem);
 
-        bool result = ToBag(slot_cell, false, false);
+        // npc_equipment.md: what the belt cell of the partner held goes to the ruck of the partner (asked first)
+        bool result;
+        if (partner_equip)
+        {
+            if (!slot_cell || !PartnerEquipmentCanMove(iitem, true, "belt", 0))
+                return false;
+            result = ToPartnerRuck(slot_cell, false, false, false);
+            if (!result)
+                return false;
+        }
+        else
+            result = ToBag(slot_cell, false, false);
         VERIFY(result);
 
         result = ToBelt(itm, b_use_cursor_pos);
@@ -931,6 +1078,9 @@ CUIDragDropListEx* CUIActorMenu::GetSlotList(u16 slot_idx)
         {
             return m_pLists[eTradeActorBagList];
         }
+        // npc_equipment.md: these slots of the partner have no list of their own - its items show in its bag
+        if (m_pEquipOwner)
+            return m_pLists[eSearchLootBagList];
         return m_pLists[eInventoryBagList];
         break;
     };
@@ -1049,7 +1199,21 @@ void CUIActorMenu::ActivatePropertiesBox()
     m_UIPropertiesBox->RemoveAll();
     bool b_show = false;
 
-    if (m_currMenuMode == mmInventory || m_currMenuMode == mmDeadBodySearch)
+    if (m_pEquipOwner)
+    {
+        // npc_equipment.md: an item of the partner - only dress / undress it (the rest of the lines act for the
+        // actor); an item of the actor - no dress lines (they would dress the partner from the bag of the actor)
+        if (IsPartnerEquipItem(item))
+            PropertiesBoxForSlots(item, b_show);
+        else
+        {
+            PropertiesBoxForWeapon(cell_item, item, b_show);
+            PropertiesBoxForAddon(item, b_show);
+            PropertiesBoxForUsing(item, b_show);
+            PropertiesBoxForPlaying(item, b_show);
+        }
+    }
+    else if (m_currMenuMode == mmInventory || m_currMenuMode == mmDeadBodySearch)
     {
         PropertiesBoxForSlots(item, b_show);
         PropertiesBoxForWeapon(cell_item, item, b_show);
@@ -1079,6 +1243,20 @@ void CUIActorMenu::ActivatePropertiesBox()
             PropertiesBoxForDonate(item, b_show);
     }
     //-Alundaio
+    // P45 (plans/addon_api_ideas/spec.md): the lines of the addons, the event inventory_item_menu_add_property of
+    // actor_menu_inventory.script (as pda.property_box_add_properties of the map). A line added from Lua has the tag 0.
+    // The handlers may take the item away: it is not used after the call
+    if (CGameObject* GO = smart_cast<CGameObject*>(item))
+    {
+        luabind::functor<void> funct;
+        if (GEnv.ScriptEngine->functor("actor_menu_inventory.property_box_add_properties", funct))
+        {
+            const u32 lines_before = m_UIPropertiesBox->GetItemsCount();
+            funct(m_UIPropertiesBox, GO->lua_game_object(), static_cast<int>(m_currMenuMode));
+            if (m_UIPropertiesBox->GetItemsCount() > lines_before)
+                b_show = true;
+        }
+    }
     if (b_show)
     {
         m_UIPropertiesBox->AutoUpdateSize();
@@ -1097,7 +1275,8 @@ void CUIActorMenu::PropertiesBoxForSlots(PIItem item, bool& b_show)
 {
     CCustomOutfit* pOutfit = smart_cast<CCustomOutfit*>(item);
     CHelmet* pHelmet = smart_cast<CHelmet*>(item);
-    CInventory& inv = m_pActorInvOwner->inventory();
+    // npc_equipment.md: in the equipment mode the lines dress / undress the partner
+    CInventory& inv = EquipOwner()->inventory();
 
     // Флаг-признак для невлючения пункта контекстного меню: Dreess Outfit, если костюм уже надет
     bool bAlreadyDressed = false;
@@ -1142,7 +1321,7 @@ void CUIActorMenu::PropertiesBoxForSlots(PIItem item, bool& b_show)
         b_show = true;
     }
 
-    CCustomOutfit* outfit_in_slot = m_pActorInvOwner->GetOutfit();
+    CCustomOutfit* outfit_in_slot = EquipOwner()->GetOutfit();
     if (pHelmet && !bAlreadyDressed && (!outfit_in_slot || outfit_in_slot->IsHelmetAllowed()))
     {
         m_UIPropertiesBox->AddItem("st_dress_helmet", NULL, INVENTORY_TO_SLOT_ACTION);
@@ -1585,7 +1764,13 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
     {
     case INVENTORY_TO_SLOT_ACTION: ToSlot(cell_item, true, item->BaseSlot()); break;
     case INVENTORY_TO_BELT_ACTION: ToBelt(cell_item, false); break;
-    case INVENTORY_TO_BAG_ACTION: ToBag(cell_item, false, false); break;
+    case INVENTORY_TO_BAG_ACTION:
+        // npc_equipment.md: undressing the partner puts the item to its ruck
+        if (IsPartnerEquipItem(item))
+            ToPartnerRuck(cell_item, false, false, true);
+        else
+            ToBag(cell_item, false, false);
+        break;
     case INVENTORY_DONATE_ACTION: DonateCurrentItem(cell_item); break;
     case INVENTORY_SELL_ITEM: ToActorTrade(cell_item, false, false); break;
     case INVENTORY_SELL_ALL_ITEMS: ToActorTrade(cell_item, false, true); break;
@@ -1766,6 +1951,16 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
         pPda->PlayScriptFunction();
         break;
     }
+    case 0:
+    {
+        // P45: a line of an addon (AddItem_script, the tag 0) - the event inventory_item_menu_property_clicked of
+        // actor_menu_inventory.script. The handler may take the item away: `item` is not used after the call
+        CGameObject* GO = smart_cast<CGameObject*>(item);
+        luabind::functor<void> funct;
+        if (GO && GEnv.ScriptEngine->functor("actor_menu_inventory.property_box_clicked", funct))
+            funct(m_UIPropertiesBox, GO->lua_game_object(), static_cast<int>(m_currMenuMode));
+        break;
+    }
     } // switch
 
     //SetCurrentItem(nullptr);
@@ -1774,11 +1969,13 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
 
 void CUIActorMenu::UpdateOutfit()
 {
-    const u32 maxCount = m_pActorInvOwner->inventory().BeltMaxWidth();
+    // npc_equipment.md: the outfit and the belt of the partner in the equipment mode
+    CInventoryOwner* equip_owner = EquipOwner();
+    const u32 maxCount = equip_owner->inventory().BeltMaxWidth();
     const Ivector2 maxCap = m_pLists[eInventoryBeltList]->CalculateCapacity(maxCount);
     m_pLists[eInventoryBeltList]->SetMaxCellsCapacity(maxCap);
 
-    CCustomOutfit* outfit = m_pActorInvOwner->GetOutfit();
+    CCustomOutfit* outfit = equip_owner->GetOutfit();
     if (m_pLists[eInventoryHelmetList])
     {
         if (outfit && !outfit->IsHelmetAllowed())
@@ -1804,7 +2001,7 @@ void CUIActorMenu::UpdateOutfit()
         return;
     }
 
-    const u32 af_count = m_pActorInvOwner->inventory().BeltWidth();
+    const u32 af_count = equip_owner->inventory().BeltWidth();
     const Ivector2 cap = m_pLists[eInventoryBeltList]->CalculateCapacity(af_count);
     m_pLists[eInventoryBeltList]->SetCellsCapacity(cap);
 }
@@ -1815,7 +2012,14 @@ void CUIActorMenu::MoveArtefactsToBag()
     {
         CUICellItem* ci = m_pLists[eInventoryBeltList]->GetItemIdx(0);
         VERIFY(ci && ci->m_pData);
-        ToBag(ci, false, false);
+        // npc_equipment.md: the belt of the partner goes to its ruck
+        if (m_pEquipOwner)
+        {
+            if (!ToPartnerRuck(ci, false, false, false))
+                break;
+        }
+        else
+            ToBag(ci, false, false);
     } // for i
     m_pLists[eInventoryBeltList]->ClearAll(true);
 }

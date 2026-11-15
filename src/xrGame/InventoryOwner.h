@@ -245,6 +245,43 @@ public:
     IC bool deadbody_can_take_status() const { return m_deadbody_can_take; }
     void deadbody_closed(bool status);
     IC bool deadbody_closed_status() const { return m_deadbody_closed; }
+
+    // plans/addon_companion_extended/npc_equipment.md: the player sets up the equipment of this NPC (a companion) in
+    // the exchange window. Runtime only (not saved, the actor cannot have it): whoever sets it sets it again after a
+    // load (npc_on_net_spawn comes before the items of the NPC are placed). While it is set:
+    //  - the slots the class of the owner refuses (CAI_Stalker: outfit, PDA) accept items (EquipmentSlotOverride);
+    //  - the belt works, its width is the artefact_count of the outfit like for the actor (CInventory::BeltWidth);
+    //  - GEG_PLAYER_ITEM2SLOT / ITEM2BELT / ITEM2RUCK are handled for own items (OnEquipmentEvent);
+    //  - CInventory::Take keeps the saved place (slot, belt) of an item and does not put a transferred outfit / PDA /
+    //    belt item there by itself.
+    // Turning it off moves the belt items to the ruck.
+    IC bool equipment_editable() const { return m_equipment_editable; }
+    void set_equipment_editable(bool value);
+    // The slot is accepted although the class of the owner refuses it (CInventory::CanPutInSlot)
+    bool EquipmentSlotOverride(u16 slot_id) const;
+
+    // npc_equipment.md, the temporary swap of a weapon (decision of the developer 2026-11-15): an equipment_editable
+    // NPC in a fight whose weapons of the slots 2 / 3 have no ammo puts a loaded weapon of its ruck into the slot
+    // (CObjectActionShow) and remembers the weapon it took out - the one the player gave; it goes back when it has
+    // ammo again or the fight is over (CAI_Stalker::update_best_item_info_impl). Runtime only: the addon keeps it in
+    // its save by the ids of the items and sets it again after a load (Lua set_equipment_swapped). A move of the player
+    // in the exchange window drops it (CUIActorMenu::NotePartnerWeaponMove)
+    u16 EquipmentSwapped(u16 slot_id) const; // the id of the weapon taken out of the slot 2 / 3, u16(-1) - none
+    void SetEquipmentSwapped(u16 slot_id, u16 item_id); // u16(-1) clears; slots other than 2 / 3 are ignored
+    bool IsEquipmentSwapped(u16 item_id) const;
+    void ResetEquipmentSwap();
+    // when the NPC last had an enemy (Device.dwTimeGlobal): the end of a fight for the swap
+    u32 EquipmentEnemyTime() const { return m_equipment_enemy_time; }
+    void EquipmentEnemySeen(u32 time) { m_equipment_enemy_time = time; }
+
+protected:
+    // GEG_PLAYER_ITEM2SLOT / ITEM2BELT / ITEM2RUCK for an equipment_editable owner (CInventoryOwner::OnEvent)
+    void OnEquipmentEvent(NET_Packet& P, u16 type);
+
+private:
+    bool m_equipment_editable{};
+    u16 m_equipment_swap[2]{ u16(-1), u16(-1) }; // [0] - INV_SLOT_2, [1] - INV_SLOT_3
+    u32 m_equipment_enemy_time{};
 };
 
 #include "inventory_owner_inline.h"

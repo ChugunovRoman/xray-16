@@ -116,6 +116,27 @@ public:
     // CPU skinning (RM_SKINNING_SOFT) writes the shared dynamic VB (RImplementation.Vertex, mapped on the immediate
     // context), so such a mesh may be recorded by the main thread only (see R_dsgraph_structure::render_graph_main_parallel).
     bool IsSoftwareSkinned() const { return RenderMode == RM_SKINNING_SOFT; }
+
+    // The skinning variant of the vertex shaders this mesh was loaded with (the shader_option_skinning value of
+    // _Load_hw: -1 none / CPU skinning, 0 - one bone of the whole mesh, 1..4 - bones per vertex). For a shader made for
+    // this mesh later (the ghost of model_MakeGhost)
+    s32 ShaderSkinningMode() const
+    {
+        switch (RenderMode)
+        {
+        case RM_SINGLE:
+        case RM_SINGLE_HQ: return 0;
+        case RM_SKINNING_1B:
+        case RM_SKINNING_1B_HQ: return 1;
+        case RM_SKINNING_2B:
+        case RM_SKINNING_2B_HQ: return 2;
+        case RM_SKINNING_3B:
+        case RM_SKINNING_3B_HQ: return 3;
+        case RM_SKINNING_4B:
+        case RM_SKINNING_4B_HQ: return 4;
+        default: return -1;
+        }
+    }
 };
 
 template <typename T_vertex, typename T_buffer>

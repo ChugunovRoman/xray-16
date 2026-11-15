@@ -50,6 +50,18 @@ private:
 };
 
 // The class itself
+// GPU instancing (plans/render_instancing/plan.md): the one indexed draw a visual's Render() issues -
+// set_Geometry(geom) + Render(D3DPT_TRIANGLELIST, baseV, 0, countV, startI, PC). Two visuals with equal draws are
+// copies of one mesh: render_matrix_items draws them with one instanced draw.
+struct instancing_draw
+{
+    SGeometry* geom;
+    u32 baseV;
+    u32 countV;
+    u32 startI;
+    u32 PC;
+};
+
 class ECORE_API dxRender_Visual : public IRenderVisual
 {
 public:
@@ -73,6 +85,16 @@ public:
     virtual void Copy(dxRender_Visual* from);
     virtual void Spawn(){};
     virtual void Depart(){};
+
+    // GPU instancing: true if Render(cmd_list, LOD, use_fast_geo) of this visual under the world transform `xform`
+    // (set_xform_world of render_matrix_items, the pass already set) is exactly one draw `draw` of a rigid mesh whose
+    // vertices go through the world matrix `world`; it then has the same side effects on the visual as Render() (the
+    // progressive LOD it remembers). False - the visual is drawn by Render() (skinning, several draws, anything else).
+    virtual bool instancing_get(CBackend& /*cmd_list*/, const Fmatrix& /*xform*/, float /*LOD*/, bool /*use_fast_geo*/,
+        instancing_draw& /*draw*/, Fmatrix& /*world*/)
+    {
+        return false;
+    }
 
     //	virtual	CKinematics*		dcast_PKinematics			()				{ return 0;	}
     //	virtual	CKinematicsAnimated*dcast_PKinematicsAnimated	()				{ return 0;	}

@@ -62,7 +62,9 @@
       "title": "Смарт-террейны",
       "scripts": [
         "smart_terrain.script",
-        "sim_smart_capture.script"
+        "sim_smart_capture.script",
+        "sim_smart.script",
+        "sim_garrison_pack.script"
       ]
     },
     {
@@ -92,7 +94,8 @@
       "title": "PDA, торговля, меню актора",
       "scripts": [
         "pda.script",
-        "actor_menu.script"
+        "actor_menu.script",
+        "axr_task_manager.script"
       ]
     },
     {
@@ -112,12 +115,26 @@
       ]
     },
     {
+      "id": "surge",
+      "title": "Выброс и пси-шторм",
+      "scripts": [
+        "surge_manager.script",
+        "psi_storm_manager.script"
+      ]
+    },
+    {
+      "id": "weather",
+      "title": "Погода"
+    },
+    {
       "id": "misc",
       "title": "Прочее",
       "scripts": [
         "xr_statistic.script",
         "dxr_achievements.script",
-        "sim_factions.script"
+        "sim_factions.script",
+        "gm_faction_leaders.script",
+        "gw_tasks.script"
       ]
     },
     {
@@ -324,6 +341,41 @@
       "when": "загрузка сейва, в котором есть объекты, которые ALife не смог создать (секция или класс выключенного аддона), и объекты внутри них: после чтения реестров и Lua-колбэка `CALifeStorageManager_on_objects_skipped`, до `alife_on_load`. Состояние пропущенных id уже снято: ссылки отрядов и смартов, личные отношения, состояние биндеров плагинов, метки карты ПДА. Только при непустом списке; отправляется, только если у события есть подписчики",
       "notes": "Плагин сбрасывает своё состояние по этим id (данные из `save_read` и т. п.): новый объект может получить тот же id. В массиве не больше 4096 элементов: длинный список приходит несколькими событиями подряд. Lua видит тот же список через `alife_save.skipped_objects()`. План: `plans/addons_api_support/09-content-addons-vfs.md`, раздел 8 (C8)"
     },
+    "actor_on_before_hit_ex": {
+      "section": "builtin",
+      "emitter": "движок (`CActor::Hit`)",
+      "args": [
+        "`OBJECT` актор",
+        "`NUMBER` сила хита после артефактов на поясе и Lua-обработчиков `actor_on_before_hit`",
+        "`VEC3` направление хита в мировых координатах",
+        "`OBJECT` кто нанёс хит или `NIL`",
+        "`INT` кость попадания, `-1` - без кости",
+        "`INT` тип хита `GWP_HIT_*` (числа `hit.*` Lua)",
+        "`NUMBER` импульс хита"
+      ],
+      "when": "хит по живому актору (не в режиме бога), после того как `_G.CActor__BeforeHitCallback` (Lua-событие `actor_on_before_hit`) пропустил хит, и до Lua-колбэка `hit` и `actor_on_hit_callback`. Отправляется, только если у события есть подписчики",
+      "notes": "Читаемая замена `actor_on_before_hit` для плагинов: там хит приходит как `LUA_REF` (userdata Lua), здесь - числами, по схеме `npc_on_before_hit`. Результат - как у `npc_on_before_hit`: перед рассылкой `NUMBER` сила; подписчик пишет новую силу, `false` или силу `<= 0` - хит отменяется целиком. Старое событие `actor_on_before_hit` не меняется и приходит раньше. План: `plans/addon_api_ideas/spec.md`, П22. Страница: [Персонаж](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/character.md)"
+    },
+    "game_on_before_save": {
+      "section": "builtin",
+      "emitter": "движок (`CCC_ALifeSave::Execute`, `CAutosaveManager`)",
+      "args": [
+        "`STRING` имя сейва без расширения (`<пользователь> - quicksave` для быстрого сохранения)",
+        "`STRING` вид: `quicksave` (клавиша, `save` без имени), `save` (окно сохранения, `xr_effects`, `game_save` плагина, консоль `save <имя>`) или `autosave`"
+      ],
+      "when": "сохранение игры, после проверок одиночной игры и живого актора и до записи сейва: до `save_state`, `alife_on_before_save` и снимка экрана. Отправляется, только если у события есть подписчики",
+      "notes": "Результат: перед рассылкой `BOOL` `true`; `false` отменяет сохранение (в лог пишется строка, кто отменил - не пишется). `true`, `nil` и другие значения сохранение пропускают. Отменённое автосохранение ждёт следующего интервала. Lua-подписчик получает последним аргументом таблицу `{ret_value = true}`, нативный - `event->result`. Сохранение кнопкой быстрого сохранения Lua может запретить и раньше (`level_input.script`). План: `plans/addon_api_ideas/spec.md`, П21. Страница: [Данные в сейве](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/save.md)"
+    },
+    "plugin_on_reloaded": {
+      "section": "builtin",
+      "args": [
+        "`STRING` id аддона, чей плагин перезагружен",
+        "`STRING` как: `plugin_reload` или `addon_reload`",
+        "`STRING` или `NIL` имя уровня, если идёт игра; `NIL` - главное меню"
+      ],
+      "when": "консольная команда `plugin_reload` или `addon_reload` загрузила плагин заново, в начале кадра. Новый экземпляр плагина подписался в `gwp_plugin_init` и получает событие сам",
+      "notes": "После перезагрузки посреди игры плагин не получает `alife_on_start` этой игры: третий аргумент говорит, что игра идёт, и плагин сам настраивает онлайн-объекты заново. Другие плагины и Lua тоже получают событие - фильтруйте по id аддона. План: `plans/addon_api_ideas/spec.md`, П34. Страница: [События](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/events.md)"
+    },
     "alife_on_time_skip_begin": {
       "section": "builtin",
       "args": [
@@ -405,6 +457,94 @@
       ],
       "when": "курсор ушёл с ячейки"
     },
+    "inventory_item_menu_add_property": {
+      "section": "inventory_menu",
+      "args": [
+        "`LUA_REF` меню (CUIPropertiesBox)",
+        "`OBJECT` предмет",
+        "`STRING` режим меню: inventory, dead_body, trade, upgrade"
+      ],
+      "when": "правый клик по предмету: меню заполняется, свои строки — property_ui:AddItem(текст)",
+      "notes": "Шлёт actor_menu_inventory.property_box_add_properties, когда её зовёт движок (CUIActorMenu::ActivatePropertiesBox). Нужна правка движка (spec addon_api_ideas П45); до неё событие не приходит."
+    },
+    "inventory_item_menu_property_clicked": {
+      "section": "inventory_menu",
+      "args": [
+        "`LUA_REF` меню (CUIPropertiesBox)",
+        "`OBJECT` предмет",
+        "`STRING` режим меню",
+        "`STRING` текст выбранной строки"
+      ],
+      "when": "клик по строке, которую добавил аддон",
+      "notes": "Шлёт actor_menu_inventory.property_box_clicked (движок: строка с тегом 0 в CUIActorMenu::ProcessPropertiesBoxClicked). Нужна правка движка (П45)."
+    },
+    "item_menu_on_build": {
+      "section": "inventory_menu",
+      "args": [
+        "`OBJECT` предмет",
+        "`STRING` режим меню: inventory, dead_body, trade, upgrade",
+        "`OBJECT` владелец предмета (item:parent(): актор, НПС, ящик) или nil",
+        "`OBJECT` партнёр окна (торговец, механик, НПС или труп, ящик) или nil — в своём инвентаре"
+      ],
+      "when": "правый клик по предмету: меню строится, после строк реестра addons.register_item_menu; свои строки — addons.item_menu_add(id, текст) (плагин — через script_call)",
+      "notes": "Шлёт gw_item_menu.build_begin (реестр строк меню предмета). Перед inventory_item_menu_add_property. addons.item_menu_add работает только во время рассылки. Нужна правка движка П45 (пересборка xrGame)."
+    },
+    "item_menu_on_click": {
+      "section": "inventory_menu",
+      "args": [
+        "`STRING` id строки (id пункта addons.register_item_menu или id из addons.item_menu_add)",
+        "`OBJECT` предмет",
+        "`STRING` режим меню",
+        "`OBJECT` владелец предмета или nil",
+        "`OBJECT` партнёр окна или nil"
+      ],
+      "when": "клик по строке реестра меню предмета (после action пункта)",
+      "notes": "Шлёт gw_item_menu.clicked, после inventory_item_menu_property_clicked. Предмет мог быть удалён действием пункта (объект ещё жив до конца кадра)."
+    },
+    "companion_menu_on_build": {
+      "section": "misc",
+      "emitter": "`gw_companion_menu.script` (`build`, зовёт `ui_addon_companion_quick_menu.script` при открытии меню)",
+      "args": [
+        "`INT` id отряда-напарника, по командиру которого меню показывает состояния кнопок",
+        "`VEC3` или `NIL` точка под прицелом (как у «иди в точку» базы) или nil"
+      ],
+      "when": "открытие меню команд напарникам (средняя кнопка мыши): кнопки строятся, после кнопок реестра addons.register_companion_menu; свои кнопки — addons.companion_menu_add(id, текст, столбик) (плагин — через script_call)",
+      "notes": "addons.companion_menu_add работает только во время рассылки. Команды меню идут всем отрядам-напарникам: список — addons.companions.squads()."
+    },
+    "companion_menu_on_click": {
+      "section": "misc",
+      "emitter": "`gw_companion_menu.script` (`clicked`)",
+      "args": [
+        "`STRING` id кнопки (id addons.register_companion_menu, id из addons.companion_menu_add, у кнопки столбика — id элемента items или \"<id столбика>:<номер>\")",
+        "`STRING` или `NIL` id столбика или nil — отдельная кнопка"
+      ],
+      "when": "клик по кнопке аддона в меню команд напарникам (меню уже закрыто, после action)"
+    },
+    "actor_menu_partner_equipment_before_move": {
+      "section": "inventory_menu",
+      "emitter": "`actor_menu_inventory.script` (`CUIActorMenu_PartnerEquipmentCanMove`, зовёт движок)",
+      "args": [
+        "`OBJECT` НПС-партнёр окна",
+        "`OBJECT` предмет",
+        "`BOOL` true — предмет уходит НПС (слот, пояс, рюкзак), false — в рюкзак игрока",
+        "`STRING` куда: slot, belt, ruck",
+        "`NUMBER` номер слота движка для slot (как `npc:item_in_slot`), иначе 0"
+      ],
+      "when": "окно обмена в режиме «снаряжение напарника» (`ActorMenu.set_partner_equipment`): перед каждым переносом вещи с участием НПС",
+      "notes": "начальное значение `true`; `false` — вещь остаётся на месте. Движок до события уже отказал: квестовые вещи игрока НПС не отдаются, НПС не унесёт (вес). Нужна пересборка xrGame (plans/addon_companion_extended/npc_equipment.md)."
+    },
+    "actor_menu_partner_equipment_changed": {
+      "section": "inventory_menu",
+      "args": [
+        "`OBJECT` НПС-партнёр окна",
+        "`STRING` что изменилось: slot или belt",
+        "`NUMBER` номер слота движка (для belt — 0)",
+        "`OBJECT` вещь в слоте теперь / вещь, надетая на пояс, или `NIL` — слот опустел / вещь снята с пояса",
+        "`NUMBER` id вещи, что была там, или `NIL`"
+      ],
+      "when": "окно в режиме «снаряжение напарника» увидело, что слот или пояс НПС изменился (переложил игрок или сам НПС взял другое оружие); по вызову на слот и на каждую вещь пояса",
+      "notes": "Шлёт `actor_menu_inventory.CUIActorMenu_OnPartnerEquipmentChanged` (зовёт движок, CUIActorMenu). Слот 7 (OUTFIT_SLOT) — точка смены модели НПС под костюм. Нужна пересборка xrGame."
+    },
     "main_menu_on_keyboard": {
       "section": "main_menu",
       "args": [
@@ -457,6 +597,16 @@
       "section": "main_menu",
       "args": [],
       "when": "сразу после всех подписчиков `opt_menu_on_accept`"
+    },
+    "addon_option_changed": {
+      "section": "main_menu",
+      "args": [
+        "`STRING` ключ опции `\"<вкладка>:<id>\"`",
+        "новое значение, как его отдаёт `addons.options.get`: `BOOL`, `NUMBER`, `STRING`, `LUA_REF` (массив строк у `listbox`) или `NIL`",
+        "прежнее значение, в том же виде"
+      ],
+      "when": "опция реестра настроек получила новое значение: `addons.options.set` (сразу после записи) или окно настроек по «Принять» (после записи всех вкладок, до `opt_menu_on_accepted`); одно событие на опцию, только если значение действительно изменилось",
+      "notes": "Шлёт `gw_options.script` (окно - через `axr_main_options.opt_menu_on_accept`). Колбэки строки (`on_change`, `on_accept`) при `addons.options.set` не вызываются - это событие для них замена. Окно сравнивает значения, только если у события есть подписчики. Пробел П07 `plans/addon_api_ideas/spec.md`"
     },
     "npc_on_use": {
       "section": "npc",
@@ -761,6 +911,18 @@
       "when": "отряд сменил группировку: `sim_squad_scripted:set_squad_community` (события смерти лидеров фракций, вызов API `squad_set_community`), сразу после записи `player_id`, до смены группировки бойцов. Только когда группировка реально изменилась",
       "notes": "Других писателей `player_id` у зарегистрированного отряда нет (конструктор и `STATE_Read` работают до регистрации), поэтому плагин может кэшировать группировку отряда и сбрасывать кэш по этому событию (так делает `gw_eoc`). Группировка отряда для счёта — `squad:get_squad_community()` = `squad_community_by_behaviour[player_id]`. Lua отправляет событие, только если у него есть подписчики"
     },
+    "smart_terrain_on_attack": {
+      "section": "server",
+      "args": [
+        "`NUMBER` id смарта-цели (серверный объект `SMRTTRRN`)",
+        "`STRING` фракция атакующего отряда (`squad:get_squad_community()`)",
+        "`NUMBER` id отряда",
+        "`NUMBER` id смарта, на котором отряд создан и откуда он выходит",
+        "`STRING` владелец цели в момент выхода по состоянию плагина `gw_eoc` (`sim_smart.get_smart_owner`); `\"none\"` — ничей или состояние плагина недоступно"
+      ],
+      "when": "отряд создан на смарте и сразу отправлен на смарт-цель (`sim_squad.create_squad` с целью): атака фракции по таймеру (`sim_smart.spawn_attack_squad`: цель — приоритет ПДА актора или выбор `find_targets` плагина `gw_eoc`), атака, купленная в ПДА (`sim_smart.spawn_attack`), волна и рейд «Последнего рубежа» (`gw_lastline_spawns`). Онлайн и офлайн (атаки симуляции почти всегда офлайн), один раз на отряд, сразу после назначения цели",
+      "notes": "Цель — и чужой смарт, и ничей (расширение фракции): сравните владельца (аргумент 4) со своей фракцией. Отряд, сменивший цель уже после появления (выбор цели симуляцией, флажки ПДА), события не даёт — его видно по `squad_on_assign_smart`. Охотник на актора без смарта-цели события не даёт. Lua отправляет событие, только если у него есть подписчики. План addon_quests"
+    },
     "smart_terrain_on_update": {
       "section": "smart",
       "args": [
@@ -795,6 +957,27 @@
         "`SERVER_OBJECT` смарт-террейн"
       ],
       "when": "актор покинул радиус во время захвата"
+    },
+    "smart_terrain_on_read_params": {
+      "section": "smart",
+      "args": [
+        "`SERVER_OBJECT` смарт-террейн"
+      ],
+      "when": "конец `se_smart_terrain:read_params`: параметры смарта (`arrive_dist`, `max_population`, `ini`, …) прочитаны из его cfg. Приходит из `STATE_Read` (смарт `all.spawn` и сейва — до `on_register`) и из `on_before_register` смарта, созданного в рантайме (`alife():create`)",
+      "notes": "Точка расширения для смартов, созданных аддонами (plans/addon_runtime_smarts): подписчик переопределяет поля смарта, например `arrive_dist` и `max_population` из своей записи. Объект ещё может быть не зарегистрирован — `alife():create` и `release` здесь нельзя. Lua отправляет событие, только если у него есть подписчики"
+    },
+    "smart_terrain_on_service_squad": {
+      "section": "smart",
+      "args": [
+        "`NUMBER` id смарта (серверный объект `SMRTTRRN`)",
+        "`NUMBER` id отряда",
+        "`STRING` роль: `trader`, `mechanic`, `barmen`, `medik`, `unik` или `explorer` (слот плагина `gw_eoc`)",
+        "`STRING` секция отряда (`<фракция>_sim_squad_<роль>` или секция записи мета-гарнизона)",
+        "`STRING` фракция отряда (`squad:get_squad_community()`)",
+        "`STRING` причина: `\"spawn\"` — новый отряд (проверка служебных слотов плагином `gw_eoc`, наём торговца или механика `sim_smart.spawnTraderOnSmart` / `spawnMechanicOnSmart`); `\"unpack\"` — отряд распакован из мета-гарнизона (`sim_garrison_pack`), id у него новый"
+      ],
+      "when": "на смарте появился служебный отряд — торговец, механик, бармен, медик, уник или разведчик: `sim_smart.create_service_squads` (онлайн и офлайн, по ответу плагина) и распаковка мета-гарнизона уровня актора (`sim_garrison_pack.spawn_from_meta_entry`). Один раз на созданный отряд",
+      "notes": "Для метки на настоящем торговце: id отряда — `alife_object(squad_id)`, бойцы — `squad:squad_members()`. Упаковка гарнизона (`sim_garrison_pack.pack_level`) удаляет отряд без этого события — слушайте `squad_on_remove` / `server_object_on_unregister`, а при распаковке придёт новое событие с причиной `\"unpack\"` и новым id. Отряд, который создать не удалось (лимит id), события не даёт. Lua отправляет событие, только если у него есть подписчики. План addon_quests"
     },
     "on_pstor_save_all": {
       "section": "pstor",
@@ -859,8 +1042,8 @@
         "`LUA_REF` биндер",
         "`NUMBER` дельта, мс"
       ],
-      "when": "каждое обновление биндера (каждый кадр), пока актор жив",
-      "notes": "с этапа B-4 отправляет движок; плагин получает на месте биндера `GWP_T_LUA_REF` без содержимого, Lua-подписчики — `db.actor_binder` через Lua-адаптер `axr_main.script` (после `CScriptBinder::shedule_Update`, только живой актор); частота — как у биндера актора"
+      "when": "каждое обновление биндера актора, пока актор жив (около 5 раз в секунду, не каждый кадр)",
+      "notes": "Не каждый кадр: биндер актора троттлится — следующий вызов не раньше чем через `npc_perf_binder_near_interval_ms` (180 мс по умолчанию, около 5 раз в секунду); то, что должно следовать за камерой каждый кадр, — на `actor_on_frame`. с этапа B-4 отправляет движок; плагин получает на месте биндера `GWP_T_LUA_REF` без содержимого, Lua-подписчики — `db.actor_binder` через Lua-адаптер `axr_main.script` (после `CScriptBinder::shedule_Update`, только живой актор); частота — как у биндера актора"
     },
     "actor_on_update_slow": {
       "section": "actor",
@@ -868,8 +1051,8 @@
         "`LUA_REF` биндер",
         "`NUMBER` дельта, мс"
       ],
-      "when": "тоже каждый кадр, сразу после `_fast`",
-      "notes": "«медленным» его делает только `throttle_ms` подписчика: у Lua — в `RegisterScriptCallback`, у плагина — в `event_subscribe_ex`. с этапа B-4 отправляет движок; плагин получает на месте биндера `GWP_T_LUA_REF` без содержимого, Lua-подписчики — `db.actor_binder` через Lua-адаптер `axr_main.script` (после `CScriptBinder::shedule_Update`, только живой актор); частота — как у биндера актора"
+      "when": "в том же обновлении биндера, сразу после `_fast`",
+      "notes": "Не каждый кадр: биндер актора троттлится — следующий вызов не раньше чем через `npc_perf_binder_near_interval_ms` (180 мс по умолчанию, около 5 раз в секунду); то, что должно следовать за камерой каждый кадр, — на `actor_on_frame`. «медленным» его делает только `throttle_ms` подписчика: у Lua — в `RegisterScriptCallback`, у плагина — в `event_subscribe_ex`. с этапа B-4 отправляет движок; плагин получает на месте биндера `GWP_T_LUA_REF` без содержимого, Lua-подписчики — `db.actor_binder` через Lua-адаптер `axr_main.script` (после `CScriptBinder::shedule_Update`, только живой актор); частота — как у биндера актора"
     },
     "actor_on_update": {
       "section": "actor",
@@ -877,8 +1060,17 @@
         "`LUA_REF` биндер",
         "`NUMBER` дельта, мс"
       ],
-      "when": "тоже каждый кадр, сразу после `actor_on_update_slow`",
-      "notes": "устаревшее имя, оставлено для сторонних скриптов, подписанных на `actor_on_update`; без подписчиков стоит один поиск в шине. с этапа B-4 отправляет движок; плагин получает на месте биндера `GWP_T_LUA_REF` без содержимого, Lua-подписчики — `db.actor_binder` через Lua-адаптер `axr_main.script` (после `CScriptBinder::shedule_Update`, только живой актор); частота — как у биндера актора"
+      "when": "в том же обновлении биндера, сразу после `actor_on_update_slow`",
+      "notes": "Не каждый кадр: биндер актора троттлится — следующий вызов не раньше чем через `npc_perf_binder_near_interval_ms` (180 мс по умолчанию, около 5 раз в секунду); то, что должно следовать за камерой каждый кадр, — на `actor_on_frame`. устаревшее имя, оставлено для сторонних скриптов, подписанных на `actor_on_update`; без подписчиков стоит один поиск в шине. с этапа B-4 отправляет движок; плагин получает на месте биндера `GWP_T_LUA_REF` без содержимого, Lua-подписчики — `db.actor_binder` через Lua-адаптер `axr_main.script` (после `CScriptBinder::shedule_Update`, только живой актор); частота — как у биндера актора"
+    },
+    "actor_on_frame": {
+      "section": "actor",
+      "emitter": "движок (`CGameObject::shedule_Update` актора)",
+      "args": [
+        "`INT` дельта кадра, мс"
+      ],
+      "when": "каждый кадр вне паузы, пока актор жив, — после `actor_on_first_update`; в кадре, где пришёл `actor_on_update`, — после него",
+      "notes": "Обработчик вызывается **каждый кадр** (60–150 раз в секунду): только то, что должно следовать за камерой (призрак под прицелом, метка точки), дорогое — проверки, поиск по спискам, много лучей — троттлить (`throttle_ms` подписки или своим таймером). Камера — этого кадра (`device().cam_pos` / `cam_dir`, `Device.mFullTransform` уже пересчитаны в `OnCameraUpdated`), та же, что у мира и UI кадра. В паузе и в главном меню не приходит (планировщик стоит). Без подписчиков стоит одна проверка в шине. Источник только движок: отправка из Lua отбрасывается. Старый движок без события — подписка не получает ничего: проверять `event_bus.list()` (поле `engine`) и падать на `actor_on_update`"
     },
     "on_level_changing": {
       "section": "actor",
@@ -985,6 +1177,97 @@
       ],
       "when": "покупка или продажа предмета"
     },
+    "actor_on_money_change": {
+      "section": "actor",
+      "emitter": "движок (`CInventoryOwner::set_money`)",
+      "args": [
+        "`NUMBER` деньги актора после изменения",
+        "`NUMBER` изменение со знаком: больше нуля — получил, меньше нуля — потратил"
+      ],
+      "when": "деньги актора изменились: торговля, награда, `give_money` / `transfer_money`, `cmd.money` и любой другой путь через `set_money`",
+      "notes": "только для актора и только когда сумма правда изменилась. Не приходит при появлении актора (новая игра, загрузка сейва, смена уровня: движок ставит деньги сохранённого актора) и до конца его первого апдейта — деньги, выданные в `actor_on_first_update`, тоже не считаются. Причины нет: торговлю отдельно описывает `actor_on_trade`. Не меняйте деньги из обработчика без нужды: новое изменение придёт вложенным событием"
+    },
+    "actor_on_trade_deal": {
+      "section": "actor",
+      "emitter": "движок (`CUIActorMenu::OnBtnPerformTrade*`)",
+      "args": [
+        "`OBJECT` партнёр по сделке (торговец, сталкер или мутант-торговец)",
+        "`NUMBER` деньги, полученные актором: сумма цен проданных предметов",
+        "`NUMBER` деньги, отданные актором: сумма цен купленных предметов",
+        "`ARRAY` id проданных предметов в порядке передачи (в Lua — таблица `{id, ...}`; пустая — актор ничего не продавал); предметы уже у партнёра",
+        "`ARRAY` id купленных предметов (пустая — ничего не купил); предметы уже у актора",
+        "`ARRAY` цены проданных предметов (в Lua — таблица `{money, ...}`): деньги `actor_on_trade` за каждый предмет, параллельно id проданных — `sold_prices[i]` за `sold_ids[i]`, та же длина",
+        "`ARRAY` цены купленных предметов: деньги `actor_on_trade` за каждый предмет, параллельно id купленных — `bought_prices[i]` за `bought_ids[i]`"
+      ],
+      "when": "сделка окна торговли: нажата «Совершить сделку» (или кнопка «Купить» / «Продать»), и хотя бы один предмет перешёл из рук в руки. Одно событие на нажатие — после всех `actor_on_trade` и `actor_on_money_change` этой сделки",
+      "notes": "Предмет, отданный партнёру бесплатно (`DonateCurrentItem`), — не сделка: для него приходит только `actor_on_trade`. Деньги — суммы цен из `actor_on_trade` этой сделки (что движок правда перевёл), а не баланс актора; цены по предметам — те же деньги `actor_on_trade`. Аргументы 5 и 6 (цены) дописаны в конец: обработчики на пять аргументов работают как раньше. Предметы онлайн: секция — `level.object_by_id(id):section()`, патроны в пачке — `obj:ammo_get_count()`; количество предметов — длина массива. Больше 4096 предметов на одной стороне массив не держит — лишние отбрасываются. План addon_quests"
+    },
+    "trade_on_item_price": {
+      "section": "actor",
+      "emitter": "движок (`CTrade::GetItemPrice`)",
+      "args": [
+        "`OBJECT` предмет",
+        "`OBJECT` другая сторона сделки (торговец, сталкер, мутант-торговец)",
+        "`BOOL` `true` — актор покупает (платит цену), `false` — актор продаёт (получает цену)",
+        "`NUMBER` цена движка: база × состояние × отношение × коэффициенты торговли × скидки `trade_manager`"
+      ],
+      "when": "движок считает цену предмета в торговле с актором: окно торговли (цена в ячейке, подсказке, сумма списков) и сама передача предмета",
+      "notes": "начальное значение — цена движка; число в результате (`flags.ret_value = 1234` в Lua) — новая цена, её показывает окно и её платит сделка. Результат обрезается до 1..1000000, как цена движка; не число — цена не меняется. Приходит часто (каждая ячейка при каждом пересчёте) и только при подписчиках: обработчик должен быть быстрым и детерминированным — одна и та же цена для показа и для оплаты. Предмет, который торговец не покупает или не продаёт (цена 0), и бесплатная передача события не дают. Подписчиков несколько — каждый видит результат предыдущего в `flags.ret_value`. Пробел П08 (plans/addon_api_ideas)"
+    },
+    "actor_on_before_trade_deal": {
+      "section": "actor",
+      "emitter": "движок (`CUIActorMenu::OnBtnPerformTrade*`)",
+      "args": [
+        "`OBJECT` партнёр по сделке",
+        "`NUMBER` деньги, которые получит актор: сумма цен продаваемых предметов",
+        "`NUMBER` деньги, которые отдаст актор: сумма цен покупаемых предметов",
+        "`ARRAY` id продаваемых предметов (в Lua — таблица `{id, ...}`; пустая — актор ничего не продаёт); предметы ещё у актора",
+        "`ARRAY` id покупаемых предметов (пустая — ничего не покупает); предметы ещё у партнёра"
+      ],
+      "when": "нажата «Совершить сделку» (или «Купить» / «Продать»), денег хватает, но предметы ещё не переданы",
+      "notes": "начальное значение `true`; `false` отменяет сделку целиком: ничего не передаётся, деньги не меняются, предметы остаются в списках торговли, `actor_on_trade` / `actor_on_trade_deal` не приходят. Причину игроку показывает сам подписчик (новость, сообщение на HUD). Если денег не хватает, движок отказывает раньше и событие не приходит. Пробел П08 (plans/addon_api_ideas)"
+    },
+    "actor_on_before_item_take": {
+      "section": "actor",
+      "emitter": "движок (`CActor::PickupModeUpdate*`)",
+      "args": [
+        "`OBJECT` предмет, который актор поднимает"
+      ],
+      "when": "актор поднимает предмет с земли клавишей «Использовать» — перед тем, как движок отправит подбор",
+      "notes": "начальное значение `true`; `false` — предмет остаётся лежать, `actor_on_item_take` не придёт. После отмены движок не спрашивает снова, пока клавишу не нажмут заново (с мульти-подбором при зажатой клавише — каждый кадр). Передачи из скриптов (`transfer_item`, `give_object_to_actor`), из ящика и из торговли не спрашивают. Пробел П30 (plans/addon_api_ideas)"
+    },
+    "actor_on_before_item_drop": {
+      "section": "actor",
+      "emitter": "движок (`CUIActorMenu::SendEvent_Item_Drop`, клавиша «Выбросить»)",
+      "args": [
+        "`OBJECT` предмет, который игрок выбрасывает"
+      ],
+      "when": "игрок выбрасывает предмет: меню предмета, перетаскивание за окно, клавиша «Выбросить» в окне инвентаря и вне его",
+      "notes": "начальное значение `true`; `false` — предмет остаётся в инвентаре, `actor_on_item_drop` не придёт. «Выбросить все» для стопки спрашивает один раз — по первому предмету стопки. Выбросы скриптов (`drop_item`) и монстров (бюрер, контролёр) не спрашивают. Пробел П30 (plans/addon_api_ideas)"
+    },
+    "item_on_upgrade": {
+      "section": "actor",
+      "emitter": "движок (`inventory::upgrade::Manager`)",
+      "args": [
+        "`OBJECT` предмет",
+        "`STRING` секция апгрейда (id из дерева апгрейдов предмета)"
+      ],
+      "when": "на предмет установлен апгрейд: окно техника, Lua `install_upgrade` / `add_upgrade`, плагин `item_install_upgrade`",
+      "notes": "после установки: свойства предмета уже пересчитаны, `obj:has_upgrade(upgrade)` — `true`. Апгрейды из конфига (`installed_upgrades`) и из сейва при спавне предмета событие не дают. Предмет любого владельца (актор, НПС, ящик). Пробел П10 (plans/addon_api_ideas)"
+    },
+    "news_on_before_show": {
+      "section": "actor",
+      "emitter": "движок (`CActor::AddGameNews`)",
+      "args": [
+        "`STRING` заголовок, как его передали (id строки или готовый текст)",
+        "`STRING` текст, как его передали",
+        "`STRING` иконка (текстура)",
+        "`NUMBER` время показа, мс",
+        "`NUMBER` тип: `0` — новость, `1` — реплика разговора"
+      ],
+      "when": "новость или сообщение вот-вот появится на HUD и в журнале ПДА: Lua `give_game_news` (и `news_manager`), плагин `news_send`, отложенная новость в свой срок",
+      "notes": "начальное значение `true`; `false` — новость не показывается и не попадает в журнал ПДА. Обработчик может сам отправить другую новость (вложенный вызов тоже придёт в событие). Отложенная новость спрашивает, когда пришёл её срок, а не при отправке. Пробел П30 (plans/addon_api_ideas)"
+    },
     "actor_on_info_callback": {
       "section": "actor",
       "args": [
@@ -1086,24 +1369,43 @@
     "actor_on_save": {
       "section": "actor",
       "args": [],
-      "when": "**не отправляется**",
-      "notes": "объявлено, но `bind_stalker.script` вызывает одноимённую функцию `bind_stalker_ext` напрямую, без шины"
+      "when": "биндер актора записал свою часть сейва (`bind_stalker_ext.actor_on_save`): запись сейва и смена уровня",
+      "notes": "с 2026-11-14 (spec П09); раньше было объявлено, но не отправлялось. Приходит после записей базы (тайники, выброс, пси-шторм), пакет подписчику не передаётся: порядок записей пакета фиксирован. Данные аддона сохранять в `save_state` (`m_data`), а не здесь"
     },
     "actor_on_load": {
       "section": "actor",
       "args": [],
-      "when": "**не отправляется**",
-      "notes": "объявлено, но `bind_stalker.script` вызывает одноимённую функцию `bind_stalker_ext` напрямую, без шины"
+      "when": "биндер актора прочитал свою часть сейва (`bind_stalker_ext.actor_on_load`), после `load_state` скриптов",
+      "notes": "с 2026-11-14 (spec П09); раньше было объявлено, но не отправлялось. Пакет подписчику не передаётся. Уровень и `db.actor` ещё не готовы к игре: работу с миром — в `actor_on_first_update`"
+    },
+    "actor_on_sleep": {
+      "section": "actor",
+      "args": [
+        "`NUMBER` сколько игровых часов прошло",
+        "`BOOL` `true` — принудительный сон (`ui_sleep_dialog.sleep_forced`: анабиотик, выброс и т.п.), `false` — окно сна или спальник"
+      ],
+      "when": "сон сдвинул игровое время (`ui_sleep_dialog.dream_callback`, время уже сдвинуто, экран ещё затемнён)",
+      "notes": "с 2026-11-14 (spec П09). Первый аргумент — как у одноимённого события Anomaly; второй добавлен. Время сна другими путями (`level.change_game_time` аддона, пропуск времени симуляции) события не даёт"
     },
     "level_input_on_key_press": {
       "section": "level_input",
-      "emitter": "`level_input.script`",
+      "emitter": "движок (`CLevel::IR_OnKeyboardPress`, перед `level_input.on_key_press`)",
       "args": [
         "`NUMBER` код клавиши (DIK)",
         "`NUMBER` игровое действие (`key_bindings`)"
       ],
       "when": "нажатие клавиши на уровне, когда есть актор",
       "notes": "начальное значение `false`; `true` — клавиша обработана, дальше её не обрабатывают ни `level_input`, ни движок"
+    },
+    "level_input_on_mouse_wheel": {
+      "section": "level_input",
+      "emitter": "движок (`CLevel::IR_OnMouseWheel`)",
+      "args": [
+        "`NUMBER` прокрутка по вертикали: больше нуля — вверх, меньше нуля — вниз",
+        "`NUMBER` прокрутка по горизонтали (обычно `0`)"
+      ],
+      "when": "колесо мыши на уровне, когда есть актор и не открыто окно, которое само забирает колесо (инвентарь, PDA и т.п.), игра не на паузе",
+      "notes": "начальное значение `false`; `true` (`flags.ret = true` в Lua) — колесо обработано, актор его не получает: оружие не переключается. Колбэк актора `mouse_wheel` приходит раньше и поглотить колесо не может"
     },
     "actor_on_leave_dialog": {
       "section": "pda",
@@ -1112,6 +1414,14 @@
       ],
       "when": "закрытие диалога",
       "notes": "id может быть `nil` или устаревшим"
+    },
+    "actor_on_job_request": {
+      "section": "pda",
+      "args": [
+        "`OBJECT` НПС, у которого актор спросил работу"
+      ],
+      "when": "актор спросил у НПС работу: фраза «Есть работа?» штатных диалогов `dm_ordered_task_dialog` / `dm_sim_ordered_task_dialog` (сим-торговцы, лидеры группировок и др.)",
+      "notes": "Приходит из `axr_task_manager.generate_available_tasks` после того, как список работ НПС собран (задания базы и аддонов, `gw_tasks.append_available`), — и тогда, когда работ нет. Подходит для целей «поговорить с НПС о работе»: квест-вступление аддона `gwd_quests` завершается по нему у торговца группировки игрока (`addons.tasks.npc_matches(npc, {role = \"trader\", faction = \"actor\"})`). План addon_quests"
     },
     "map_spot_menu_add_property": {
       "section": "pda",
@@ -1133,15 +1443,31 @@
       ],
       "when": "клик по пункту меню метки"
     },
+    "map_spot_on_removed": {
+      "section": "pda",
+      "emitter": "движок (`CMapManager::Update`)",
+      "args": [
+        "`NUMBER` id объекта метки",
+        "`STRING` тип метки (`spot_type` из `map_spots.xml`)"
+      ],
+      "when": "метка на карте снята: `level.map_remove_object_spot`, плагинный `map_spot_remove`, объект метки исчез, у метки кончился срок (`ttl`), метку заменили (`SetMapLocation`)",
+      "notes": "движок собирает снятые метки и шлёт событие в начале следующего обновления менеджера карты (следующий кадр), а не в момент снятия: обработчик может сам ставить и снимать метки. Собираются только при подписчиках и после спавна актора. Приходит и для автоматических меток отношений НПС (`friend_location`, `deadbody_location` и т.п.) — фильтруйте по типу"
+    },
     "TrdWndOpened": {
       "section": "pda",
-      "args": [],
-      "when": "открылось окно торговли"
+      "args": [
+        "`OBJECT` или `NIL` партнёр по торговле (торговец, сталкер или мутант-торговец); `NIL` — движок не дал партнёра или объекта уже нет"
+      ],
+      "when": "открылось окно торговли",
+      "notes": "Партнёра открытого окна в любой момент даёт `actor_menu.get_trade_partner()`. Аргумент дописан: обработчики без аргументов работают как раньше"
     },
     "TrdWndClosed": {
       "section": "pda",
-      "args": [],
-      "when": "окно торговли закрылось"
+      "args": [
+        "`OBJECT` или `NIL` партнёр закрываемого окна (тот же, что в `TrdWndOpened`); `NIL` — объекта уже нет"
+      ],
+      "when": "окно торговли закрылось",
+      "notes": "Внутри обработчика `actor_menu.get_trade_partner()` ещё возвращает партнёра, после него — `nil`"
     },
     "actor_menu_mode_changed": {
       "section": "pda",
@@ -1150,6 +1476,45 @@
         "`NUMBER` прежний режим"
       ],
       "when": "смена режима меню актора (0–4)"
+    },
+    "GUI_on_show": {
+      "section": "pda",
+      "emitter": "движок (`CDialogHolder::StartMenu`)",
+      "args": [
+        "`STRING` имя окна (`SetWindowName`); у окна без имени — его класс",
+        "`STRING` класс окна в движке: `CUIActorMenu`, `CUIPdaWnd`, `CUITalkWnd`, `CUIDialogWndEx` (Lua-окно) и т.п."
+      ],
+      "when": "окно игры или главного меню показано (`ShowDialog` из Lua, инвентарь, ПДА, диалог, торговля, меню)",
+      "notes": "приходит после того, как окно встало на экран и забрало ввод; только при подписчиках. Lua тоже может слать это событие (`SendScriptCallback`) — движок такие отправки не отбрасывает. У разных Lua-окон класс один (`CUIDialogWndEx`): различайте их по имени — задайте его `self:SetWindowName(\"my_wnd\")`"
+    },
+    "GUI_on_hide": {
+      "section": "pda",
+      "emitter": "движок (`CDialogHolder::StopMenu`)",
+      "args": [
+        "`STRING` имя окна (`SetWindowName`); у окна без имени — его класс",
+        "`STRING` класс окна в движке"
+      ],
+      "when": "окно игры или главного меню скрыто (`HideDialog`, закрытие инвентаря, ПДА и т.п.)",
+      "notes": "приходит после снятия окна с экрана; только при подписчиках. Пара к `GUI_on_show`"
+    },
+    "on_console_execute": {
+      "section": "misc",
+      "emitter": "движок (`CConsole::ExecuteCommand`)",
+      "args": [
+        "`STRING` имя консольной команды",
+        "`STRING` её аргументы (`\"\"` — без аргументов; у команд, которые сами переводят аргументы в нижний регистр, — уже в нижнем)"
+      ],
+      "when": "консольная команда выполнилась: набрана в консоли, пришла из `user.ltx`, `get_console():execute`, `console_execute` плагина, команда аддона (`addons.register_command`)",
+      "notes": "приходит после выполнения команды; запрос значения (команда без аргументов, которой они нужны) не приходит, неизвестная или выключенная команда — тоже. Только с главного потока и только при подписчиках. Обработчик может сам выполнять команды — придёт вложенное событие (глубина шины ограничена)"
+    },
+    "on_localization_change": {
+      "section": "misc",
+      "emitter": "движок (консольная команда `g_language`)",
+      "args": [
+        "`STRING` новый язык (`rus`, `eng`, …)"
+      ],
+      "when": "игрок сменил язык (меню настроек или консоль `g_language`), язык действительно поменялся",
+      "notes": "к этому моменту строки нового языка загружены, имена предметов перечитаны, окна получили `ui_reset`: перестройте свои надписи (`game.translate_string`). Смена языка при сборке контента (язык из аддона, выбранный раньше) события не даёт"
     },
     "monster_on_update": {
       "section": "monster",
@@ -1267,6 +1632,71 @@
       "section": "misc",
       "args": [],
       "when": "конец обновления фракций симуляции, примерно раз в 10 с"
+    },
+    "faction_leader_on_death": {
+      "section": "misc",
+      "args": [
+        "`STRING` фракция лидера (у актора-лидера — базовая фракция актора)",
+        "`NUMBER` или `NIL` id погибшего лидера: `0` — актор; `NIL` — объекта лидера уже нет (офлайн-отряд лидера остался без бойцов)",
+        "`NUMBER` или `NIL` id убийцы: `0` — актор; в офлайн-бою — командир отряда-победителя; `NIL` — убийца неизвестен (аномалия, выброс, гарнизон мета-боя)",
+        "`STRING` или `NIL` фракция убийцы (базовая: `stalker`, а не `actor_stalker`); `NIL` — убийца неизвестен",
+        "`STRING` или `NIL` тип последствия — имя функции `gm_faction_leaders_events_after_dead.script`: `none`, `vendeta`, `punishment`, `disbandment`, `hegemony`, `psydecay`, `dominoes`, `wolf_ticket`, `setup`, `vassalitet`, `deaf_defense`, `aggressive_expansion`, `treachery`, `immortal_leader` (вместо `random_event` — выбранный им сценарий); `NIL` — последствие не запускалось (особый режим игры; в режиме азазеля — при типах `none`, `vendeta`, `punishment`)",
+        "`BOOL` офлайн: смерть в офлайн- или мета-бою симуляции"
+      ],
+      "when": "погиб лидер фракции: онлайн (`npc_on_death_callback`; актор-лидер — `actor_on_before_death`, в том числе в режиме азазеля), в офлайн-бою (`gw_eoc_offline_combat_result`: потеря бойца или отряд лидера без бойцов) и в мета-бою против гарнизона. Один раз на лидера, после флага `ui_pda_factions_tab.leaders[фракция].dead` и последствия",
+      "notes": "Шлёт `gm_faction_leaders.mark_leader_dead`. В обработчике `utils.is_faction_leader_dead(фракция)` уже `true`, последствие (отношения, отряды, новость) уже применено. Повторная смерть отмеченного лидера (отряд лидера опустел после смерти самого лидера; два пути смерти актора-лидера) события не даёт. Флаг не сбрасывается — на фракцию одно событие за игру. Офлайн-событие `npc_on_death_offline` (серверные объекты лидера и убийцы) приходит, как раньше, перед этим. План addon_quests"
+    },
+    "gw_task_state": {
+      "section": "misc",
+      "args": [
+        "`STRING` id задания реестра `addons.register_task`",
+        "`STRING` новое состояние: `\"active\"` — выдано, перешло на другой этап или вернулось из «готово к сдаче»; `\"ready\"` — все этапы пройдены, ждёт сдачи; `\"completed\"`, `\"failed\"`, `\"cancelled\"` — конец выдачи",
+        "`STRING` или `NIL` id текущего этапа (`stages[i].id`, у задания без `stages` — `\"main\"`); в конце — этап, на котором выдача закончилась; `NIL` — задание готово к сдаче",
+        "`STRING` id аддона-владельца задания",
+        "`STRING` или `NIL` прежнее состояние: `\"active\"` или `\"ready\"`; `NIL` — выдача (нового задания или повторная)",
+        "`STRING` или `NIL` причина у `\"failed\"` и у тихого `\"cancelled\"` (`time_limit_action = \"remove\"`, `fail_if.giver_dead = \"remove\"`, `fail` с `\"remove\"`): `\"time\"`, `\"giver_dead\"`, `\"faction_changed\"`, `\"dead\"`, `\"alarm\"`, `\"attack\"`, причина из `def.fail` или `addons.tasks.fail` (`\"forced\"` без причины); иначе `NIL`"
+      ],
+      "when": "состояние задания реестра заданий аддонов изменилось: выдача (`addons.tasks.give`, диалог, `auto_give`, выдача базой), смена этапа (ход целей, `set_stage`, `reset_objective`, `add_objective` на пройденный этап), «готово к сдаче» и возврат из него (живая цель снова не выполнена), конец (сдача, провал, отмена)",
+      "notes": "Шлёт `gw_tasks.script`. Приходит после колбэков задания (`on_give`, `on_enter`, `on_stage`, `on_end` и др.): `addons.tasks.status` / `info` уже новые. Задание, завершённое внутри своей выдачи (`on_give` / `on_enter` вызвали `fail` / `cancel`), событий не даёт. Загрузка сейва событий не даёт: состояние — `addons.tasks.list` / `status`. Задания базы из `task_manager.ltx` без регистрации не входят. Пробел П01 плана addon_api_ideas"
+    },
+    "surge_on_start": {
+      "section": "surge",
+      "args": [
+        "`STRING` вид: `\"surge\"` — выброс, `\"psi_storm\"` — пси-шторм"
+      ],
+      "when": "выброс или пси-шторм начался на уровне актора — с волнами, укрытиями и эффектами (`CSurgeManager:start`, `CPsiStormManager:start`)",
+      "notes": "Выброс без показа (актор спит, под землёй, на уровне без выбросов) начала не даёт — только `surge_on_end` с `skipped = true`. После загрузки сейва, где выброс уже шёл, начало не повторяется. Выключенные в настройках выбросы и пси-шторма событий не дают. Выброс прерывает идущий пси-шторм: сначала `surge_on_start(\"surge\")`, затем `surge_on_end(\"psi_storm\", false)`. План addon_quests"
+    },
+    "surge_on_end": {
+      "section": "surge",
+      "args": [
+        "`STRING` вид: `\"surge\"` или `\"psi_storm\"`",
+        "`BOOL` пропущен: `true` — прошёл без показа (актор спал, был под землёй или на уровне без выбросов), `surge_on_start` перед ним не было; `false` — закончился начатый"
+      ],
+      "when": "выброс или пси-шторм закончился: конец волн (`end_surge` / `finish`, в том числе досрочно — сон в укрытии), пси-шторм прерван выбросом, или выброс прошёл без показа (`skip_surge` / `skip_psi_storm` со счётом в статистике `surges` / `storms`)",
+      "notes": "Приходит после сброса состояния менеджера: `surge_manager.is_finished()` — `true`, следующий выброс уже назначен, артефакты уровня обновлены. Не приходит, если выбросы выключены в настройках, и при переносе таймера на загрузке уровня без выбросов (выброса не было). Менеджер один на игру и живёт с актором: «офлайн-выброс» на другом уровне — это `skipped = true`. План addon_quests"
+    },
+    "surge_on_before_start": {
+      "section": "surge",
+      "emitter": "`surge_manager.script` (`notify_before_start`; зовут `CSurgeManager:start` и `CPsiStormManager:start`)",
+      "args": [
+        "`STRING` вид: `\"surge\"` — выброс, `\"psi_storm\"` — пси-шторм",
+        "`BOOL` `true` — запущен скриптом (`surge_manager.start_surge`, отладка), `false` — по часам"
+      ],
+      "when": "выброс или пси-шторм вот-вот начнётся с показом — после всех проверок «без показа» (выключен в настройках, уровень без выбросов, актор проспал), прямо перед `surge_on_start`",
+      "notes": "начальное значение `true`; `false` (`flags.ret_value = false` в Lua) — отменить: событие проходит как пропущенное (`skip_surge` / `skip_psi_storm`, артефакты обновляются, следующее назначается как обычно), приходит `surge_on_end` с `skipped = true`, `surge_on_start` нет. Подсказки «выброс прошёл, пока вы спали» при отмене нет. План addon_api_ideas, П11"
+    },
+    "weather_on_changed": {
+      "section": "weather",
+      "emitter": "движок (`CGamePersistent::OnFrame`, опрос раз в кадр)",
+      "args": [
+        "`STRING` погода сейчас — то, что вернёт `level.get_weather()`: имя эффекта, пока он играет, иначе цикл погоды",
+        "`STRING` или `NIL` прежняя погода; `NIL` — первая погода уровня (загрузка, смена уровня)",
+        "`BOOL` играет погодный эффект (выброс, пси-шторм и т.п.)",
+        "`STRING` или `NIL` цикл погоды под эффектом (`level.get_weather()` без эффекта)"
+      ],
+      "when": "погода или эффект поменялись: новый цикл от `level_weathers.script` (смена часа, загрузка), `level.set_weather`, плагинные `weather_set` / `weather_lock`, начало и конец эффекта",
+      "notes": "движок сравнивает имя погоды и флаг эффекта с прошлым кадром, поэтому повторная установка того же цикла события не даёт, а изменение приходит в следующем кадре. Плавный переход внутри цикла (смена дескриптора по времени суток) — не смена погоды. План addon_api_ideas, П11"
     },
     "gw_eoc_offline_combat_result": {
       "section": "gw_eoc",

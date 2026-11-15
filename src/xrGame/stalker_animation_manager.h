@@ -190,6 +190,9 @@ public:
     virtual void reinit();
     virtual void reload();
     virtual void update();
+    // The model of a live stalker was replaced (CAI_Stalker::ChangeVisual): takes the new model and starts the current
+    // animations on it at once (plans/addon_companion_extended/npc_visual.md)
+    void on_visual_changed();
     void play_fx(float power_factor, int fx_index);
     void play_delayed_callbacks();
 

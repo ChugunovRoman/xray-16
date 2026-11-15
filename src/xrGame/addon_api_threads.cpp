@@ -10,9 +10,14 @@
 #include "addon_host.h"
 
 #include "xrCore/Threading/ParallelFor.hpp"
+#include "xrCore/Threading/ThreadUtil.h"
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
 
 namespace gw::addons::threads
 {
@@ -115,6 +120,122 @@ GwpResult GWP_CALL ApiTaskParallelFor(
 }
 
 uint32_t GWP_CALL ApiTaskWorkerCount() { return TaskScheduler ? static_cast<uint32_t>(TaskScheduler->GetWorkersCount()) : 0; }
+
+// ---------------------------------------------------------------------------------------------
+// P46 (plans/addon_api_ideas, group plugin): task_async - a work on a background thread of the host, its done on the
+// main thread. GWP_ASYNC_THREADS threads of their own, started at the first task: a long or blocking work (a file, the
+// network) never takes a worker of the task scheduler that the frame waits for.
+// ---------------------------------------------------------------------------------------------
+
+struct AsyncTask
+{
+    const GwpPlugin* plugin = nullptr;
+    GwpAsyncFn work = nullptr;
+    GwpAsyncFn done = nullptr;
+    void* user = nullptr;
+};
+
+struct AsyncState
+{
+    std::mutex lock;
+    std::condition_variable wake; // a task came, or the stop
+    std::condition_variable idle; // a work ended (WaitPluginTasks)
+    std::deque<AsyncTask> queue;  // not started
+    xr_vector<AsyncTask> finished; // work ended, done waits for the main thread (OnFrame)
+    xr_vector<const GwpPlugin*> running; // one entry per work that runs now
+    xr_vector<const GwpPlugin*> crashed; // a work crashed: the plugin is stopped on the main thread (OnFrame)
+    xr_vector<const GwpPlugin*> cancelled; // stopped plugins: a work of them that ends now gives no done
+    bool stop = false;
+    std::thread threads[GWP_ASYNC_THREADS];
+    bool started = false;
+};
+
+AsyncState* g_async = nullptr;
+
+void AsyncWorkThunk(void* context)
+{
+    const AsyncTask& task = *static_cast<const AsyncTask*>(context);
+    task.work(task.user);
+}
+
+void AsyncDoneThunk(void* context)
+{
+    const AsyncTask& task = *static_cast<const AsyncTask*>(context);
+    task.done(task.user);
+}
+
+u32 CountOf(const xr_vector<const GwpPlugin*>& list, const GwpPlugin* plugin)
+{
+    return static_cast<u32>(std::count(list.begin(), list.end(), plugin));
+}
+
+void EraseOne(xr_vector<const GwpPlugin*>& list, const GwpPlugin* plugin)
+{
+    const auto it = std::find(list.begin(), list.end(), plugin);
+    if (it != list.end())
+        list.erase(it);
+}
+
+void AsyncThreadLoop(AsyncState* state)
+{
+    std::unique_lock<std::mutex> guard(state->lock);
+    for (;;)
+    {
+        state->wake.wait(guard, [state] { return state->stop || !state->queue.empty(); });
+        if (state->stop)
+            return;
+        const AsyncTask task = state->queue.front();
+        state->queue.pop_front();
+        state->running.push_back(task.plugin);
+        guard.unlock();
+        // The crash guard of every plugin call, without the call depth of the main thread (the unload waits for this
+        // work itself, WaitPluginTasks)
+        const bool ok = events::CallPluginGuardedBackground(reinterpret_cast<const void*>(task.work), "task_async",
+            &AsyncWorkThunk, const_cast<AsyncTask*>(&task));
+        guard.lock();
+        EraseOne(state->running, task.plugin);
+        if (!ok)
+            state->crashed.push_back(task.plugin);
+        else if (task.done && CountOf(state->cancelled, task.plugin) == 0)
+            state->finished.push_back(task);
+        state->idle.notify_all();
+    }
+}
+
+GwpResult GWP_CALL ApiTaskAsync(const GwpPlugin* self, GwpAsyncFn work, GwpAsyncFn done, void* user)
+{
+    if (!CheckThreadsCall("task_async"))
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!self || !work)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!g_async)
+        g_async = xr_new<AsyncState>();
+    AsyncState& state = *g_async;
+    std::lock_guard<std::mutex> guard(state.lock);
+    u32 count = CountOf(state.running, self);
+    for (const AsyncTask& task : state.queue)
+        count += task.plugin == self ? 1 : 0;
+    for (const AsyncTask& task : state.finished)
+        count += task.plugin == self ? 1 : 0;
+    if (count >= GWP_ASYNC_MAX_PER_PLUGIN)
+    {
+        if (IsDebugLog())
+            Msg("~ [plugin:%s] task_async: %u tasks are queued or running, refused", PluginAddonId(self), count);
+        return GWP_ERROR_INVALID_STATE;
+    }
+    // A new instance of a plugin (reloaded) may take the address of the handle again: its tasks are not cancelled
+    state.cancelled.erase(std::remove(state.cancelled.begin(), state.cancelled.end(), self), state.cancelled.end());
+    if (!state.started)
+    {
+        state.started = true;
+        state.stop = false;
+        for (std::thread& thread : state.threads)
+            thread = Threading::RunThread("X-Ray Plugin async", &AsyncThreadLoop, &state);
+    }
+    state.queue.push_back(AsyncTask{ self, work, done, user });
+    state.wake.notify_one();
+    return GWP_OK;
+}
 } // namespace
 
 bool InTaskPiece() { return t_piece_depth != 0; }
@@ -123,5 +244,85 @@ void FillEngineApi(GwpEngineApi& api)
 {
     api.task_parallel_for = &ApiTaskParallelFor;
     api.task_worker_count = &ApiTaskWorkerCount;
+    api.task_async = &ApiTaskAsync; // P46 (plans/addon_api_ideas, group plugin)
+}
+
+void OnFrame()
+{
+    if (!g_async)
+        return;
+    xr_vector<AsyncTask> finished;
+    xr_vector<const GwpPlugin*> crashed;
+    {
+        std::lock_guard<std::mutex> guard(g_async->lock);
+        finished.swap(g_async->finished);
+        crashed.swap(g_async->crashed);
+    }
+    for (const GwpPlugin* plugin : crashed)
+        OnPluginCrashed(plugin, "a work of task_async"); // StopPlugin -> CancelPluginTasks: its done do not come
+    for (const AsyncTask& task : finished)
+    {
+        // A done of a plugin stopped meanwhile (a crash above, or in a done before this one) is dropped
+        {
+            std::lock_guard<std::mutex> guard(g_async->lock);
+            if (CountOf(g_async->cancelled, task.plugin) != 0)
+                continue;
+        }
+        if (!events::CallPluginGuarded(reinterpret_cast<const void*>(task.done), "task_async done", &AsyncDoneThunk,
+                const_cast<AsyncTask*>(&task)))
+            OnPluginCrashed(task.plugin, "a done of task_async");
+    }
+}
+
+void CancelPluginTasks(const GwpPlugin* plugin)
+{
+    if (!g_async || !plugin)
+        return;
+    std::lock_guard<std::mutex> guard(g_async->lock);
+    auto& queue = g_async->queue;
+    queue.erase(std::remove_if(queue.begin(), queue.end(), [plugin](const AsyncTask& t) { return t.plugin == plugin; }),
+        queue.end());
+    auto& finished = g_async->finished;
+    finished.erase(std::remove_if(finished.begin(), finished.end(),
+        [plugin](const AsyncTask& t) { return t.plugin == plugin; }), finished.end());
+    if (CountOf(g_async->cancelled, plugin) == 0)
+        g_async->cancelled.push_back(plugin);
+}
+
+void WaitPluginTasks(const GwpPlugin* plugin)
+{
+    if (!g_async || !plugin)
+        return;
+    CancelPluginTasks(plugin);
+    std::unique_lock<std::mutex> guard(g_async->lock);
+    if (CountOf(g_async->running, plugin) != 0)
+    {
+        Msg("* [plugin:%s] waits for its task_async work to end before the unload", PluginAddonId(plugin));
+        g_async->idle.wait(guard, [plugin] { return CountOf(g_async->running, plugin) == 0; });
+    }
+    // A crash of the last work is no news now: the plugin goes anyway. The next instance of the plugin (the same
+    // handle after a reload) starts clean
+    EraseOne(g_async->crashed, plugin);
+    g_async->cancelled.erase(std::remove(g_async->cancelled.begin(), g_async->cancelled.end(), plugin),
+        g_async->cancelled.end());
+}
+
+void Shutdown()
+{
+    if (!g_async)
+        return;
+    {
+        std::lock_guard<std::mutex> guard(g_async->lock);
+        g_async->stop = true;
+        g_async->queue.clear();
+        g_async->finished.clear();
+    }
+    g_async->wake.notify_all();
+    for (std::thread& thread : g_async->threads)
+    {
+        if (thread.joinable())
+            thread.join();
+    }
+    xr_delete(g_async);
 }
 } // namespace gw::addons::threads

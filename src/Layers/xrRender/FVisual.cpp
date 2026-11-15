@@ -196,6 +196,22 @@ void Fvisual::Render(CBackend& cmd_list, float, bool use_fast_geo)
     }
 }
 
+// GPU instancing (plans/render_instancing/plan.md): the draw of Render() above. FProgressive, CSkeletonX_ST and
+// CSkeletonX_PM derive from Fvisual and override this together with Render().
+bool Fvisual::instancing_get(CBackend& cmd_list, const Fmatrix& xform, float, bool use_fast_geo, instancing_draw& draw,
+    Fmatrix& world)
+{
+#if RENDER == R_R1
+    const bool fast = m_fast && ps_r1_force_geomx;
+#else
+    const bool fast = m_fast && (ps_r1_force_geomx || use_fast_geo && !cmd_list.is_TessEnabled());
+#endif
+    const IRender_Mesh& mesh = fast ? *m_fast : static_cast<const IRender_Mesh&>(*this);
+    draw = { mesh.rm_geom._get(), mesh.vBase, mesh.vCount, mesh.iBase, mesh.dwPrimitives };
+    world = xform;
+    return draw.geom != nullptr;
+}
+
 #define PCOPY(a) a = pFrom->a
 void Fvisual::Copy(dxRender_Visual* pSrc)
 {

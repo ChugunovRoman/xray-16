@@ -61,6 +61,17 @@ void OwnerItem(EItem kind, const CGameObject* owner, const CGameObject* item);
 void ActorItemUse(const CGameObject* item);
 void ActorItemTakeFromBox(const CGameObject* box, const CGameObject* item);
 void ActorTrade(const CGameObject* item, bool sell, u32 money);
+// actor_on_trade_deal(partner, money got, money paid, sold ids, bought ids, sold prices, bought prices)
+// (plans/addon_quests): one press of a trade button of the trade window (CUIActorMenu::OnBtnPerformTrade*). Begin
+// before the transfer of the lists, ActorTrade collects every item of it (id and the money of its actor_on_trade), End
+// sends the event when at least one item moved. The price arrays are parallel to the id arrays. A free item given to
+// the partner (DonateCurrentItem) is not a deal: only actor_on_trade comes for it
+void ActorTradeDealBegin();
+void ActorTradeDealEnd(const CGameObject* partner);
+// actor_on_money_change(new_money, delta) from CInventoryOwner::set_money of the actor (plans/addon_achievements 7.2):
+// only a real change, only after the first update of the actor binder since its spawn - setting the money of the
+// saved actor at the spawn (a new game, a load, a level change) sends nothing
+void ActorMoneyChange(u32 old_money, u32 new_money);
 void ActorInfo(const CGameObject* actor, pcstr info_id);
 
 enum class EKey
@@ -95,6 +106,9 @@ void ActorVehicle(EVehicle kind, const IGameObject* vehicle);
 // Group input (B-1)
 // level_input_on_key_press(dik, action): true when a subscriber consumed the key (flags.ret = true in Lua).
 bool LevelInputKeyPress(int key, int action);
+// level_input_on_mouse_wheel(y, x): true when a subscriber consumed the wheel (flags.ret = true in Lua) - then neither
+// the actor (weapon switch, HUD FOV) nor anything after it gets it. plans/addon_base_building/plan.md D1
+bool LevelInputMouseWheel(float y, float x);
 // on_before_item_use(owner, item): false when a subscriber cancelled the use (flags.ret_value = false in Lua).
 bool BeforeItemUse(const CGameObject* owner, const CGameObject* item);
 
@@ -122,10 +136,56 @@ enum class EBinder
 // the events they emit are for the actor only.
 void ObjectBinder(EBinder kind, const CGameObject* object);
 void ObjectBinderUpdate(const CGameObject* object, u32 dt_ms); // actor: first update, update_fast/slow, update
+// actor_on_frame(dt_ms): every scheduler pass of the actor = every frame out of the pause (CGameObject::shedule_Update,
+// not throttled like the binder and its actor_on_update*), live actor, after actor_on_first_update; only with
+// subscribers. No Lua source.
+void ActorFrame(const CGameObject* object, u32 dt_ms);
 void LevelChanging(); // on_level_changing: CALifeUpdateManager::change_level, before the client save
 // npc_on_update(npc, storage) for a live stalker, when the native gate of the binder lets its update through
 // (W3-2; called from CGameObject::shedule_Update). Not a group of stage B: while the gate is off, xr_motivator
 // sends the event from Lua as before.
 void NpcUpdate(const CGameObject* npc);
 void HeliHit(const CGameObject* heli, float damage, float impulse, u32 hit_type, const IGameObject* who);
+
+// engine gaps P09 (plans/addon_api_ideas/spec.md): GUI_on_show(name, class) / GUI_on_hide(name, class) - a dialog of
+// the game UI or of the main menu was shown / hidden (CDialogHolder::StartMenu / StopMenu: engine windows and Lua
+// windows shown with ShowDialog alike). name: the window name (SetWindowName), the class when it has none; class: the
+// engine class of the window (CUIActorMenu, CUIPdaWnd, CUITalkWnd, CUIDialogWndEx for Lua windows, ...). Not in
+// kEngineEvents: Lua may send these events too. Only with subscribers.
+void GuiDialog(pcstr name, pcstr window_class, bool shown);
+// engine gaps P38: map_spot_on_removed(id, spot_type) - a map location (a spot of a type on an object) is removed:
+// level.map_remove_object_spot, the plugin map_spot_remove, the object went away, the location expired. CMapManager
+// collects them (only while WantsMapSpotRemoved) and sends them at the start of its next Update (the next frame).
+bool WantsMapSpotRemoved();
+void MapSpotRemoved(u16 id, pcstr spot_type);
+
+// engine gaps P08/P10/P30 (plans/addon_api_ideas/spec.md): events with a result and an upgrade event. Not in
+// kEngineEvents (no Lua source to replace): the schemas live in intercepts of axr_main.script, the result field of Lua
+// in kLuaResultBindings (addon_event_bus.cpp). Each is emitted only with subscribers and a spawned actor.
+// trade_on_item_price(item, partner, actor_buys, price) -> price: CTrade::GetItemPrice of a trade with the actor (the
+// window shows it, the transfer pays it). Returns the price to use: a subscriber's INT / NUMBER result clamped to
+// 1..1000000 like the engine price, anything else keeps `price`.
+u32 TradeItemPrice(const CGameObject* item, const CGameObject* partner, bool actor_buys, u32 price);
+// actor_on_before_trade_deal(partner, money_got, money_paid, sold ids, bought ids) -> bool: the trade button, after the
+// money check, before the transfer. false: the deal is not made, the items stay in the trade lists.
+bool ActorBeforeTradeDeal(const CGameObject* partner, u32 money_got, u32 money_paid, const xr_vector<u16>& sold,
+    const xr_vector<u16>& bought);
+// item_on_upgrade(item, upgrade): an upgrade was installed (Manager::upgrade_install outside the load, upgrade_add).
+void ItemUpgrade(const CGameObject* item, pcstr upgrade);
+// actor_on_before_item_take(item) -> bool: the actor picks an item up from the world (the use key, CActor pickup).
+// actor_on_before_item_drop(item) -> bool: the player drops an item (the inventory window, the drop key). false
+// cancels. Script drops and transfers (drop_item, transfer_item) do not ask.
+bool ActorBeforeItemTake(const CGameObject* item);
+bool ActorBeforeItemDrop(const CGameObject* item);
+// news_on_before_show(caption, text, icon, show_ms, type) -> bool: CActor::AddGameNews (Lua give_game_news, plugin
+// news_send, a deferred news when its time comes); type: GAME_NEWS_DATA::eNewsType (0 news, 1 a line of a talk).
+// false: the news is not shown and not kept in the PDA log.
+bool NewsBeforeShow(pcstr caption, pcstr text, pcstr icon, int show_ms, int type);
+
+// engine gaps P11 (plans/addon_api_ideas/spec.md): weather_on_changed(weather, previous, fx, cycle) - the weather
+// (level.get_weather(): the effect while one plays) or the effect state changed: a new cycle of level_weathers, a
+// weather_set / weather_lock, an effect starting or ending. Polled once a frame (CGamePersistent::OnFrame) by the
+// pointer of the name: the first weather of every level comes with previous = nil. Not in kEngineEvents: no Lua
+// source. Only with subscribers (the state is tracked always).
+void WeatherFrame();
 } // namespace gw::addons::objevents

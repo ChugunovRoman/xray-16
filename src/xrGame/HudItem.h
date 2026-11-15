@@ -224,4 +224,11 @@ public:
     void PlayAnimIdleMovingCrouch(); //AVO: new crouch idle animation
     bool isHUDAnimationExist(pcstr anim_name, bool silent = false) const;
     pcstr WhichHUDAnimationExist(pcstr anim_name, pcstr anim_name2, bool silent = false) const;
+
+    // Текущая HUD-анимация: алиас (anm_*), её описание и время старта по Device.dwTimeGlobal.
+    // Время старта известно только для анимации с остановкой в конце (выстрел, перезарядка),
+    // иначе 0. Читает player_hud при ослаблении пинка выстрела в прицеливании.
+    const shared_str& CurrentHudMotion() const { return m_current_motion; }
+    const CMotionDef* CurrentHudMotionDef() const { return m_current_motion_def; }
+    u32 CurrentHudMotionStartTime() const { return m_bStopAtEndAnimIsRunning ? m_dwMotionStartTm : 0; }
 };

@@ -15,6 +15,10 @@ void CUIDialogWnd::Show(bool status)
 
     if (status)
         ResetAll();
+    else
+        // a dialog hidden with a mouse button held (a slider dragged) keeps no capture: shown again, the slider must
+        // not follow the cursor (plans/addon_base_building/plan.md 17.17)
+        ReleaseMouseCaptureTree();
 }
 
 bool CUIDialogWnd::OnKeyboardAction(int dik, EUIMessages keyboard_action)

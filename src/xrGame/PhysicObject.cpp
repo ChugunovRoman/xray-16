@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "PhysicObject.h"
 #include "xrPhysics/PhysicsShell.h"
+#include "xrPhysics/IPHStaticGeomShell.h"
 
 #include "xrServer_Objects_ALife.h"
 #include "Level.h"
@@ -33,6 +34,11 @@ bool CPhysicObject::net_Spawn(CSE_Abstract* DC)
     m_mass = po->mass;
     m_collision_hit_callback = NULL;
     m_anim_blend = 0;
+    // D5 (plans/addon_base_building/plan.md 10.5): the use hint from the section (a string id), as the bolt and the
+    // items read it - no Lua set_tip_text on every spawned instance. Before inherited::net_Spawn: the Lua binder
+    // (net_spawn) and the net spawn subscribers called there may still change it
+    if (pSettings->line_exist(cNameSect(), "tip_text"))
+        set_tip_text(pSettings->r_string(cNameSect(), "tip_text"));
     inherited::net_Spawn(DC);
 
     // Small physics clutter does not need to be visible-for-AI as a separate target.
@@ -46,6 +52,10 @@ bool CPhysicObject::net_Spawn(CSE_Abstract* DC)
     create_collision_model();
 
     CPHSkeleton::Spawn(e);
+    if (m_static_collision)
+        CreateStaticCollision();
+    if (!m_npc_collision)
+        IgnoreNpcCollision();
     setVisible(TRUE);
     setEnabled(TRUE);
 
@@ -146,10 +156,13 @@ static CPhysicsShellHolder* retrive_collide_object(bool bo1, dContact& c)
     else
         ud = PHRetrieveGeomUserData(c.geom.g1);
 
-    if (ud)
-        collide_obj = static_cast<CPhysicsShellHolder*>(ud->ph_ref_object);
-    else
-        collide_obj = 0;
+    // Not a static_cast: the ref object of a geom may be no CPhysicsShellHolder - the static shell of an inventory box
+    // (static_collision, plans/addon_base_building/plan.md 17.37) is a box for the door, as the level
+    if (ud && ud->ph_ref_object)
+    {
+        IGameObject* object = ud->ph_ref_object->IObject();
+        collide_obj = object ? object->cast_physics_shell_holder() : nullptr;
+    }
     return collide_obj;
 }
 static void door_ignore(bool& do_collide, bool bo1, dContact& c, SGameMtl* /*material_1*/, SGameMtl* /*material_2*/)
@@ -205,11 +218,22 @@ void CPhysicObject::RunStartupAnim(CSE_Abstract* D)
             R_ASSERT(visual);
             R_ASSERT2(visual->startup_animation.c_str(), "no startup animation");
 
-            VERIFY2((!!PKinematicsAnimated->LL_MotionID(visual->startup_animation.c_str()).valid()),
-                (make_string(" animation %s not faund ", visual->startup_animation.c_str()) +
-                    dbg_object_base_dump_string(this))
-                    .c_str());
-            m_anim_blend = m_anim_script_callback.play_cycle(PKinematicsAnimated, visual->startup_animation);
+            // An object spawned at runtime (alife():create - addons, base building) has the startup animation
+            // "$editor": only the level editor sets a real one. An animated model (a diesel generator) has no such
+            // motion and play_cycle failed on an invalid MotionID. Fall back to "idle", else no startup animation
+            shared_str anim = visual->startup_animation;
+            if (!PKinematicsAnimated->LL_MotionID(anim.c_str()).valid())
+            {
+                const shared_str fallback = "idle";
+                if (anim != fallback && PKinematicsAnimated->LL_MotionID(fallback.c_str()).valid())
+                    anim = fallback;
+                else
+                    anim = nullptr;
+                Msg("~ [physic_object] %s: no startup animation '%s' in %s - %s", cName().c_str(),
+                    visual->startup_animation.c_str(), cNameVisual().c_str(), anim.size() ? anim.c_str() : "none");
+            }
+            if (anim.size())
+                m_anim_blend = m_anim_script_callback.play_cycle(PKinematicsAnimated, anim);
         }
         smart_cast<IKinematics*>(Visual())->CalculateBones_Invalidate();
         smart_cast<IKinematics*>(Visual())->CalculateBones(TRUE);
@@ -283,6 +307,7 @@ void CPhysicObject::net_Destroy()
     //	processing_deactivate();
     //}
 
+    DestroyStaticGeomShell(m_static_shell);
     inherited::net_Destroy();
     CPHSkeleton::RespawnInit();
     xr_delete(bones_snd_player);
@@ -318,7 +343,61 @@ void CPhysicObject::Load(LPCSTR section)
     CPHSkeleton::Load(section);
     // F5: the same expression is_ai_obstacle evaluated on every call (the section of an object does not change and
     // pSettings is read-only in the game)
-    m_is_ai_obstacle = READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "is_ai_obstacle", true) ? 1 : 0;
+    // npc_collision (plan 17.19): an object NPCs walk through is no obstacle for their paths and their collision
+    // avoidance either (moving_objects) - unless is_ai_obstacle of the section says otherwise
+    m_npc_collision = !!READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "npc_collision", true);
+    m_is_ai_obstacle = READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "is_ai_obstacle", m_npc_collision) ? 1 : 0;
+    m_static_collision = !!READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "static_collision", false);
+}
+
+// npc_collision = false (plans/addon_base_building/plan.md 17.19): low decor under the feet (a sleeping bag, a
+// mattress, a deck) with smart jobs on it - NPCs and monsters walk through it to the job, the actor still stands on
+// it. The callback goes to what collides: the static shell of static_collision, else the physics shell (the doors
+// ignore the AI the same way, door_ignore). Both shells are created anew on every net_Spawn
+void CPhysicObject::IgnoreNpcCollision()
+{
+    if (m_static_shell)
+    {
+        P_StaticGeomShellAddContactCallback(m_static_shell, P_IgnoreNpcCharacterContact);
+        return;
+    }
+    if (CPhysicsShell* shell = PPhysicsShell())
+        shell->add_ObjectContactCallback(P_IgnoreNpcCharacterContact);
+}
+
+// static_collision (plans/addon_base_building/plan.md 17.8): placed decor that the actor walks and jumps on as on the
+// level. A fixed element (fixed_bones) is still an ODE body: the character controller takes its contact as an
+// "object" one (PHSimpleCharacter.cpp InitContact - 10 times stiffer spring, step climbing on its edges,
+// ValidateWalkOnObject) and, once touched, the fixed shell never sleeps again (CPHElement::PhDataUpdate leaves before
+// Disabling) - the actor standing on it is simulated every step on that stiff contact and drifts. A static geom shell
+// (as CBreakableObject has, but of all the bone shapes, not one box of the whole model) has no body: the controller
+// sees the level. The physics shell stays (the object code, the bones, the sync need it): every element fixed (the
+// free wheels of a trolley too), its collision off - nothing touches it and it sleeps; ray picks and bullets use the
+// collision form (CCF_Skeleton), not the shells
+void CPhysicObject::CreateStaticCollision()
+{
+    CPhysicsShell* shell = PPhysicsShell();
+    if (!shell || m_static_shell)
+        return;
+    m_static_shell = P_BuildStaticGeomShellFromBones(this);
+    if (!m_static_shell)
+    {
+        Msg("! [static_collision] [%s] visual [%s]: no bone with a physics shape - the object keeps its physics shell",
+            cNameSect().c_str(), cNameVisual().c_str());
+        return;
+    }
+    for (u16 i = 0, count = shell->get_ElementsNumber(); i < count; ++i)
+        shell->get_ElementByStoreOrder(i)->Fix();
+    shell->DisableCollision();
+}
+
+// A static object takes no push of a hit or an explosion (its elements are fixed anyway; this keeps the shell from
+// being woken up by them). The hit itself (damage, callbacks) goes on as before
+void CPhysicObject::PHHit(SHit& H)
+{
+    if (m_static_shell)
+        return;
+    inherited::PHHit(H);
 }
 
 void CPhysicObject::shedule_Update(u32 dt)
@@ -513,7 +592,8 @@ bool CPhysicObject::is_ai_obstacle() const
     // F5: from Load; not loaded yet - the ini as before (no write here: the getter is called from two threads)
     if (m_is_ai_obstacle >= 0)
         return m_is_ai_obstacle != 0;
-    return !!(READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "is_ai_obstacle", true));
+    return !!(READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "is_ai_obstacle",
+        READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "npc_collision", true)));
 }
 
 // network synchronization ----------------------------

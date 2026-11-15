@@ -10,6 +10,12 @@
 #include "game_base_space.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrEngine/xr_object.h"
+#include "raypick.h"
+#include "xrMaterialSystem/GameMtlLib.h"
+#include "GameObject.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace gw::addons
 {
@@ -172,6 +178,58 @@ int GWP_CALL ApiLevelRayPick(const float from_xyz[3], const float dir[3], float 
         *out_object = result.O ? result.O->ID() : GWP_INVALID_OBJECT_ID; // no object means static geometry
     return 1;
 }
+// level_ray_pick with the surface (plans/addon_base_building D2): ray_pick_surface of raypick.cpp, as rq_result of Lua
+int GWP_CALL ApiLevelRayPickEx(const float from_xyz[3], const float dir[3], float distance, uint32_t targets,
+    GwpObjectId ignore, float* out_distance, GwpObjectId* out_object, float out_normal[3], uint32_t* out_material)
+{
+    if (out_distance)
+        *out_distance = 0.f;
+    if (out_object)
+        *out_object = GWP_INVALID_OBJECT_ID;
+    if (out_normal)
+        out_normal[0] = out_normal[1] = out_normal[2] = 0.f;
+    if (out_material)
+        *out_material = GWP_INVALID_MATERIAL;
+    if (!CheckLevelCall("level_ray_pick_ex") || !from_xyz || !dir || !HasLevel() || !(distance > 0.f))
+        return 0;
+
+    IGameObject* ignore_object = ignore != GWP_INVALID_OBJECT_ID ? Level().Objects.net_Find(ignore) : nullptr;
+    const collide::rq_target target = static_cast<collide::rq_target>(targets ? targets : GWP_RAY_ANY);
+    const Fvector start = ToVector(from_xyz);
+    const Fvector direction = ToVector(dir);
+    collide::rq_result result;
+    if (!Level().ObjectSpace.RayPick(start, direction, distance, target, result, ignore_object))
+        return 0;
+
+    if (out_distance)
+        *out_distance = result.range;
+    if (out_object)
+        *out_object = result.O ? result.O->ID() : GWP_INVALID_OBJECT_ID; // no object means static geometry
+    if (out_normal || out_material)
+    {
+        Fvector normal;
+        u16 material = u16(-1);
+        ray_pick_surface(result, start, direction, normal, material);
+        if (out_normal)
+        {
+            out_normal[0] = normal.x;
+            out_normal[1] = normal.y;
+            out_normal[2] = normal.z;
+        }
+        if (out_material)
+            *out_material = material == u16(-1) ? GWP_INVALID_MATERIAL : uint32_t(material);
+    }
+    return 1;
+}
+
+// The name of a game material by its index (level_ray_pick_ex, rq_result.material_id); the library lives all session
+const char* GWP_CALL ApiLevelMaterialName(uint32_t material)
+{
+    if (!CheckLevelCall("level_material_name") || material >= GMLib.CountMaterial())
+        return nullptr;
+    return GMLib.GetMaterialByIdx(u16(material))->m_Name.c_str();
+}
+
 // time_global() of Lua (Device.dwTimeGlobal).
 uint32_t GWP_CALL ApiLevelTimeMs()
 {
@@ -192,5 +250,41 @@ void FillLevelApi(GwpEngineApi& api)
     api.level_vertex_in_direction = &ApiLevelVertexInDirection;
     api.level_ray_pick = &ApiLevelRayPick;
     api.level_time_ms = &ApiLevelTimeMs;
+    api.level_ray_pick_ex = &ApiLevelRayPickEx; // D2 (plans/addon_base_building)
+    api.level_material_name = &ApiLevelMaterialName;
+}
+
+// engine gaps P47: the search behind level.objects_in_radius (level_script.cpp); see addon_host.h
+void LevelObjectsInRadius(const Fvector& center, float radius, CLASS_ID class_id, int script_clsid,
+    bool with_inventory, xr_vector<u16>& out)
+{
+    out.clear();
+    if (!HasLevel() || !(radius > 0.f))
+        return;
+    // A walk over the live objects (o_count / o_get_by_iterator, as level_objects): a few thousand distance checks,
+    // cheaper than the 65536 ids Lua scans; the spatial tree would miss items in inventories and objects without a
+    // collision form
+    const float radius_sqr = radius * radius;
+    xr_vector<std::pair<float, u16>> found;
+    const u32 count = Level().Objects.o_count();
+    for (u32 i = 0; i < count; ++i)
+    {
+        const CGameObject* object = smart_cast<const CGameObject*>(Level().Objects.o_get_by_iterator(i));
+        if (!object || object->getDestroy())
+            continue;
+        if (!with_inventory && object->H_Parent())
+            continue;
+        if (class_id && object->CLS_ID != class_id)
+            continue;
+        if (script_clsid >= 0 && object->clsid() != script_clsid)
+            continue;
+        const float distance_sqr = object->Position().distance_to_sqr(center);
+        if (distance_sqr <= radius_sqr)
+            found.emplace_back(distance_sqr, object->ID());
+    }
+    std::sort(found.begin(), found.end()); // nearest first; the same distance - by id, so the order is stable
+    out.reserve(found.size());
+    for (const auto& [distance_sqr, id] : found)
+        out.push_back(id);
 }
 } // namespace gw::addons

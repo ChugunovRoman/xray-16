@@ -855,6 +855,365 @@ public:
 ConsoleBindCmds g_consoleBindCmds;
 BOOL g_remapped = false;
 
+// The localized key names (keyboard_key::key_local_name) are filled by the first bind command or here
+static void EnsureKeysRemapped()
+{
+    if (g_remapped || !pInput)
+        return;
+    RemapKeys();
+    s_keymap_watcher.Initialize();
+    g_remapped = true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Addon key actions (xr_level_controller.h, plans/addons_api_support/19-addon-key-groups.md)
+namespace
+{
+constexpr int addon_key_slots = 2; // primary, secondary (keyboard / mouse only)
+
+struct addon_key_action
+{
+    shared_str group; // empty - no addon registers the action now: only the keys the player set are kept
+    shared_str label;
+    keyboard_key* defaults[addon_key_slots]{};
+    keyboard_key* user[addon_key_slots]{};
+    bool user_set[addon_key_slots]{}; // the player changed the slot: user[] (may be nullptr - no key), else defaults[]
+
+    keyboard_key* key(int idx) const { return user_set[idx] ? user[idx] : defaults[idx]; }
+    bool registered() const { return group.size() != 0; }
+    bool changed() const { return user_set[0] || user_set[1]; }
+};
+
+struct addon_key_group
+{
+    shared_str name;
+    shared_str title;
+    bool mode = false;
+    xr_vector<shared_str> actions;
+};
+
+// Lua (the game thread too) and the options window (main thread) touch the registry
+Lock s_addon_keys_lock;
+xr_map<shared_str, addon_key_action> s_addon_actions;
+xr_vector<addon_key_group> s_addon_groups;
+
+bool AddonKeyNameOk(pcstr name, bool action)
+{
+    if (!name || !name[0])
+        return false;
+    const size_t length = xr_strlen(name);
+    if (length > (action ? 129u : 64u))
+        return false;
+    u32 dots = 0;
+    for (pcstr c = name; *c; ++c)
+    {
+        if (*c == '.')
+        {
+            ++dots;
+            if (!action || c == name || !c[1])
+                return false;
+            continue;
+        }
+        if (!isalnum(u8(*c)) && *c != '_' && *c != '-')
+            return false;
+    }
+    return !action || dots == 1;
+}
+
+addon_key_group* AddonKeyGroupFind(const shared_str& name)
+{
+    for (addon_key_group& group : s_addon_groups)
+    {
+        if (group.name == name)
+            return &group;
+    }
+    return nullptr;
+}
+
+addon_key_action* AddonKeyActionFind(pcstr name)
+{
+    if (!name || !name[0])
+        return nullptr;
+    const auto it = s_addon_actions.find(shared_str(name));
+    return it == s_addon_actions.end() ? nullptr : &it->second;
+}
+
+void AddonKeyAppendText(xr_string& text, const keyboard_key* key)
+{
+    if (!key)
+        return;
+    if (!text.empty())
+        text += ", ";
+    text += key->key_local_name.empty() ? key->key_name : key->key_local_name.c_str();
+}
+
+// unbindall: every slot of every action - no key (the player's choice, saved)
+void AddonKeysUnbindAll()
+{
+    ScopeLock scope(&s_addon_keys_lock);
+    for (auto& [name, action] : s_addon_actions)
+    {
+        for (int i = 0; i < addon_key_slots; ++i)
+        {
+            action.user_set[i] = true;
+            action.user[i] = nullptr;
+        }
+    }
+}
+
+// default_controls: the defaults of the addons; the kept keys of actions no addon registers are dropped
+void AddonKeysDefaults()
+{
+    ScopeLock scope(&s_addon_keys_lock);
+    for (auto it = s_addon_actions.begin(); it != s_addon_actions.end();)
+    {
+        if (!it->second.registered())
+        {
+            it = s_addon_actions.erase(it);
+            continue;
+        }
+        for (int i = 0; i < addon_key_slots; ++i)
+        {
+            it->second.user_set[i] = false;
+            it->second.user[i] = nullptr;
+        }
+        ++it;
+    }
+}
+} // namespace
+
+bool AddonKeyGroupRegister(pcstr group, pcstr title, bool mode)
+{
+    if (!AddonKeyNameOk(group, false))
+    {
+        Msg("! [addon keys] bad group name '%s': 1..64 of A-Z a-z 0-9 _ -", group ? group : "<nil>");
+        return false;
+    }
+    ScopeLock scope(&s_addon_keys_lock);
+    const shared_str name = group;
+    addon_key_group* g = AddonKeyGroupFind(name);
+    if (!g)
+    {
+        g = &s_addon_groups.emplace_back();
+        g->name = name;
+    }
+    g->title = title && title[0] ? title : group;
+    g->mode = mode;
+    return true;
+}
+
+bool AddonKeyRegister(pcstr group, pcstr action, pcstr label, int key, int key_sec)
+{
+    if (!AddonKeyNameOk(action, true))
+    {
+        Msg("! [addon keys] bad action name '%s': <group>.<id> of A-Z a-z 0-9 _ -", action ? action : "<nil>");
+        return false;
+    }
+    ScopeLock scope(&s_addon_keys_lock);
+    const shared_str group_name = group ? group : "";
+    addon_key_group* g = AddonKeyGroupFind(group_name);
+    if (!g)
+    {
+        Msg("! [addon keys] action '%s': no group '%s' (register the group first)", action, group ? group : "<nil>");
+        return false;
+    }
+    const shared_str name = action;
+    addon_key_action& a = s_addon_actions[name];
+    if (a.registered() && a.group != group_name)
+    {
+        // moved to another group: out of the list of the old one
+        if (addon_key_group* old = AddonKeyGroupFind(a.group))
+            old->actions.erase(std::remove(old->actions.begin(), old->actions.end(), name), old->actions.end());
+    }
+    a.group = group_name;
+    a.label = label && label[0] ? label : action;
+    a.defaults[0] = key > 0 ? DikToPtr(key, true) : nullptr;
+    a.defaults[1] = key_sec > 0 ? DikToPtr(key_sec, true) : nullptr;
+    if (std::find(g->actions.begin(), g->actions.end(), name) == g->actions.end())
+        g->actions.push_back(name);
+    return true;
+}
+
+void AddonKeyGroupsClear()
+{
+    ScopeLock scope(&s_addon_keys_lock);
+    s_addon_groups.clear();
+    for (auto it = s_addon_actions.begin(); it != s_addon_actions.end();)
+    {
+        it->second.group = shared_str();
+        if (!it->second.changed())
+        {
+            it = s_addon_actions.erase(it);
+            continue;
+        }
+        ++it;
+    }
+}
+
+void AddonKeyGroups(xr_vector<addon_key_group_view>& groups)
+{
+    groups.clear();
+    ScopeLock scope(&s_addon_keys_lock);
+    groups.reserve(s_addon_groups.size());
+    for (const addon_key_group& g : s_addon_groups)
+    {
+        addon_key_group_view& view = groups.emplace_back();
+        view.name = g.name;
+        view.title = g.title;
+        view.mode = g.mode;
+        view.actions.reserve(g.actions.size());
+        for (const shared_str& name : g.actions)
+        {
+            const auto it = s_addon_actions.find(name);
+            if (it != s_addon_actions.end())
+                view.actions.push_back({ name, it->second.label });
+        }
+    }
+}
+
+bool AddonKeyFind(pcstr action, shared_str* group /*= nullptr*/, bool* mode /*= nullptr*/)
+{
+    ScopeLock scope(&s_addon_keys_lock);
+    const addon_key_action* a = AddonKeyActionFind(action);
+    if (!a || !a->registered())
+        return false;
+    if (group)
+        *group = a->group;
+    if (mode)
+    {
+        const addon_key_group* g = AddonKeyGroupFind(a->group);
+        *mode = g && g->mode;
+    }
+    return true;
+}
+
+keyboard_key* AddonKeyGet(pcstr action, int idx)
+{
+    if (idx < 0 || idx >= addon_key_slots)
+        return nullptr;
+    ScopeLock scope(&s_addon_keys_lock);
+    const addon_key_action* a = AddonKeyActionFind(action);
+    return a && a->registered() ? a->key(idx) : nullptr;
+}
+
+void AddonKeySet(pcstr action, int idx, keyboard_key* key)
+{
+    if (idx < 0 || idx >= addon_key_slots)
+        return;
+    ScopeLock scope(&s_addon_keys_lock);
+    addon_key_action* a = AddonKeyActionFind(action);
+    if (!a)
+        return;
+    a->user_set[idx] = key != a->defaults[idx];
+    a->user[idx] = a->user_set[idx] ? key : nullptr;
+}
+
+bool AddonKeyIs(pcstr action, int dik)
+{
+    if (dik <= 0)
+        return false;
+    ScopeLock scope(&s_addon_keys_lock);
+    const addon_key_action* a = AddonKeyActionFind(action);
+    if (!a || !a->registered())
+        return false;
+    for (int i = 0; i < addon_key_slots; ++i)
+    {
+        const keyboard_key* key = a->key(i);
+        if (key && key->dik == dik)
+            return true;
+    }
+    return false;
+}
+
+xr_string AddonKeyText(pcstr action)
+{
+    EnsureKeysRemapped();
+    xr_string text;
+    ScopeLock scope(&s_addon_keys_lock);
+    const addon_key_action* a = AddonKeyActionFind(action);
+    if (!a || !a->registered())
+        return text;
+    for (int i = 0; i < addon_key_slots; ++i)
+        AddonKeyAppendText(text, a->key(i));
+    return text;
+}
+
+xr_string DikToLocalName(int dik)
+{
+    EnsureKeysRemapped();
+    xr_string text;
+    AddonKeyAppendText(text, dik > 0 ? DikToPtr(dik, true) : nullptr);
+    return text;
+}
+
+// bind_addon <group>.<id> <primary> [<secondary>]: a key name (as bind takes it, "kQ", "mouse1"), "-" - no key,
+// "*" - the default of the addon. Written to user.ltx for the actions the player changed (after the line
+// default_controls of the command bind: the commands are saved in the order of their names). An action no addon
+// registered yet (user.ltx runs before the addons) keeps the keys until it is registered.
+class CCC_AddonBind : public IConsole_Command
+{
+public:
+    CCC_AddonBind(LPCSTR n) : IConsole_Command(n) {}
+
+    void Execute(LPCSTR args) override
+    {
+        string256 action, keys[addon_key_slots];
+        action[0] = 0;
+        keys[0][0] = 0;
+        keys[1][0] = 0;
+        sscanf(args, "%255s %255s %255s", action, keys[0], keys[1]);
+        if (!AddonKeyNameOk(action, true) || !keys[0][0])
+        {
+            Msg("! bind_addon: usage bind_addon <group>.<id> <key | - | *> [<key | - | *>]");
+            return;
+        }
+        ScopeLock scope(&s_addon_keys_lock);
+        addon_key_action& a = s_addon_actions[shared_str(action)];
+        for (int i = 0; i < addon_key_slots; ++i)
+        {
+            if (!keys[i][0] || 0 == xr_strcmp(keys[i], "*"))
+            {
+                a.user_set[i] = false;
+                a.user[i] = nullptr;
+            }
+            else if (0 == xr_strcmp(keys[i], "-"))
+            {
+                a.user_set[i] = true;
+                a.user[i] = nullptr;
+            }
+            else if (keyboard_key* key = KeynameToPtr(keys[i], true))
+            {
+                a.user_set[i] = true;
+                a.user[i] = key;
+            }
+        }
+    }
+
+    void Save(IWriter* f) override
+    {
+        ScopeLock scope(&s_addon_keys_lock);
+        for (const auto& [name, a] : s_addon_actions)
+        {
+            if (!a.changed())
+                continue;
+            pcstr tokens[addon_key_slots];
+            for (int i = 0; i < addon_key_slots; ++i)
+                tokens[i] = !a.user_set[i] ? "*" : a.user[i] ? a.user[i]->key_name : "-";
+            f->w_printf("%s %s %s %s\r\n", cName, name.c_str(), tokens[0], tokens[1]);
+        }
+    }
+};
+
+// The keys of the engine actions right after default_controls (predefined_bindings + default_controls.ltx), filled by
+// CCC_DefControls::Execute. user.ltx starts with default_controls (CCC_Bind::Save), so a slot the player cleared would
+// get its default back: CCC_Bind::Save writes unbind / unbind_sec / unbind_gpad for an empty slot whose default has a
+// key. execUserScript runs default_controls before user.ltx - the keys are known before any cfg_save
+static keyboard_key* s_default_keys[bindings_count][bindtypes_count];
+static bool s_default_keys_known = false;
+
+// The commands that clear a slot of an action, by the slot (CCC_Bind::m_workIdx): bind, bind_sec, bind_gpad
+constexpr pcstr unbind_command_names[bindtypes_count] = { "unbind", "unbind_sec", "unbind_gpad" };
+
 class CCC_Bind : public IConsole_Command
 {
     int m_workIdx;
@@ -925,6 +1284,11 @@ public:
             key_binding* binding = &g_key_bindings[idx];
             if (binding->m_keyboard[m_workIdx])
                 f->w_printf("%s %s %s\r\n", cName, binding->m_action->action_name, binding->m_keyboard[m_workIdx]->key_name);
+            // Cleared by the player (Delete in the options, unbind): after the line default_controls ("bind" is saved
+            // before "bind_gpad" and "bind_sec" - the commands go in the order of their names). No defaults known
+            // (default_controls never ran) - every empty slot, that is right too
+            else if (!s_default_keys_known || s_default_keys[idx][m_workIdx])
+                f->w_printf("%s %s\r\n", unbind_command_names[m_workIdx], binding->m_action->action_name);
         }
     }
 };
@@ -938,7 +1302,26 @@ public:
 
     virtual void Execute(LPCSTR args)
     {
-        int actionId = ActionNameToId(args);
+        string256 action;
+        action[0] = 0;
+        if (args)
+            sscanf(args, "%255s", action);
+        if (!action[0])
+        {
+            Msg("! %s: usage %s <action> (list_actions shows the actions)", cName, cName);
+            return;
+        }
+        // kNOTBINDED for an unknown name: g_key_bindings has no such element
+        const EGameActions actionId = ActionNameToId(action, true);
+        if (actionId >= kLASTACTION)
+        {
+            if (strchr(action, '.'))
+                Msg("! %s: '%s' is an addon key action - bind_addon <action> <key | - | *> [<key | - | *>]", cName,
+                    action);
+            else
+                Msg("! %s: unknown action '%s' (list_actions shows the actions)", cName, action);
+            return;
+        }
         key_binding* binding = &g_key_bindings[actionId];
         binding->m_keyboard[m_workIdx] = nullptr;
         TranslateBinding(g_key_bindings[actionId], g_action_bindings[actionId]);
@@ -978,6 +1361,7 @@ public:
             TranslateBinding(g_key_bindings[idx], g_action_bindings[idx]);
         }
         g_consoleBindCmds.clear();
+        AddonKeysUnbindAll();
     }
 };
 
@@ -1086,6 +1470,7 @@ public:
     virtual void Execute(LPCSTR args)
     {
         CCC_UnBindAll::Execute(args);
+        AddonKeysDefaults(); // the addon key actions: their defaults (bind_addon lines after this one change them)
 
         for (const auto& [action, keys] : predefined_bindings)
         {
@@ -1103,7 +1488,15 @@ public:
         string_path cfg, cmd;
         FS.update_path(cfg, "$game_config$", "default_controls.ltx");
         strconcat(cmd, "cfg_load", " ", cfg);
-        Console->Execute(cmd);
+        Console->Execute(cmd); // cfg_load runs the lines at once
+
+        // The defaults for CCC_Bind::Save (unbind of a cleared slot)
+        for (size_t idx = 0; idx < bindings_count; ++idx)
+        {
+            for (u8 i = 0; i < bindtypes_count; ++i)
+                s_default_keys[idx][i] = g_key_bindings[idx].m_keyboard[i];
+        }
+        s_default_keys_known = true;
     }
 };
 
@@ -1212,6 +1605,7 @@ void CCC_RegisterInput()
     CMD2(CCC_UnBind, "unbind_sec", 1);
     CMD2(CCC_UnBind, "unbind_gpad", 2);
     CMD1(CCC_UnBindAll, "unbindall");
+    CMD1(CCC_AddonBind, "bind_addon"); // addon key actions (AddonKeyRegister)
     CMD1(CCC_DefControls, "default_controls");
     CMD1(CCC_ListActions, "list_actions");
 

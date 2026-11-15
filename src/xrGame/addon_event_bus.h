@@ -50,6 +50,10 @@ enum class EBuiltin : GwpEventId
     AddonsContentApplied, // (when, ok, world, providers) the procedure of the content is done, Lua restarted
     // 09-content-addons-vfs.md section 8 (C8): a save is loaded without some of its objects (alife_storage_manager.cpp)
     AlifeObjectsSkipped, // (save_name, ids, sections) the saved objects ALife could not create, before alife_on_load
+    // plans/addon_api_ideas (group plugin): P22, P21, P34
+    ActorOnBeforeHitEx, // (actor, power, dir, who, bone, hit type, impulse) -> power / false (addon_api_character.cpp)
+    GameOnBeforeSave,   // (save name, kind) -> false cancels the save (console_commands.cpp CCC_ALifeSave)
+    PluginOnReloaded,   // (addon id, how, level name or nil) plugin_reload / addon_reload loaded a plugin again
     Count_
 };
 
@@ -118,6 +122,10 @@ void PrintList(); // console command "event_list"
 // plugin_code: an address inside the plugin library (the callback itself), so the crash filter knows the module.
 // Shared with the binders (addon_binders.cpp).
 bool CallPluginGuarded(const void* plugin_code, pcstr what, void (*fn)(void*), void* context);
+// The same guards without raising PluginCallDepth (plans/addon_api_ideas, task_async): for a background thread of the
+// host whose plugin calls the unload waits for by itself (threads::WaitPluginTasks). The depth would hold every
+// unload and reload of every plugin while one long task runs.
+bool CallPluginGuardedBackground(const void* plugin_code, pcstr what, void (*fn)(void*), void* context);
 
 // Plugin functions running right now on this thread (guarded calls nested in each other). 0: no plugin code is on
 // the stack, a plugin library may be unloaded (addon_host.cpp: the unload and the reload of a crashed plugin).

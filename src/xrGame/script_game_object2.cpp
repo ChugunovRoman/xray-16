@@ -40,6 +40,9 @@
 #include "detail_path_manager.h"
 #include "Level.h"
 #include "xrPhysics/IPHWorld.h"
+#include "alife_simulator.h"
+#include "alife_object_registry.h"
+#include "xrServerEntities/xrServer_Objects_Abstract.h"
 
 namespace
 {
@@ -879,6 +882,14 @@ void CScriptGameObject::ResetBoneProtections(pcstr imm_sect, pcstr bone_sect)
 
 void CScriptGameObject::set_visual_name(pcstr visual)
 {
+    // A live stalker: the whole model change (animations, bones, physics), else the model rolled into a ball - the
+    // managers kept the old one (plans/addon_companion_extended/npc_visual.md). Online only, as before: the server
+    // object is not touched. ChangeVisual defers to the end of the frame itself (B2.2 below)
+    if (CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object()); stalker && stalker->g_Alive() && visual && *visual)
+    {
+        stalker->ChangeVisual(visual);
+        return;
+    }
     // B2.2 (plans/optimization_mt/16-b2-overlap-races.md): Lua on the Game thread runs beside the render, which reads
     // renderable.visual (published before its callbacks and OnChangeVisual, null for an empty name): the model is
     // changed at the end of the frame, get_visual_name returns the old one until then
@@ -889,6 +900,60 @@ void CScriptGameObject::set_visual_name(pcstr visual)
         return;
     }
     object().cNameVisual_set(visual);
+}
+
+bool CScriptGameObject::set_visual(pcstr visual)
+{
+    // plans/addon_companion_extended/npc_visual.md. The name as the server object keeps it (CSE_Visual::set_visual):
+    // without ".ogf", lower case, backslashes - so get_visual_name and the save agree
+    string_path name{};
+    if (visual)
+    {
+        xr_strcpy(name, visual);
+        _Trim(name);
+        for (char* c = name; *c; ++c)
+            if (*c == '/')
+                *c = '\\';
+        xr_strlwr(name);
+        const size_t length = xr_strlen(name);
+        if (length > 4 && 0 == xr_strcmp(name + length - 4, ".ogf"))
+            name[length - 4] = 0;
+    }
+    string_path file;
+    if (!*name || xr_strlen(name) + 5 > sizeof(file))
+    {
+        Msg("! [visual] set_visual [%s]: an empty or too long model name", object().cName().c_str());
+        return false;
+    }
+    strconcat(file, name, ".ogf");
+    if (!FS.exist("$game_meshes$", file))
+    {
+        Msg("! [visual] set_visual [%s]: no model file meshes\\%s", object().cName().c_str(), file);
+        return false;
+    }
+
+    // A live stalker (traders too): bones, animations, physics are rebuilt, the server object is written once the model
+    // is set; on the Game thread beside the render - at the end of the frame (true is returned at once)
+    if (CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object()))
+        return stalker->ChangeVisual(name, true);
+
+    // The actor: the path of an outfit (CActor::ChangeVisual defers itself). An outfit with its own actor visual puts
+    // its model back when it is put on or taken off and on a load
+    if (CActor* actor = smart_cast<CActor*>(&object()))
+    {
+        actor->ChangeVisual(name);
+        if (ai().get_alife())
+        {
+            CSE_Abstract* const server = ai().alife().objects().object(actor->ID(), true);
+            if (CSE_Visual* const server_visual = server ? smart_cast<CSE_Visual*>(server) : nullptr)
+                server_visual->set_visual(name);
+        }
+        return true;
+    }
+
+    Msg("! [visual] set_visual [%s]: only a live stalker or the actor changes its model online, [%s] refused",
+        object().cName().c_str(), name);
+    return false;
 }
 
 pcstr CScriptGameObject::get_visual_name() const { return object().cNameVisual().c_str(); }

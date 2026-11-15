@@ -65,6 +65,10 @@ public:
     static u32 LanguageID;
     static string32 LanguageIDInLTX;
 
+    // g_language asked for a language that is not installed now (its folder text\<language>\ comes with an addon,
+    // mounted later): it is taken by the next Init that finds it. nullptr or "" - none (plans/addon_api_ideas, P39)
+    static void SetPendingLanguage(pcstr language);
+
 private:
     struct StringTableEntry
     {
@@ -85,7 +89,9 @@ private:
         u16 layer{};
         xr_vector<StringTableEntry> strings; // in the order of the file
     };
-    void Load(StringTableFile& file) const;
+    void Load(StringTableFile& file, pcstr language) const;
+    void CollectFiles(pcstr language, xr_vector<StringTableFile>& files) const;
+    void LoadFallbackLanguages(); // [string_table] fallback_language (P39)
     void Merge(const xr_vector<StringTableFile>& files);
     void FillLanguageToken();
     void SetLanguage();
@@ -94,6 +100,8 @@ private:
     static std::mutex pDataMutex;
     static xr_unique_ptr<STRING_TABLE_DATA> pData;
     static xr_vector<xr_token> languagesToken;
+    static string32 ActiveLanguage;  // the name of the language of pData: SetLanguage keeps it by the name (P39)
+    static string32 PendingLanguage; // SetPendingLanguage
 };
 
 ENGINE_API CStringTable& StringTable();

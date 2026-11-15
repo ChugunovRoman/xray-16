@@ -859,11 +859,16 @@ void CWeaponMagazinedWGrenade::PlayAnimShoot()
         VERIFY(GetState() == eFire);
         if (IsGrenadeLauncherAttached())
         {
+            // Выстрел "через прицел" (ключи OGSR), см. CWeaponMagazined::PlayAnimShoot.
+            const bool scoped = (IsZoomed() || IsSecondZoomed()) && IsScopeAttached();
+
             if (iAmmoElapsed > 1 || !isHUDAnimationExist("anm_shot_w_gl_l"))
             {
                 if (IsZoomed() || IsSecondZoomed())
                 {
-                    if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
+                    if (scoped && isHUDAnimationExist("anm_shots_aim_scope_w_gl"))
+                        PlayHUDMotion("anm_shots_aim_scope_w_gl", TRUE, this, GetState());
+                    else if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
                         PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
                     else if (isHUDAnimationExist("anm_shots_w_gl_aim"))
                         PlayHUDMotion("anm_shots_w_gl_aim", FALSE, this, GetState());
@@ -875,8 +880,12 @@ void CWeaponMagazinedWGrenade::PlayAnimShoot()
             {
                 if (IsZoomed() || IsSecondZoomed())
                 {
-                    if (isHUDAnimationExist("anm_shot_w_gl_l_aim"))
+                    if (scoped && isHUDAnimationExist("anm_shots_last_aim_scope_w_gl"))
+                        PlayHUDMotion("anm_shots_last_aim_scope_w_gl", TRUE, this, GetState());
+                    else if (isHUDAnimationExist("anm_shot_w_gl_l_aim"))
                         PlayHUDMotion("anm_shot_w_gl_l_aim", TRUE, this, GetState());
+                    else if (scoped && isHUDAnimationExist("anm_shots_aim_scope_w_gl"))
+                        PlayHUDMotion("anm_shots_aim_scope_w_gl", TRUE, this, GetState());
                     else if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
                         PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
                 }

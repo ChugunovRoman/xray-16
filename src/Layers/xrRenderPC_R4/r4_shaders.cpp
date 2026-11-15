@@ -347,6 +347,11 @@ HRESULT CRender::shader_compile(pcstr name, IReader* fs, pcstr pFunctionName,
     // SKIN_4
     appendShaderOption(4 == skinning, "SKIN_4", "1");
 
+    // GPU instancing (plans/render_instancing/plan.md): the twin vertex shaders of CBlender_Compile::r_Pass. No symbol
+    // in the cache key - their names carry "_i" (_CreateVS), so the cache files of the other shaders stay valid.
+    if (shader_instanced())
+        options.add("INSTANCED", "1");
+
     //	Igor: need restart options
     // Soft water
     {

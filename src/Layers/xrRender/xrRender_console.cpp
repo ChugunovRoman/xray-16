@@ -313,6 +313,10 @@ int ps_r__main_parallel_parts = 8; // 4 -> 8 (2026-10-17): tested 6/8/12, 12 lea
 // A tunable, not saved.
 int ps_r__svp_lens_margin_pct = 45;
 int ps_r__main_parallel_submit_min = 1500;
+// GPU instancing of rigid models (plans/render_instancing/plan.md): copies of one mesh in a dynamic group are drawn
+// with one instanced draw in every pass. On by default; 0 - the emergency switch back to one draw per copy (the shaders
+// created while it is 0 get no INSTANCED twin at all - Blender_Recorder_R2.cpp, r_PassInstancedTwin).
+int ps_r__instancing = 1;
 int ps_r2_mt_render = 1;
 int ps_r__phase_mt = 0;
 
@@ -1132,5 +1136,6 @@ void xrRender_initconsole()
     CMD4(CCC_IntegerNotSavedR, "r__bodycam_support", &bodycam_support, 1, 1);
     CMD4(CCC_IntegerNotSavedR, "r__bodycam", &ps_r__bodycam, 0, 1);
     CMD4(CCC_IntegerNotSavedR, "r__svp_lens_margin_pct", &ps_r__svp_lens_margin_pct, 10, 100);
+    CMD4(CCC_Integer, "r__instancing", &ps_r__instancing, 0, 1);
 }
 } // namespace xray::render::RENDER_NAMESPACE

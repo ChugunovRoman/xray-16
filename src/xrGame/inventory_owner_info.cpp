@@ -39,6 +39,19 @@ void CInventoryOwner::OnEvent(NET_Packet& P, u16 type)
             OnDisableInfo(info_id);
     }
     break;
+    // npc_equipment.md: the actor menu places an item of an equipment_editable NPC (CActor handles these itself).
+    // The read position is restored: the class of the owner may read the same packet after us
+    case GEG_PLAYER_ITEM2SLOT:
+    case GEG_PLAYER_ITEM2BELT:
+    case GEG_PLAYER_ITEM2RUCK:
+    {
+        if (!m_equipment_editable)
+            break;
+        const u32 read_pos = P.r_tell();
+        OnEquipmentEvent(P, type);
+        P.r_seek(read_pos);
+    }
+    break;
     }
 }
 

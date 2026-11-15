@@ -219,6 +219,23 @@ public:
         set(C, L, x, y, z, w);
     }
 
+    // `count` consecutive float4 elements of an array constant from element `e` in one call (CBackend::set_ca_rows,
+    // plans/render_instancing/plan.md) - same result as `count` seta(C, e + i, rows[i]) calls.
+    ICF void seta_rows(R_constant* C, u32 e, const Fvector4* rows, u32 count)
+    {
+        VERIFY(RC_float == C->type);
+        R_constant_load L;
+        if (C->destination & RC_dest_pixel) { L = C->ps; }
+        if (C->destination & RC_dest_vertex) { L = C->vs; }
+        if (C->destination & RC_dest_geometry) { L = C->gs; }
+        if (C->destination & RC_dest_all) { L = C->pp; }
+        VERIFY(RC_1x4 == L.cls);
+        if (GLAD_GL_ARB_separate_shader_objects)
+            CHK_GL(glProgramUniform4fv(L.program, L.location + e, count, (const float*)rows));
+        else
+            CHK_GL(glUniform4fv(L.location + e, count, (const float*)rows));
+    }
+
     // TODO: OGL: Implement constant caching through UBOs
     ICF void flush() { }
 };

@@ -5,6 +5,7 @@
 #include "addon_event_bus.h"
 #include "addon_goap.h"
 #include "addon_goap_planner.h"
+#include "addon_host.h"
 #include "addon_storage.h"
 
 #include "Actor.h"
@@ -43,6 +44,8 @@ static_assert(GWP_SOUND_AMBIENT == SOUND_TYPE_AMBIENT);
 #include "PhysicObject.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "ai/monsters/poltergeist/poltergeist.h"
+#include "xrEngine/Environment.h"
+#include "xrEngine/IGame_Persistent.h"
 
 #include <iterator>
 
@@ -84,6 +87,8 @@ constexpr EngineEvent kEngineEvents[] = {
     { "actor_item_to_ruck", EGroup::Actor },
     { "actor_item_to_slot", EGroup::Actor },
     { "actor_on_trade", EGroup::Actor },
+    { "actor_on_money_change", EGroup::Actor }, // plans/addon_achievements 7.2: no Lua source
+    { "actor_on_trade_deal", EGroup::Actor },   // plans/addon_quests: no Lua source
     { "actor_on_info_callback", EGroup::Actor },
     { "on_key_press", EGroup::Actor },
     { "on_key_release", EGroup::Actor },
@@ -100,6 +105,7 @@ constexpr EngineEvent kEngineEvents[] = {
     { "actor_on_detach_vehicle", EGroup::Actor },
     { "actor_on_use_vehicle", EGroup::Actor },
     { "level_input_on_key_press", EGroup::Input },
+    { "level_input_on_mouse_wheel", EGroup::Input }, // D1 (plans/addon_base_building): no Lua source
     { "on_before_item_use", EGroup::Input },
     // B-2: monsters and physics
     { "monster_on_hit_callback", EGroup::Monster },
@@ -127,6 +133,7 @@ constexpr EngineEvent kEngineEvents[] = {
     { "actor_on_update", EGroup::Lifecycle },
     { "actor_on_update_fast", EGroup::Lifecycle },
     { "actor_on_update_slow", EGroup::Lifecycle },
+    { "actor_on_frame", EGroup::Lifecycle }, // no Lua source: every frame, unlike the throttled actor_on_update
     { "on_level_changing", EGroup::Lifecycle },
 };
 
@@ -219,6 +226,9 @@ bool IsActive(EGroup group) { return (kImplementedGroups & g_enabled_groups & Bi
 namespace
 {
 bool g_actor_spawned = false;
+// actor_on_money_change is sent from the end of the first update of the actor binder after its spawn on: the spawn
+// (a new game, a loaded save, a level change) sets the money of the saved actor - not a change of the game
+bool g_actor_money_live = false;
 
 // Id of an event name, resolved once: the bus lives for the whole process (Shutdown only at exit).
 #define GW_EVENT_ID(name)                                                    \
@@ -234,7 +244,11 @@ bool IsActor(const IGameObject* object) { return object && g_actor && object == 
 GwpValue ObjectOrNil(const IGameObject* object) { return object ? events::Object(object->ID()) : events::Nil(); }
 } // namespace
 
-void SetActorSpawned(bool spawned) { g_actor_spawned = spawned; }
+void SetActorSpawned(bool spawned)
+{
+    g_actor_spawned = spawned;
+    g_actor_money_live = false; // a spawn or the end of the actor: live again after its first update
+}
 
 void ActorHit(const CGameObject* actor, float amount, const Fvector& local_dir, const IGameObject* who, s16 bone)
 {
@@ -298,12 +312,101 @@ void ActorItemTakeFromBox(const CGameObject* box, const CGameObject* item)
     events::Emit(GW_EVENT_ID("actor_on_item_take_from_box"), args, 2);
 }
 
+namespace
+{
+// The deal being transferred (ActorTradeDealBegin .. ActorTradeDealEnd): the items of actor_on_trade in order
+struct TradeDeal
+{
+    bool active = false;
+    u64 money_got = 0;  // the sum of the sold items: the actor got it
+    u64 money_paid = 0; // the sum of the bought items: the actor paid it
+    xr_vector<u16> sold;
+    xr_vector<u16> bought;
+    xr_vector<u32> sold_prices;   // the money of actor_on_trade of each sold item, parallel to sold
+    xr_vector<u32> bought_prices; // the money of actor_on_trade of each bought item, parallel to bought
+};
+TradeDeal g_trade_deal;
+
+GwpValue IdArray(const xr_vector<GwpValue>& items)
+{
+    GwpValue value = events::Nil();
+    value.type = GWP_T_ARRAY;
+    value.u.a.items = items.empty() ? nullptr : items.data();
+    value.u.a.count = static_cast<uint32_t>(items.size());
+    return value;
+}
+} // namespace
+
 void ActorTrade(const CGameObject* item, bool sell, u32 money)
 {
     if (!ActorReady(EGroup::Actor) || !item)
         return;
+    if (g_trade_deal.active)
+    {
+        // sell == true: the actor sold the item (CTrade::TransferItem, bDir)
+        (sell ? g_trade_deal.sold : g_trade_deal.bought).push_back(item->ID());
+        (sell ? g_trade_deal.sold_prices : g_trade_deal.bought_prices).push_back(money);
+        (sell ? g_trade_deal.money_got : g_trade_deal.money_paid) += money;
+    }
     const GwpValue args[] = { events::Object(item->ID()), events::Bool(sell), events::Int(money) };
     events::Emit(GW_EVENT_ID("actor_on_trade"), args, 3);
+}
+
+void ActorTradeDealBegin()
+{
+    g_trade_deal.active = true;
+    g_trade_deal.money_got = 0;
+    g_trade_deal.money_paid = 0;
+    g_trade_deal.sold.clear();
+    g_trade_deal.bought.clear();
+    g_trade_deal.sold_prices.clear();
+    g_trade_deal.bought_prices.clear();
+}
+
+void ActorTradeDealEnd(const CGameObject* partner)
+{
+    if (!g_trade_deal.active)
+        return;
+    g_trade_deal.active = false;
+    if ((g_trade_deal.sold.empty() && g_trade_deal.bought.empty()) || !ActorReady(EGroup::Actor) || !partner)
+        return;
+    // an array holds at most kMaxArrayItems values: a longer list is cut (a trade window never moves that many)
+    // the price arrays are parallel to the id arrays (the same length, the same order): ActorTrade pushes both
+    xr_vector<GwpValue> sold;
+    xr_vector<GwpValue> bought;
+    xr_vector<GwpValue> sold_prices;
+    xr_vector<GwpValue> bought_prices;
+    const size_t sold_count = std::min<size_t>(g_trade_deal.sold.size(), events::kMaxArrayItems);
+    const size_t bought_count = std::min<size_t>(g_trade_deal.bought.size(), events::kMaxArrayItems);
+    sold.reserve(sold_count);
+    bought.reserve(bought_count);
+    sold_prices.reserve(sold_count);
+    bought_prices.reserve(bought_count);
+    for (size_t i = 0; i < sold_count; ++i)
+    {
+        sold.push_back(events::Int(g_trade_deal.sold[i]));
+        sold_prices.push_back(events::Int(g_trade_deal.sold_prices[i]));
+    }
+    for (size_t i = 0; i < bought_count; ++i)
+    {
+        bought.push_back(events::Int(g_trade_deal.bought[i]));
+        bought_prices.push_back(events::Int(g_trade_deal.bought_prices[i]));
+    }
+    // the prices are appended after the ids: the first five arguments keep their order (plugins and Lua built for
+    // the five-argument event still work)
+    const GwpValue args[] = { events::Object(partner->ID()), events::Int(static_cast<s64>(g_trade_deal.money_got)),
+        events::Int(static_cast<s64>(g_trade_deal.money_paid)), IdArray(sold), IdArray(bought), IdArray(sold_prices),
+        IdArray(bought_prices) };
+    events::Emit(GW_EVENT_ID("actor_on_trade_deal"), args, static_cast<u32>(std::size(args)));
+}
+
+void ActorMoneyChange(u32 old_money, u32 new_money)
+{
+    if (old_money == new_money || !g_actor_money_live || !ActorReady(EGroup::Actor))
+        return;
+    // (new balance, signed delta); the delta of two u32 always fits an s64
+    const GwpValue args[] = { events::Int(new_money), events::Int(static_cast<s64>(new_money) - old_money) };
+    events::Emit(GW_EVENT_ID("actor_on_money_change"), args, 2);
 }
 
 void ActorInfo(const CGameObject* actor, pcstr info_id)
@@ -382,6 +485,17 @@ bool LevelInputKeyPress(int key, int action)
     GwpValue result = events::Bool(false);
     const GwpValue args[] = { events::Int(key), events::Int(action) };
     events::Emit(GW_EVENT_ID("level_input_on_key_press"), args, 2, &result);
+    return result.type == GWP_T_BOOL && result.u.b != 0;
+}
+
+bool LevelInputMouseWheel(float y, float x)
+{
+    // The same condition as level_input_on_key_press: a level with the actor
+    if (!ActorReady(EGroup::Input))
+        return false;
+    GwpValue result = events::Bool(false);
+    const GwpValue args[] = { events::Number(y), events::Number(x) };
+    events::Emit(GW_EVENT_ID("level_input_on_mouse_wheel"), args, 2, &result);
     return result.type == GWP_T_BOOL && result.u.b != 0;
 }
 
@@ -638,6 +752,17 @@ void ObjectBinder(EBinder kind, const CGameObject* object)
 void ObjectBinderUpdate(const CGameObject* object, u32 dt_ms)
 {
     binders::OnObjectUpdate(object, dt_ms); // plugin binders (W0.1): collected, delivered after the scheduler pass
+    // actor_on_money_change: live after this first update (and its actor_on_first_update below) - the money given
+    // by the scripts of the start (actor_on_first_update) is not a change either
+    struct MoneyLive
+    {
+        bool actor;
+        ~MoneyLive()
+        {
+            if (actor)
+                g_actor_money_live = g_actor_spawned;
+        }
+    } money_live{ IsActor(object) };
     // Every update of the actor binder while the actor is alive (the Lua binder returned early for a dead one).
     if (!IsActive(EGroup::Lifecycle) || !object || !smart_cast<const CActor*>(object) || !IsAlive(object))
         return;
@@ -650,6 +775,18 @@ void ObjectBinderUpdate(const CGameObject* object, u32 dt_ms)
     events::Emit(GW_EVENT_ID("actor_on_update_fast"), args, 2);
     events::Emit(GW_EVENT_ID("actor_on_update_slow"), args, 2);
     events::Emit(GW_EVENT_ID("actor_on_update"), args, 2);
+}
+
+void ActorFrame(const CGameObject* object, u32 dt_ms)
+{
+    // Every frame: the cheap checks first, the bus lookup only with the group on - nothing else without subscribers.
+    // Not before actor_on_first_update (the binder runs after this frame's first scheduler pass of the actor).
+    if (!IsActive(EGroup::Lifecycle) || !g_actor_spawned || g_actor_first_update || !IsActor(object))
+        return;
+    if (!events::HasSubscribers(GW_EVENT_ID("actor_on_frame")) || !IsAlive(object))
+        return;
+    const GwpValue args[] = { events::Int(dt_ms) };
+    events::Emit(GW_EVENT_ID("actor_on_frame"), args, 1);
 }
 
 void NpcUpdate(const CGameObject* npc)
@@ -669,6 +806,178 @@ void LevelChanging()
     if (!IsActive(EGroup::Lifecycle))
         return;
     events::Emit(GW_EVENT_ID("on_level_changing"));
+}
+
+// engine gaps P09: GUI_on_show / GUI_on_hide. Not tied to a group or to the actor: the main menu has dialogs too.
+void GuiDialog(pcstr name, pcstr window_class, bool shown)
+{
+    const GwpEventId id = shown ? GW_EVENT_ID("GUI_on_show") : GW_EVENT_ID("GUI_on_hide");
+    if (!events::HasSubscribers(id))
+        return;
+    const pcstr type = window_class ? window_class : "";
+    const GwpValue args[] = { events::String(name && name[0] ? name : type), events::String(type) };
+    events::Emit(id, args, 2);
+}
+
+// engine gaps P38: map_spot_on_removed
+bool WantsMapSpotRemoved() { return g_actor_spawned && events::HasSubscribers(GW_EVENT_ID("map_spot_on_removed")); }
+
+void MapSpotRemoved(u16 id, pcstr spot_type)
+{
+    if (!WantsMapSpotRemoved())
+        return;
+    const GwpValue args[] = { events::Int(id), events::String(spot_type ? spot_type : "") };
+    events::Emit(GW_EVENT_ID("map_spot_on_removed"), args, 2);
+}
+
+// ---------------------------------------------------------------------------------------------
+// engine gaps P08/P10/P30 (plans/addon_api_ideas/spec.md): trade price, cancellable deal, take, drop, news; upgrades
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+// The bool result of a cancellable event: anything but an explicit false lets the action go on
+bool Allowed(const GwpValue& result) { return result.type != GWP_T_BOOL || result.u.b != 0; }
+
+GwpValue IdList(xr_vector<GwpValue>& items, const xr_vector<u16>& ids)
+{
+    const size_t count = std::min<size_t>(ids.size(), events::kMaxArrayItems);
+    items.clear();
+    items.reserve(count);
+    for (size_t i = 0; i < count; ++i)
+        items.push_back(events::Int(ids[i]));
+    return IdArray(items);
+}
+} // namespace
+
+u32 TradeItemPrice(const CGameObject* item, const CGameObject* partner, bool actor_buys, u32 price)
+{
+    // GetItemPrice runs for every cell the trade window prices: nothing without subscribers
+    const GwpEventId id = GW_EVENT_ID("trade_on_item_price");
+    if (!ActorReady(EGroup::Actor) || !item || !partner || !events::HasSubscribers(id))
+        return price;
+    GwpValue result = events::Int(price);
+    const GwpValue args[] = { events::Object(item->ID()), events::Object(partner->ID()), events::Bool(actor_buys),
+        events::Int(price) };
+    events::Emit(id, args, 4, &result);
+    double value;
+    if (result.type == GWP_T_INT)
+        value = static_cast<double>(result.u.i);
+    else if (result.type == GWP_T_NUMBER && std::isfinite(result.u.n))
+        value = result.u.n;
+    else
+        return price;
+    // the clamp of CTrade::GetItemPrice: a price is never 0 (0 there means "not traded") nor above a million
+    clamp(value, 1.0, 1000000.0);
+    return static_cast<u32>(iFloor(static_cast<float>(value)));
+}
+
+bool ActorBeforeTradeDeal(const CGameObject* partner, u32 money_got, u32 money_paid, const xr_vector<u16>& sold,
+    const xr_vector<u16>& bought)
+{
+    const GwpEventId id = GW_EVENT_ID("actor_on_before_trade_deal");
+    if (!ActorReady(EGroup::Actor) || !partner || !events::HasSubscribers(id))
+        return true;
+    xr_vector<GwpValue> sold_items;
+    xr_vector<GwpValue> bought_items;
+    GwpValue result = events::Bool(true);
+    const GwpValue args[] = { events::Object(partner->ID()), events::Int(money_got), events::Int(money_paid),
+        IdList(sold_items, sold), IdList(bought_items, bought) };
+    events::Emit(id, args, static_cast<u32>(std::size(args)), &result);
+    return Allowed(result);
+}
+
+void ItemUpgrade(const CGameObject* item, pcstr upgrade)
+{
+    const GwpEventId id = GW_EVENT_ID("item_on_upgrade");
+    if (!g_actor_spawned || !item || !upgrade || !events::HasSubscribers(id))
+        return;
+    const GwpValue args[] = { events::Object(item->ID()), events::String(upgrade) };
+    events::Emit(id, args, 2);
+}
+
+namespace
+{
+bool ActorBeforeItem(GwpEventId id, const CGameObject* item)
+{
+    if (!ActorReady(EGroup::Actor) || !item || !events::HasSubscribers(id))
+        return true;
+    GwpValue result = events::Bool(true);
+    const GwpValue args[] = { events::Object(item->ID()) };
+    events::Emit(id, args, 1, &result);
+    return Allowed(result);
+}
+} // namespace
+
+bool ActorBeforeItemTake(const CGameObject* item)
+{
+    return ActorBeforeItem(GW_EVENT_ID("actor_on_before_item_take"), item);
+}
+
+bool ActorBeforeItemDrop(const CGameObject* item)
+{
+    return ActorBeforeItem(GW_EVENT_ID("actor_on_before_item_drop"), item);
+}
+
+bool NewsBeforeShow(pcstr caption, pcstr text, pcstr icon, int show_ms, int type)
+{
+    const GwpEventId id = GW_EVENT_ID("news_on_before_show");
+    if (!ActorReady(EGroup::Actor) || !events::HasSubscribers(id))
+        return true;
+    GwpValue result = events::Bool(true);
+    const GwpValue args[] = { events::String(caption ? caption : ""), events::String(text ? text : ""),
+        events::String(icon ? icon : ""), events::Int(show_ms), events::Int(type) };
+    events::Emit(id, args, 5, &result);
+    return Allowed(result);
+}
+
+// ---------------------------------------------------------------------------------------------
+// engine gaps P11 (plans/addon_api_ideas/spec.md): weather_on_changed
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+// The weather seen at the previous frame. The names point into the keys of CEnvironment::WeatherCycles /
+// WeatherFXs (shared_str values that live as long as the environment), so they stay valid as event arguments
+const void* g_weather_level = nullptr; // the level the state belongs to: a new level starts it again
+pcstr g_weather_name = nullptr;
+bool g_weather_fx = false;
+} // namespace
+
+void WeatherFrame()
+{
+    if (!IsMainThread()) // as FlushBatches next to it: the events go from the game logic thread
+        return;
+    if (!g_pGameLevel || !g_pGamePersistent)
+    {
+        g_weather_level = nullptr;
+        return;
+    }
+    CEnvironment& environment = g_pGamePersistent->Environment();
+    // The pointers only: the shared_str is not copied (the environment may switch an effect off on another thread
+    // in the frame of the game/render overlap; a pointer read sees the old value or the new one)
+    const pcstr name = environment.CurrentWeatherName.c_str();
+    const bool fx = environment.IsWFXPlaying();
+    if (g_weather_level != g_pGameLevel)
+    {
+        g_weather_level = g_pGameLevel;
+        g_weather_name = nullptr; // the first weather of a level comes with previous = nil
+        g_weather_fx = false;
+    }
+    if (!name || (name == g_weather_name && fx == g_weather_fx))
+        return;
+    const pcstr previous = g_weather_name;
+    g_weather_name = name;
+    g_weather_fx = fx;
+    const GwpEventId id = GW_EVENT_ID("weather_on_changed");
+    if (!events::HasSubscribers(id))
+        return;
+    const pcstr cycle = environment.CurrentCycleName.c_str();
+    // (weather, previous, effect playing, cycle): weather - the name level.get_weather() gives (the effect while one
+    // plays), cycle - the weather cycle under it
+    const GwpValue args[] = { events::String(name), previous ? events::String(previous) : events::Nil(),
+        events::Bool(fx), cycle ? events::String(cycle) : events::Nil() };
+    events::Emit(id, args, 4);
 }
 
 #undef GW_EVENT_ID

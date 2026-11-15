@@ -231,6 +231,8 @@ public:
     void SetTargetMap(const shared_str& name, bool bZoomIn = false);
 
     void MapLocationRelcase(CMapLocation* ml);
+    /** A window is being destroyed (the hook of ~CUIWindow): the hint forgets it as its owner */
+    void OnWindowDestroyed(CUIWindow* window);
 
     Frect ActiveMapRect()
     {

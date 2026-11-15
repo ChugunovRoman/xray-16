@@ -148,6 +148,9 @@ typedef uint32_t GwpSubscriptionId; /* 0 = invalid */
 #define GWP_TIMER_REAL_TIME 0x1u  /* level time (real seconds of unpaused frames) instead of game time */
 #define GWP_TIMER_PERSISTENT 0x2u /* the timer is stored in the game save and comes back on a load */
 
+/* The largest block of save_write (64 MiB per addon). Documents the limit the engine has had from the start. */
+#define GWP_SAVE_MAX_SIZE (64u * 1024u * 1024u)
+
 /* Config file and one of its sections (group ini). Both are 0 when there is no such file or section. */
 typedef uint32_t GwpIni;
 typedef uint32_t GwpIniSection;
@@ -163,6 +166,8 @@ typedef uint32_t GwpIniSection;
 #define GWP_RAY_SHAPE 0x4u    /* shapes of zones and restrictors */
 #define GWP_RAY_OBSTACLE 0x8u /* obstacles (doors and the like) */
 #define GWP_RAY_ANY (GWP_RAY_OBJECT | GWP_RAY_STATIC)
+/* No game material: level_ray_pick_ex hit something without one (plans/addon_base_building D2). */
+#define GWP_INVALID_MATERIAL ((uint32_t)0xFFFFFFFFu)
 
 typedef enum GwpValueType
 {
@@ -267,6 +272,14 @@ typedef struct GwpSubscribeOptions
     GwpObjectId object;                 /* GWP_SUBSCRIBE_OBJECT: the object; an online object is required */
     uint16_t reserved;                  /* 0 */
     uint32_t reserved2;                 /* 0; fills the tail that the alignment would leave on 64-bit targets */
+    /* Appended by plans/addon_api_ideas (group plugin, P29). An engine without them reads only the fields above (its
+       size): it orders the subscriber as priority 0 - check GWP_API_HAS(api, task_async) (the same step) to know the
+       field is honored. */
+    int32_t priority;   /* the order among the subscribers of the same kind (Lua ones first, then the plugins - this
+                           order stays): a higher priority is called earlier, equal ones in the order of subscription;
+                           0 = the default (every subscription before this field). Batch subscribers: the order of
+                           their deliveries within a frame */
+    uint32_t reserved3; /* 0; fills the tail on 64-bit targets */
 } GwpSubscribeOptions;
 
 /* ------------------------------------------------------------------------- */
@@ -932,6 +945,92 @@ typedef uint32_t GwpParticles;
 #define GWP_EFFECTOR_ID_MAX 0xFFFFu
 
 /* ------------------------------------------------------------------------- */
+/* Files in the profile of the user (group user_data)                        */
+/* ------------------------------------------------------------------------- */
+
+/* The largest file of user_data_read / user_data_write (4 MiB): a larger write is refused, a larger file (made by
+   hand) is not read. */
+#define GWP_USER_DATA_MAX_FILE_SIZE (4u * 1024u * 1024u)
+/* The longest name of a file of user_data_* (bytes; the names are ASCII). */
+#define GWP_USER_DATA_MAX_NAME 64u
+/* The default and the longest wait of user_data_lock, ms (a longer timeout_ms is cut to the maximum). */
+#define GWP_USER_DATA_LOCK_TIMEOUT_DEFAULT 500u
+#define GWP_USER_DATA_LOCK_TIMEOUT_MAX 10000u
+/* A lock of user_data_lock: 0 = none. */
+typedef uint64_t GwpUserDataLock;
+#define GWP_INVALID_USER_DATA_LOCK ((GwpUserDataLock)0u)
+
+/* ------------------------------------------------------------------------- */
+/* plans/addon_api_ideas (group plugin): types of the functions at the end of */
+/* GwpEngineApi (fs_*, console commands, item_params, task_async, ...)        */
+/* ------------------------------------------------------------------------- */
+
+/* fs_read (group ini): the largest file it reads (64 MiB). */
+#define GWP_FS_MAX_FILE_SIZE (64u * 1024u * 1024u)
+/* Flags of fs_list. */
+#define GWP_FS_LIST_FILES 0x1u     /* list the files (the default when neither bit is set) */
+#define GWP_FS_LIST_FOLDERS 0x2u   /* list the folders (a name ends with '\\') */
+#define GWP_FS_LIST_RECURSIVE 0x4u /* the subfolders too (the names are relative to the folder asked) */
+
+/* cvar_register_string: the longest value of a string variable (bytes, the terminator not counted). */
+#define GWP_CVAR_STRING_MAX 255u
+
+/* A console command of a plugin (console_command_register): args - the text after the name, trimmed ("" without
+   one), valid during the call. Main thread. */
+typedef void(GWP_CALL* GwpConsoleCommandFn)(void* user, const char* args);
+
+/* item_params: what kind of item it is (the fields of GwpItemParams that apply). */
+#define GWP_ITEM_KIND_OTHER 0u    /* any other inventory item: weight, cost, condition, immunity */
+#define GWP_ITEM_KIND_OUTFIT 1u   /* CCustomOutfit (a suit) */
+#define GWP_ITEM_KIND_HELMET 2u   /* CHelmet */
+#define GWP_ITEM_KIND_ARTEFACT 3u /* CArtefact */
+#define GWP_ITEM_KIND_BACKPACK 4u /* CBackpack */
+/* The number of the real hit types GWP_HIT_* (0..GWP_HIT_PHYSIC_STRIKE): the size of the protection arrays. */
+#define GWP_HIT_TYPE_COUNT 12u
+/* Indices of GwpItemParams::restore. */
+#define GWP_RESTORE_HEALTH 0u
+#define GWP_RESTORE_RADIATION 1u
+#define GWP_RESTORE_SATIETY 2u
+#define GWP_RESTORE_POWER 3u
+#define GWP_RESTORE_BLEEDING 4u
+#define GWP_RESTORE_COUNT 5u
+
+/* The parameters of one item instance as the engine uses them now: the section values plus its installed upgrades
+   (item_params). Zero-initialize, set size = sizeof(GwpItemParams); the engine fills what `size` covers. A field
+   that does not apply to the kind is 0. */
+typedef struct GwpItemParams
+{
+    uint32_t size;           /* sizeof(GwpItemParams) of the plugin */
+    uint32_t kind;           /* GWP_ITEM_KIND_* */
+    float weight;            /* the inventory weight (inv_weight + upgrades) */
+    uint32_t cost;           /* the base cost (cost + upgrades), before the trade factors of a trader */
+    float condition;         /* 0..1 */
+    float additional_weight; /* outfit, backpack: additional_inventory_weight (the weight the actor walks with);
+                                artefact: its additional_inventory_weight (the actor uses it times the condition) */
+    float additional_weight_max; /* outfit, backpack: additional_inventory_weight2 (the most weight) */
+    float power_loss;        /* outfit, helmet: power_loss as the engine applies it (GetPowerLoss of an outfit) */
+    uint32_t artefact_count; /* outfit: the belt slots for artefacts */
+    float restore[GWP_RESTORE_COUNT]; /* outfit, helmet, artefact: the restore speeds (GWP_RESTORE_*); an artefact
+                                         gives them times its condition on the belt */
+    float protection[GWP_HIT_TYPE_COUNT]; /* by GWP_HIT_*: outfit, helmet - the protection the UI shows (the value
+                                             times the condition); artefact - the hit absorption of
+                                             hit_absorbation_sect (the engine's own coefficient, condition not
+                                             applied) */
+    float immunity[GWP_HIT_TYPE_COUNT];   /* by GWP_HIT_*: the item's own immunities_sect - the factor of the damage a
+                                             hit does to the condition of the item itself (1 = full) */
+} GwpItemParams;
+
+/* task_async: the work (on a background thread) and its end (on the main thread). */
+typedef void(GWP_CALL* GwpAsyncFn)(void* user);
+/* The background threads of task_async (all the plugins together). */
+#define GWP_ASYNC_THREADS 2u
+/* Tasks of one plugin queued or running at once (task_async refuses more). */
+#define GWP_ASYNC_MAX_PER_PLUGIN 256u
+
+/* draw_* (group level): the longest id of a shape of a plugin, bytes. */
+#define GWP_DRAW_MAX_ID 56u
+
+/* ------------------------------------------------------------------------- */
 /* Engine API table (engine -> plugin)                                        */
 /* ------------------------------------------------------------------------- */
 
@@ -1042,7 +1141,8 @@ typedef struct GwpEngineApi
        alife_on_before_save handler). size == 0 removes the data. The engine copies the bytes.
        save_read returns the data of this addon from the loaded save (or written since); GWP_ERROR_NOT_FOUND when
        there is none. The pointer is valid until the next save_write of this plugin, a load or a new game.
-       gwp.hpp has helpers for the bytes: BinaryWriter / BinaryReader with tagged chunks (BinaryWriter::chunk,
+       At most GWP_SAVE_MAX_SIZE bytes per addon: a larger save_write is GWP_ERROR_INVALID_ARGUMENT (the data kept
+       before stays). gwp.hpp has helpers for the bytes: BinaryWriter / BinaryReader with tagged chunks (BinaryWriter::chunk,
        BinaryReader::next_chunk) that an older or a newer version of the plugin can skip.
        Data of addons that are not installed now is carried to new saves unchanged.
        @group save @thread main */
@@ -2058,7 +2158,7 @@ typedef struct GwpEngineApi
        caches of the scripts are dropped, then alife():teleport_object). An online object goes offline first and
        comes back by the usual switch when the place is near the actor. level_vertex GWP_INVALID_LEVEL_VERTEX = the
        level vertex of the game vertex; position NULL = the point of the game vertex. Refused: the actor
-       (GWP_ERROR_NOT_SUPPORTED - on its level use object_teleport, to another level the game has no API), an item
+       (GWP_ERROR_NOT_SUPPORTED - on its level use object_teleport, to another level actor_change_level), an item
        inside an inventory, a squad or a member of one (use squad_teleport: a member moved alone lives apart from
        its squad) - GWP_ERROR_INVALID_ARGUMENT; a bad vertex too. GWP_ERROR_NOT_SUPPORTED: the Lua function
        TeleportObject is missing (the scripts of the mod are not loaded); GWP_ERROR_CRASHED: it raised an error.
@@ -2551,20 +2651,24 @@ typedef struct GwpEngineApi
     GwpResult(GWP_CALL* physics_apply_impulse)(const GwpPlugin* self, GwpObjectId id, const float dir[3], float power,
         const char* bone);
 
-    /* Changes the model of an object: obj:set_visual_name(visual) of Lua plus its server object, so the model stays
-       with the save and the next spawn (Lua changes only the online object). `visual` is the path under meshes without
-       the extension ("dynamics\box\box_wood_01"). An online object changes at once - the actor completely (bones,
-       animations, physics, as an outfit does; an outfit with its own actor visual puts its model back when it is put
-       on or taken off and at a load); any other creature (a stalker, a trader, a monster, alive or dead)
-       cannot while online (the engine keeps its skeleton in the animation and physics managers, a corpse in its
-       ragdoll), and so cannot an object with a physics shell (a box, a barrel, an item on the ground, a car: the shell
-       keeps the bones of the old model): change it while it is offline, it comes online with the new model. An offline object changes its
-       server object only. Called on the game logic thread while the render of the frame runs beside it, the online
-       model (the actor's too) changes at the end of that frame, after the render: GWP_OK is returned at once, the
-       old model (and visual name) stays until then; the server object is written at once. GWP_ERROR_NOT_FOUND: neither online nor in ALife, no such model file;
-       GWP_ERROR_INVALID_ARGUMENT: an empty or too long name, an object without a model; GWP_ERROR_INVALID_STATE: an
-       offline object without a game; GWP_ERROR_NOT_SUPPORTED: an online creature other than the actor, an online
-       object with a physics shell.
+    /* Changes the model of an object: as obj:set_visual_name(visual) of Lua plus its server object, so the model stays
+       with the save and the next spawn (Lua set_visual_name changes only the online object). `visual` is the path
+       under meshes without the extension ("dynamics\box\box_wood_01"). An online object changes at once - the actor
+       completely (bones, animations, physics, as an outfit does; an outfit with its own actor visual puts its model
+       back when it is put on or taken off and at a load); a live stalker or trader completely too (as Lua
+       npc:set_visual: animations, bones, physics rebuilt; its server object is written once the model is set, a
+       model without the bones or the animations of a stalker is refused and the old one stays). Any other creature (a
+       monster, a corpse) cannot while online (the engine keeps its skeleton in the animation and physics managers, a
+       corpse in its ragdoll), and so cannot an object with a physics shell (a box, a barrel, an item on the ground, a
+       car: the shell keeps the bones of the old model): change it while it is offline, it comes online with the new
+       model. An offline object changes its server object only. Called on the game logic thread while the render of
+       the frame runs beside it, the online model (the actor's and a stalker's too) changes at the end of that frame,
+       after the render: GWP_OK is returned at once, the old model (and visual name) stays until then; the server
+       object is written at once (a stalker's - at the end of the frame, if the model was set). GWP_ERROR_NOT_FOUND:
+       neither online nor in ALife, no such model file; GWP_ERROR_INVALID_ARGUMENT: an empty or too long name, an
+       object without a model, a model unfit for a stalker (when changed at once); GWP_ERROR_INVALID_STATE: an offline
+       object without a game; GWP_ERROR_NOT_SUPPORTED: an online creature other than the actor and a live stalker, an
+       online object with a physics shell.
        @group object_ext @thread main */
     GwpResult(GWP_CALL* object_set_visual)(const GwpPlugin* self, GwpObjectId id, const char* visual);
 
@@ -2651,6 +2755,294 @@ typedef struct GwpEngineApi
        @group alife @thread main */
     GwpResult(GWP_CALL* alife_squads_state)(const GwpObjectId* ids, uint32_t count, GwpSquadState* out,
         uint32_t stride, uint32_t fields);
+
+    /* level_ray_pick with the surface of the hit (plans/addon_base_building D2): the same ray and the same answer,
+       plus the normal of the surface and its game material. Static geometry: the normal of the hit triangle, turned
+       towards the start of the ray, and the material of the triangle. An object with a skeleton: the normal of the
+       collision shape of the hit bone at the hit point (a box - its face, a cylinder - its cap or side, a sphere -
+       from its centre) and the material of the bone. Anything else: the normal is -dir and
+       the material GWP_INVALID_MATERIAL. The material is an index into the game materials (gamemtl.xr; the same
+       number as rq_result.material_id of Lua) - stable within one game session, not across builds of gamemtl.xr:
+       keep the name (level_material_name), not the number. Every out parameter may be NULL. Returns 1 on a hit.
+       level_material_name: the name of a material ("materials\earth"), NULL for an unknown index; the string lives
+       for the whole session.
+       @group level @thread main */
+    int(GWP_CALL* level_ray_pick_ex)(const float from_xyz[3], const float dir[3], float distance, uint32_t targets,
+        GwpObjectId ignore, float* out_distance, GwpObjectId* out_object, float out_normal[3], uint32_t* out_material);
+    const char*(GWP_CALL* level_material_name)(uint32_t material);
+
+    /* Files of the addon in the profile of the user, outside the game folder and the saves: one folder per addon,
+       <root>/addons/<addon id>/, shared by every save, every game folder of this user and every copy of the game
+       running at once (wiki/doc/plugins/api/user_data.md; Lua: addons.user_data). The root lies next to the data of
+       the launcher (com.ruut.stalker): Windows %APPDATA%\com.ruut.stalker\game\, Linux $XDG_CONFIG_HOME (without it
+       ~/.config)/com.ruut.stalker/game/, macOS ~/Library/Application Support/com.ruut.stalker/game/; the command line
+       key -user_data <folder> replaces the root. The paths are UTF-8 and go to the OS as wide text on Windows (any
+       name of the profile). A plugin reaches only the folder of its own addon (self). The engine creates the folders.
+       A name of a file: the characters a-z 0-9 _ . -, 1..GWP_USER_DATA_MAX_NAME of them, not starting with '.', no
+       "..", not ending with '.', ".tmp" or ".lock" (the files of the engine), not a device name of Windows (con, prn,
+       aux, nul, com0..9, lpt0..9, with any extension); any other is GWP_ERROR_INVALID_ARGUMENT. A file holds at most
+       GWP_USER_DATA_MAX_FILE_SIZE bytes. Every call does its I/O at once (a write flushes to the disk: milliseconds):
+       keep them off the per-frame path. A failure of the OS is GWP_ERROR with a line in the log.
+       user_data_dir: the absolute path of the folder with a trailing separator, created when missing; copied into out
+       zero-terminated and cut to cap - 1; the result is the full length (out may be NULL with cap 0 to ask it); 0 -
+       no folder (no root: APPDATA / HOME not set; the folder cannot be created; logged).
+       user_data_read: the whole file into out. *size - the size of the file whenever it exists. GWP_OK - the file is
+       in out; GWP_ERROR_NOT_FOUND - no such file (nothing failed); GWP_ERROR_INVALID_ARGUMENT - a bad name, size NULL,
+       out NULL with cap > 0, or cap below *size (nothing copied: call again with a buffer of *size; cap 0 asks the
+       size); GWP_ERROR_NOT_SUPPORTED - the file is larger than GWP_USER_DATA_MAX_FILE_SIZE.
+       user_data_write: replaces the file atomically - the data goes into a temporary file of the same folder, onto
+       the disk, then over the old file in one step (Windows MoveFileExW MOVEFILE_REPLACE_EXISTING |
+       MOVEFILE_WRITE_THROUGH, POSIX rename + fsync of the folder): a reader, another copy of the game, a crash or a
+       power loss see the old file or the new one, never a part of it. size 0 writes an empty file.
+       GWP_ERROR_INVALID_ARGUMENT - a bad name, data NULL with size > 0; GWP_ERROR_NOT_SUPPORTED - size above
+       GWP_USER_DATA_MAX_FILE_SIZE.
+       user_data_lock: the lock of the name between the processes and the threads (the copies of the game, Lua and
+       the plugins): Windows - "<name>.lock" opened without sharing and deleted on close, POSIX - flock of
+       "<name>.lock". Waits up to timeout_ms (cut to GWP_USER_DATA_LOCK_TIMEOUT_MAX; 0 - one try); the calling thread
+       waits with it. Not reentrant: a second lock of the same name waits for the first one. The lock guards nothing
+       by itself: read - merge - write under it (read-modify-write); a plain write needs none. *out_lock - the lock
+       for user_data_unlock; GWP_ERROR_INVALID_STATE - the wait ran out (another holder); GWP_ERROR_INVALID_ARGUMENT
+       - a bad name, out_lock NULL. A lock the plugin still holds when it unloads (or crashes) is released then
+       (logged).
+       user_data_unlock: GWP_ERROR_NOT_FOUND - no such lock (released already); GWP_ERROR_ACCESS_DENIED - a lock of
+       another plugin.
+       user_data_remove: GWP_OK - removed; GWP_ERROR_NOT_FOUND - no such file; GWP_ERROR_INVALID_ARGUMENT - a bad name.
+       user_data_list: the names of the files of the folder (valid names only: no temporary or lock files), sorted,
+       '\n' between them (none after the last one); copied and counted as user_data_dir does; 0 - no files, no
+       folder, or a failure (logged).
+       @group user_data @thread any */
+    uint32_t(GWP_CALL* user_data_dir)(const GwpPlugin* self, char* out, uint32_t cap);
+    GwpResult(GWP_CALL* user_data_read)(const GwpPlugin* self, const char* name, void* out, uint32_t cap,
+        uint32_t* size);
+    GwpResult(GWP_CALL* user_data_write)(const GwpPlugin* self, const char* name, const void* data, uint32_t size);
+    GwpResult(GWP_CALL* user_data_lock)(const GwpPlugin* self, const char* name, uint32_t timeout_ms,
+        GwpUserDataLock* out_lock);
+    GwpResult(GWP_CALL* user_data_unlock)(const GwpPlugin* self, GwpUserDataLock lock);
+    GwpResult(GWP_CALL* user_data_remove)(const GwpPlugin* self, const char* name);
+    uint32_t(GWP_CALL* user_data_list)(const GwpPlugin* self, char* out, uint32_t cap);
+
+    /* ===== plans/addon_api_ideas (group plugin, 2026-11-14): P18 P19 P21 P24 P25 P26 P46 P47 P51 P54 P57 P12 =====
+       One additive step: an engine has all of these or none (GWP_API_HAS(api, task_async) tells; the field
+       GwpSubscribeOptions::priority of the same step too). */
+
+    /* Files of the game data, read-only (P18): the virtual file system of the engine - gamedata\ of the game, the
+       archives (.db) and the files of the active addons, as the engine itself sees them ($game_data$). path: relative
+       to gamedata, '\\' or '/' between the folders ("configs\\plugins\\my_addon\\cache.ltx"); an absolute path, "..",
+       a drive or an empty path is GWP_ERROR_INVALID_ARGUMENT. The names are UTF-8.
+       fs_stat: GWP_OK - a file (out_size: its size, out_mtime: the time it was changed, seconds since 1970 UTC; 0 for
+       a file inside an archive whose time the engine does not know); GWP_ERROR_NOT_FOUND - no such file. Each out may
+       be NULL. A plugin that caches a parsed config compares out_mtime and out_size (ini_generation tells the ltx
+       reloads of the engine).
+       fs_read: the whole file into out, as user_data_read: *size - the size of the file whenever it exists; GWP_OK;
+       GWP_ERROR_NOT_FOUND; GWP_ERROR_INVALID_ARGUMENT - a bad path, size NULL, out NULL with cap > 0, or cap below
+       *size (nothing copied: call again with *size; cap 0 asks the size); GWP_ERROR_NOT_SUPPORTED - above
+       GWP_FS_MAX_FILE_SIZE.
+       fs_list: the names in the folder `folder` ("" or NULL = gamedata itself) that match `mask` (NULL or "" = "*";
+       '*' and '?' wildcards, the case is ignored), sorted, '\n' between them; flags GWP_FS_LIST_*. Copied into out
+       zero-terminated and cut to cap - 1; the result is the full length (out NULL with cap 0 asks it); 0 - nothing
+       (no such folder, a bad argument). A listing walks the index of the file system: milliseconds - keep it off the
+       per-frame path.
+       @group ini @thread main */
+    GwpResult(GWP_CALL* fs_stat)(const char* path, uint32_t* out_size, int64_t* out_mtime);
+    GwpResult(GWP_CALL* fs_read)(const char* path, void* out, uint32_t cap, uint32_t* size);
+    uint32_t(GWP_CALL* fs_list)(const char* folder, const char* mask, uint32_t flags, char* out, uint32_t cap);
+
+    /* String variables and console commands of the plugin (P19). The names follow the rule of cvar_register_int: they
+       start with "<addon id>_".
+       cvar_register_string: a string variable (CCC_String); def - its first value, at most GWP_CVAR_STRING_MAX bytes,
+       one line. The value is kept in appdata/plugins.ltx with the numbers (the whole rest of the line; an empty value
+       is not written, the default comes back at the next start) and read with cvar_get_string. Registered again (a
+       reload of the plugin) it keeps the value. GWP_ERROR_INVALID_ARGUMENT: an empty or too long name, a value too
+       long or with a line break, a variable of this name of another kind; GWP_ERROR_ACCESS_DENIED: a name without
+       the "<addon id>_" prefix or of another addon (as cvar_register_int).
+       cvar_set_string: a variable this plugin registered; GWP_ERROR_NOT_FOUND - none.
+       console_command_register: a command of the console; fn(user, args) runs on the main thread when the player (or
+       console_execute) runs it. help: a line for the help of the console (NULL - none), copied. The command goes away
+       with the plugin (unload; after a crash it stays until the unload but calls nothing) and with
+       console_command_unregister. GWP_ERROR_INVALID_ARGUMENT: an empty or too long name, fn NULL, the console has the
+       name already (an engine command, a variable); GWP_ERROR_ACCESS_DENIED: a name without the "<addon id>_" prefix
+       or of another addon. A crash in fn stops the plugin, as a crash in a handler.
+       console_command_unregister: GWP_ERROR_NOT_FOUND - no such command of this plugin.
+       @group console @thread main */
+    GwpResult(GWP_CALL* cvar_register_string)(const GwpPlugin* self, const char* name, const char* def);
+    GwpResult(GWP_CALL* cvar_set_string)(const GwpPlugin* self, const char* name, const char* value);
+    GwpResult(GWP_CALL* console_command_register)(const GwpPlugin* self, const char* name, GwpConsoleCommandFn fn,
+        void* user, const char* help);
+    GwpResult(GWP_CALL* console_command_unregister)(const GwpPlugin* self, const char* name);
+
+    /* The level of the log of this plugin (P57): the lines of `log` below min_level are dropped. GWP_LOG_DEBUG turns
+       the debug lines of this plugin on without the -addon_debug key (the other plugins stay as they are); a higher
+       level hides the info lines, and so on. Without a call: GWP_LOG_DEBUG with -addon_debug, else GWP_LOG_INFO.
+       Errors (GWP_LOG_ERROR) are never dropped: a min_level above it is GWP_ERROR_INVALID_ARGUMENT. The level lives
+       until the plugin unloads. Any thread (a plain store).
+       @group core @thread any */
+    GwpResult(GWP_CALL* log_set_level)(const GwpPlugin* self, GwpLogLevel min_level);
+
+    /* Saving the game from a plugin (P21). Queues the console command "save <name>" for the start of the next frame
+       (as console_execute_deferred: never inside the dispatch of an event or a save that is running); name NULL or
+       "" - the quick save ("<user> - quicksave"). The engine then checks it as for the player: a single game, a live
+       actor, a valid file name (no \ / : * ? " < > |), and sends game_on_before_save (any subscriber may cancel it).
+       GWP_OK - queued; GWP_ERROR_INVALID_STATE - no game or a dead actor now; GWP_ERROR_INVALID_ARGUMENT - a name the
+       engine would refuse (or longer than 200 bytes). A save that goes on comes as alife_on_before_save /
+       alife_on_after_save.
+       @group save @thread main */
+    GwpResult(GWP_CALL* game_save)(const GwpPlugin* self, const char* name);
+
+    /* The parameters of an online inventory item as the engine uses them now (P24): the values of its section plus
+       its installed upgrades - see GwpItemParams. GWP_OK; GWP_ERROR_NOT_FOUND - no such online object;
+       GWP_ERROR_INVALID_STATE - no level;
+       GWP_ERROR_INVALID_ARGUMENT - not an inventory item, out NULL or out->size below the fields up to
+       artefact_count. Read only: the engine keeps no per-instance change of them across a save, a level change or an
+       offline switch (the item is made anew from its section and upgrades), so there is no writer.
+       @group items @thread main */
+    GwpResult(GWP_CALL* item_params)(GwpObjectId item, GwpItemParams* out);
+
+    /* Debug shapes in the world (P25): the shapes of level.draw_* of Lua - lines, depth tested, 1 pixel, opaque
+       (the alpha of color 0xAARRGGBB is ignored), drawn every frame until removed. A shape is set once by its id
+       (1..GWP_DRAW_MAX_ID bytes, a-z 0-9 _ . -) and stays until it is set again, removed, the plugin stops or the
+       level goes; the ids of a plugin are its own (the engine prefixes them with the addon id). draw_circle: a ring
+       in the horizontal plane, segments 0 = by the radius. draw_box: half sizes along its axes, turned by hpb
+       (radians: heading, pitch, bank; NULL = no turn). draw_arrow: head - the length of the head (0 = a quarter of
+       the arrow, at most 0.5 m). GWP_ERROR_INVALID_STATE - no level, or the limit of shapes (1024 of every addon
+       and Lua together); GWP_ERROR_INVALID_ARGUMENT - a bad id or a value that is not finite.
+       draw_remove: id NULL - every shape of the plugin; GWP_ERROR_NOT_FOUND - no such shape.
+       @group level @thread main */
+    GwpResult(GWP_CALL* draw_line)(const GwpPlugin* self, const char* id, const float a[3], const float b[3],
+        uint32_t color);
+    GwpResult(GWP_CALL* draw_circle)(const GwpPlugin* self, const char* id, const float center[3], float radius,
+        uint32_t color, uint32_t segments);
+    GwpResult(GWP_CALL* draw_sphere)(const GwpPlugin* self, const char* id, const float center[3], float radius,
+        uint32_t color);
+    GwpResult(GWP_CALL* draw_box)(const GwpPlugin* self, const char* id, const float center[3], const float half[3],
+        const float hpb[3], uint32_t color);
+    GwpResult(GWP_CALL* draw_arrow)(const GwpPlugin* self, const char* id, const float from[3], const float to[3],
+        uint32_t color, float head);
+    GwpResult(GWP_CALL* draw_remove)(const GwpPlugin* self, const char* id);
+
+    /* Input (P26): the state of the keyboard and the mouse buttons now, for a plugin that polls (an update, a timer).
+       The presses themselves come as events (on_key_press, level_input_on_key_press...).
+       input_key_down: 1 while the key is held; dik - a DIK_* code of the engine (the numbers of Lua DIK_keys,
+       mouse buttons included: MOUSE_1 = 337...); 0 for an unknown code. The state is that of the input of the
+       engine: a key held over an open window (the inventory, the console) or in the main menu reads as held too -
+       a plugin that reacts to keys in the world checks the game state itself.
+       input_action_down: 1 while one of the keys bound to the action is held. action: a game action ("jump",
+       "use", the names of bind in user.ltx) or an action of an addon key group (addons.register_key_group);
+       0 for an unknown action.
+       input_action_key: the DIK code of the key bound to the action, index 0 - the first key, 1 - the second;
+       -1 - no key bound, an unknown action.
+       Key groups of a plugin itself are not in this step: register them from Lua (addons.register_key_group in the
+       Lua part of the addon, or through script_call) and poll them here by their action names.
+       @group level @thread main */
+    int(GWP_CALL* input_key_down)(int dik);
+    int(GWP_CALL* input_action_down)(const char* action);
+    int(GWP_CALL* input_action_key)(const char* action, uint32_t index);
+
+    /* A task on a background thread with its end on the main thread (P46). work(user) runs on one of
+       GWP_ASYNC_THREADS threads of the engine (shared by every plugin, the tasks in the order they come); then
+       done(user) runs on the main thread at the start of a frame (done may be NULL). work may call only the
+       functions marked @thread any (log, user_data_*, profile_add...) and its own code: a blocking file or network
+       call is fine there, the game goes on. The pointer `user` belongs to the plugin until done returns (or until
+       work returns when done is NULL). When the plugin unloads (or crashes) the tasks of it that did not start are
+       dropped (no work, no done), the engine waits for the work that runs now, and no done comes after on_unload:
+       make work interruptible when it may be long (a flag the plugin sets in on_unload). A crash in work stops the
+       plugin, as a crash in a handler. GWP_OK - queued; GWP_ERROR_INVALID_ARGUMENT - work NULL;
+       GWP_ERROR_INVALID_STATE - GWP_ASYNC_MAX_PER_PLUGIN tasks of the plugin are queued or running.
+       @group threads @thread main */
+    GwpResult(GWP_CALL* task_async)(const GwpPlugin* self, GwpAsyncFn work, GwpAsyncFn done, void* user);
+
+    /* The online objects within `radius` metres of `center` (P47), the nearest first (by the position of the
+       object, not by its shape); the items inside an inventory are left out (their position is the owner's) - the
+       search of Lua level.objects_in_radius. class_id: the class id as object_class_id gives it ("AI_STL_S",
+       "O_ACTOR"...; at most 8 characters, a longer one matches nothing), NULL or "" - any class. The ids are copied into out (at most cap; out may be NULL with cap 0 to ask the count); the
+       result is how many objects matched. 0 without a level or with radius <= 0. A walk over the online objects of
+       the level: cheap, but not for every frame of hundreds of plugins.
+       @group level @thread main */
+    uint32_t(GWP_CALL* level_objects_in_radius)(const float center[3], float radius, const char* class_id,
+        GwpObjectId* out, uint32_t cap);
+
+    /* The actor starts a dialog with an online character (P51), as the player pressing "use" on it, or as
+       run_talk_dialog of Lua: the talk window opens when both can talk (character_is_talk_enabled, alive) - the
+       character may refuse it. disable_break: 1 - the player cannot leave the dialog by Esc (only by a phrase).
+       GWP_OK - the dialog started; GWP_ERROR_INVALID_STATE - no actor, the actor talks already, the character
+       refused (talk disabled, dead); GWP_ERROR_NOT_FOUND / GWP_ERROR_INVALID_ARGUMENT - no such online object / not a
+       character. A spoken line of an NPC: sound_play_attached at its head bone ("bip01_head").
+       @group character @thread main */
+    GwpResult(GWP_CALL* character_start_dialog)(const GwpPlugin* self, GwpObjectId npc, int disable_break);
+
+    /* A sound of the plugin that follows a bone of an online object every frame (P12): an NPC speaking, a radio on a
+       belt. As sound_play_at with the object instead of a point: bone NULL or "" - the root of an object with a
+       skeleton (the centre of any other object). When the object goes offline the sound stops. GWP_ERROR_NOT_FOUND:
+       no such online object, bone or file. The other rules (limit, handle, flags, volume) - those of sound_play_at.
+       @group effects @thread main */
+    GwpResult(GWP_CALL* sound_play_attached)(const GwpPlugin* self, const char* path, GwpObjectId object,
+        const char* bone, float volume, uint32_t flags, GwpSound* out_sound);
+
+    /* How lit and how visible (P54). object_luminosity: the light on the object now, as a rule 0..1 (the lighting
+       of the renderer the engine keeps for every renderable object, Lua get_luminocity; the visual memory of the NPCs
+       and the HUD icon of the actor use the same value);
+       GWP_ERROR_NOT_FOUND - no such online object; GWP_ERROR_INVALID_STATE - the object is not rendered (no
+       lighting data yet). npc_visibility_of: how far the visual memory of `npc` (a stalker or a monster) is in
+       seeing `target`, 0..1: 1 - seen (the target is among the visible objects of the NPC now), less - the value the
+       NPC has piled up toward its threshold (the eye of the stealth HUD for the actor), 0 - not noticed at all.
+       GWP_ERROR_NOT_FOUND - no such online object; GWP_ERROR_INVALID_STATE - no level; GWP_ERROR_INVALID_ARGUMENT -
+       npc is not a creature with a visual memory.
+       @group npc @thread main */
+    GwpResult(GWP_CALL* object_luminosity)(GwpObjectId id, float* out);
+    GwpResult(GWP_CALL* npc_visibility_of)(GwpObjectId npc, GwpObjectId target, float* out);
+    /* ===== end of group plugin (plans/addon_api_ideas) ===== */
+
+    /* ===== engine gaps (P11, P13; plans/addon_api_ideas, group engine) ===== */
+
+    /* The weather lock (P11): weather_set lasts until level_weathers.script picks the weather again (every change of
+       the game hour, every load); a locked cycle is what level_weathers applies instead of its own pick, so the
+       weather stays until the lock goes. One lock at a time for the plugins and Lua (level.weather_lock): the owner
+       is the plugin; a lock of another owner refuses with GWP_ERROR_ACCESS_DENIED (unlock it first or wait). The lock
+       lives through level changes; it goes with weather_unlock, when the plugin stops (unload, crash, reload) and when
+       a new game starts or a save is loaded (it is not saved: lock again in alife_on_start / level_on_start).
+       weather_lock: sets the cycle now as weather_set does (forced = 1 switches at once, 0 blends; during an effect
+       the cycle takes over after it) and locks it; the owner may lock another cycle the same way.
+       GWP_ERROR_NOT_FOUND - no such cycle; GWP_ERROR_INVALID_ARGUMENT - name NULL or empty; GWP_ERROR_INVALID_STATE -
+       no level. weather_unlock: GWP_ERROR_NOT_FOUND - no lock; GWP_ERROR_ACCESS_DENIED - the lock of another owner;
+       the weather stays until level_weathers picks the next one. weather_locked: the locked cycle as weather_get
+       copies a string (0 - no lock). The change of the weather comes as the event weather_on_changed.
+       @group world @thread main */
+    GwpResult(GWP_CALL* weather_lock)(const GwpPlugin* self, const char* name, int forced);
+    GwpResult(GWP_CALL* weather_unlock)(const GwpPlugin* self);
+    uint32_t(GWP_CALL* weather_locked)(char* out, uint32_t cap);
+
+    /* A HUD text without a timeout (P13): hud_message needs show_ms and a repeat to stay on the screen; this text
+       stays until hud_text_clear. static_id: a node of configs/ui/ui_custom_msgs.xml (required: the shared node of
+       SetHudMsg is not allowed here - its Lua messages would be hidden); text_id: a string id (translated, a missing
+       id shows as it is). A second call for the same node replaces the text at once, without a blink - call it when
+       the value changes, not by a timer. The engine keeps the text: the HUD of the next level shows it again by itself
+       (a level change); it goes with hud_text_clear, when the plugin stops, when a new game starts or a save is loaded.
+       One node is held by one text: the last caller owns it (another plugin included); hud_message or Lua SetHudMsg
+       into the same node replace it on the screen until the next level. At most 64 such texts at once.
+       hud_text_set: GWP_ERROR_INVALID_ARGUMENT - static_id NULL, empty, longer than 127 or with ':', text_id NULL or
+       empty; GWP_ERROR_NOT_FOUND - no such node; GWP_ERROR_INVALID_STATE - no HUD (no level) or 64 texts already.
+       hud_text_clear: GWP_ERROR_NOT_FOUND - no text of this plugin in the node.
+       @group feedback @thread main */
+    GwpResult(GWP_CALL* hud_text_set)(const GwpPlugin* self, const char* static_id, const char* text_id);
+    GwpResult(GWP_CALL* hud_text_clear)(const GwpPlugin* self, const char* static_id);
+
+    /* The level of the actor (P20): moves the actor to another level - or to another place of its own - through the
+       usual level change, as game.jump_to_level of Lua does: the call only sends the request and returns, the change
+       starts at the next network update of the frame (the autosave, on_level_changing, then a new ALife load and the
+       new level: alife_on_start with reason "level_change", level_on_start). Do not call it again until then.
+       actor_change_level: to the game vertex `game_vertex` of any level (graph_vertex_*); level_vertex
+       GWP_INVALID_LEVEL_VERTEX = the level vertex of the game vertex (a given one must be a vertex of the level of the
+       game vertex: it cannot be checked before that level is loaded); position NULL = the point of the game vertex;
+       angles NULL = (0, 0, 0) - the heading, pitch and bank of the camera, radians. GWP_ERROR_INVALID_ARGUMENT - a bad
+       game vertex, a NaN or an infinity in position or angles.
+       actor_change_level_to: to the level `level_name` (a name of the game graph, "l01_escape"): the game vertex of
+       that level the game graph path from the actor reaches first, without a path - the nearest one.
+       GWP_ERROR_INVALID_ARGUMENT - level_name NULL or empty; GWP_ERROR_NOT_FOUND - no such level.
+       Both: GWP_ERROR_INVALID_STATE - no level, no game (ALife) or no live actor.
+       @group world @thread main */
+    GwpResult(GWP_CALL* actor_change_level)(const GwpPlugin* self, uint32_t game_vertex, uint32_t level_vertex,
+        const float position[3], const float angles[3]);
+    GwpResult(GWP_CALL* actor_change_level_to)(const GwpPlugin* self, const char* level_name);
+    /* ===== end of engine gaps (group engine) ===== */
 } GwpEngineApi;
 
 /* True when the engine table provides the member `field` (the check of an additive step, see "Compatibility"). */
@@ -2720,7 +3112,8 @@ GWP_STATIC_ASSERT(offsetof(GwpSquadState, level_id) == 8, "GwpSquadState: size a
 GWP_STATIC_ASSERT(sizeof(GwpValue) == 24, "GwpValue: 8 bytes of header and a 16-byte union");
 GWP_STATIC_ASSERT(sizeof(GwpEvent) == 40, "GwpEvent: size, flags, id, argc, name, argv, result");
 GWP_STATIC_ASSERT(offsetof(GwpPluginDesc, api_built) == 32, "GwpPluginDesc: api_built after user");
-GWP_STATIC_ASSERT(sizeof(GwpSubscribeOptions) == 32, "GwpSubscribeOptions: no tail padding (reserved2)");
+GWP_STATIC_ASSERT(offsetof(GwpSubscribeOptions, priority) == 32, "GwpSubscribeOptions: priority after reserved2");
+GWP_STATIC_ASSERT(sizeof(GwpSubscribeOptions) == 40, "GwpSubscribeOptions: no tail padding (reserved3)");
 #endif
 
 /* ------------------------------------------------------------------------- */

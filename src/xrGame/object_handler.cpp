@@ -52,6 +52,21 @@ void CObjectHandler::reinit(CAI_Stalker* object)
     m_clutched_hammer_enabled = false;
 }
 
+void CObjectHandler::on_visual_changed()
+{
+    // As reinit: the hand and finger bones by name in the new model; the strap bones are looked up again by
+    // weapon_bones on the next call (the id of the strapped weapon is forgotten)
+    IKinematics* kinematics = smart_cast<IKinematics*>(planner().m_object->Visual());
+    VERIFY(kinematics);
+    LPCSTR section = planner().m_object->cNameSect().c_str();
+    m_r_hand = kinematics->LL_BoneID(pSettings->r_string(section, "weapon_bone0"));
+    m_l_finger1 = kinematics->LL_BoneID(pSettings->r_string(section, "weapon_bone1"));
+    m_r_finger2 = kinematics->LL_BoneID(pSettings->r_string(section, "weapon_bone2"));
+    m_strap_object_id = ALife::_OBJECT_ID(-1);
+    m_strap_bone0 = -1;
+    m_strap_bone1 = -1;
+}
+
 void CObjectHandler::reload(LPCSTR section) { inherited::reload(section); }
 bool CObjectHandler::net_Spawn(CSE_Abstract* DC)
 {

@@ -53,6 +53,9 @@ void CSE_ALifeObject::script_register(lua_State* luaState)
             .def_readonly("m_level_vertex_id", &CSE_ALifeObject::m_tNodeID)
             .def_readonly("m_game_vertex_id", &CSE_ALifeObject::m_tGraphID)
             .def_readonly("m_story_id", &CSE_ALifeObject::m_story_id)
+            // D6 (plans/addon_base_building/plan.md section 15.2): alife_switch_distance of the section, 0 - the
+            // global one. Read-only: it is not saved and is taken from the section again on load
+            .def_readonly("switch_distance", &CSE_ALifeObject::m_switch_distance)
     ];
 }
 

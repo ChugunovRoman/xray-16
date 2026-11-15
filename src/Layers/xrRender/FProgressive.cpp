@@ -71,6 +71,36 @@ void FProgressive::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags
 #endif
 }
 
+// GPU instancing (plans/render_instancing/plan.md): the draw of Render() below - its slide window of the LOD, and the
+// LOD remembered the same way.
+bool FProgressive::instancing_get(CBackend&, const Fmatrix& xform, float LOD, bool use_fast_geo, instancing_draw& draw,
+    Fmatrix& world)
+{
+#if RENDER != R_R1
+    if (m_fast && use_fast_geo)
+    {
+        const int lod_id = iFloor((1.f - clampr(LOD, 0.f, 1.f)) * float(xSWI->count - 1) + 0.5f);
+        VERIFY(lod_id >= 0 && lod_id < int(xSWI->count));
+        const FSlideWindow& SW = xSWI->sw[lod_id];
+        draw = { m_fast->rm_geom._get(), m_fast->vBase, SW.num_verts, m_fast->iBase + SW.offset, SW.num_tris };
+        world = xform;
+        return draw.geom != nullptr;
+    }
+#endif
+    int lod_id = last_lod;
+    if (LOD >= 0.f)
+    {
+        clamp(LOD, 0.f, 1.f);
+        lod_id = iFloor((1.f - LOD) * float(nSWI.count - 1) + 0.5f);
+        last_lod = lod_id;
+    }
+    VERIFY(lod_id >= 0 && lod_id < int(nSWI.count));
+    const FSlideWindow& SW = nSWI.sw[lod_id];
+    draw = { rm_geom._get(), vBase, SW.num_verts, iBase + SW.offset, SW.num_tris };
+    world = xform;
+    return draw.geom != nullptr;
+}
+
 void FProgressive::Render(CBackend& cmd_list, float LOD, bool use_fast_geo)
 {
 #if RENDER != R_R1

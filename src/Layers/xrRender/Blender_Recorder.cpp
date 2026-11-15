@@ -162,6 +162,7 @@ void CBlender_Compile::PassBegin()
 {
     // Clear resources
     RS.Invalidate();
+    bInstTwin = false; // GPU instancing: only r_Pass records the twin
     passTextures.clear();
     passMatrices.clear();
     passConstants.clear();

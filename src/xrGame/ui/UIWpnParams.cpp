@@ -9,6 +9,23 @@
 #include "Weapon.h"
 #include "UIHelper.h"
 
+namespace
+{
+// A weapon may name an ammo section that does not exist (an addon wrote a wrong ammo_class): the window of the item
+// skips it instead of a fatal error of the ini; one line per weapon and ammo section
+bool ui_ammo_section_exists(pcstr weapon_section, const shared_str& ammo_section)
+{
+    if (ammo_section.size() && pSettings->section_exist(ammo_section))
+        return true;
+    static xr_set<shared_str> warned;
+    string256 key;
+    xr_sprintf(key, "%s|%s", weapon_section, ammo_section.c_str());
+    if (warned.insert(shared_str(key)).second)
+        Msg("! [ui] weapon %s: ammo section '%s' does not exist", weapon_section, ammo_section.c_str());
+    return false;
+}
+} // namespace
+
 struct SLuaWpnParams
 {
     luabind::functor<float> m_functorRPM;
@@ -181,15 +198,23 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
         if (ammo_types.empty())
             return;
 
+        // a missing ammo section: its name and icon are not shown (ui_ammo_section_exists)
+        pcstr wpn_section = cur_wpn.object().cNameSect().c_str();
+        const bool ammo1_ok = ui_ammo_section_exists(wpn_section, ammo_types[0]);
+        const bool ammo2_ok = ammo_types.size() > 1 && ui_ammo_section_exists(wpn_section, ammo_types[1]);
+
         if (m_textAmmoUsedType)
         {
             string128 str;
-            xr_sprintf(str, sizeof(str), "%s", pSettings->r_string(ammo_types[0].c_str(), "inv_name_short"));
+            xr_sprintf(str, sizeof(str), "%s", ammo1_ok ? pSettings->r_string(ammo_types[0].c_str(), "inv_name_short") : "");
             m_textAmmoUsedType->SetTextST(str);
         }
 
         Frect tex_rect;
-        if (m_stAmmoType1)
+        tex_rect.set(0, 0, 1, 1);
+        if (m_stAmmoType1 && !ammo1_ok)
+            m_stAmmoType1->SetVisible(false);
+        else if (m_stAmmoType1)
         {
             m_stAmmoType1->SetShader(
                 InventoryUtilities::GetEquipmentIconShaderForItemSection(ammo_types[0].c_str()));
@@ -210,7 +235,7 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
 
         if (m_stAmmoType2)
         {
-            if (ammo_types.size() == 1 && m_stAmmoType1)
+            if (!ammo2_ok) // one ammo type (ammo2_ok is false then) or a missing section
             {
                 tex_rect.set(0, 0, 1, 1);
                 m_stAmmoType2->SetVisible(false);
@@ -237,7 +262,8 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
             }
         }
 
-        auto slot_id = slot_wpn->BaseSlot();
+        // no item to compare with (slot_wpn is nullptr) - the item itself
+        auto slot_id = (slot_wpn ? slot_wpn : &cur_wpn)->BaseSlot();
         if (slot_id == KNIFE_SLOT)
         {
             m_textAmmoTypes->SetVisible(false);

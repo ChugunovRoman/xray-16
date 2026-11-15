@@ -42,6 +42,12 @@ public:
     void switch_object(CSE_ALifeDynamicObject* object);
     IC float online_distance() const noexcept;
     IC float offline_distance() const noexcept;
+    // D6 (plans/addon_base_building/plan.md section 15.2): the online / offline distance of one object - its own
+    // alife_switch_distance from the section (CSE_ALifeObject::m_switch_distance) with the same hysteresis
+    // (m_switch_factor, al_switch_factor), else the global ones. Squads, groups and the time skip stay on the global
+    // (out of line: the header does not see CSE_ALifeObject; one call per object of the switch pass)
+    float online_distance(const CSE_ALifeObject* object) const noexcept;
+    float offline_distance(const CSE_ALifeObject* object) const noexcept;
     IC float switch_distance() const noexcept;
     IC void set_switch_distance(float switch_distance) noexcept;
     IC void set_switch_factor(float switch_factor) noexcept;

@@ -20,7 +20,8 @@ Where the data comes from:
                              (kLuaResultBindings), valid schema codes (IsValidSchema)
     addon_object_events.cpp  events whose source moves to the engine (kEngineEvents: name -> group), groups
                              (kGroupNames), groups the engine emits in this build (kImplementedGroups)
-    axr_main.script          script events and their schemas (local intercepts = { name = "schema", ... })
+    axr_main.script          script events and their schemas (local intercepts = { name = "schema", ... }); the
+                             copy of kEngineEvents for axr_main.event_source (local engine_events, for ipairs({...}))
     events_meta.json         hand-written: page sections and, per event, when it comes, its arguments, notes
     events_list_manual.md    hand-written text blocks (<!-- @block name --> ... ): intro, notation, event sequence, ...
 
@@ -30,7 +31,8 @@ so Visual Studio shows them in the Error List; exit code 2. An argument type in 
 not allow is printed as a warning (the page is still written).
 
 Adding a script event: add it to intercepts in axr_main.script with its schema, add its entry to events_meta.json,
-run the script.
+run the script. Moving an event to the engine (kEngineEvents): add its name to engine_events of axr_main.script too -
+the script checks that the two lists hold the same names.
 """
 
 import argparse
@@ -305,6 +307,54 @@ def parse_intercepts(path, codes):
         events[name] = {"schema": schema, "line": number}
         order.append(name)
     raise DocError(path, start + 1, "intercepts table is not closed")
+
+
+def parse_engine_events_lua(path):
+    """Names of the engine_events list of axr_main.script: local engine_events = {} / for _, name in ipairs({ ... })."""
+    lines = read_text(path, "cp1251").split("\n")
+    start = None
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*local\s+engine_events\s*=\s*\{\s*\}\s*$", line):
+            start = index
+            break
+    if start is None:
+        raise DocError(path, 1, "cannot find 'local engine_events = {}' (the copy of kEngineEvents)")
+    names = {}
+    opened = False
+    for index in range(start + 1, len(lines)):
+        number = index + 1
+        code = lines[index]
+        comment = code.find("--")
+        if comment >= 0:
+            code = code[:comment]
+        if not opened:
+            if re.search(r"\bipairs\s*\(\s*\{", code):
+                opened = True
+                code = code[code.index("{") + 1:]
+            elif code.strip():
+                raise DocError(path, number, "engine_events: expected 'for _, name in ipairs({'")
+            else:
+                continue
+        closed = code.find("}")
+        for m in re.finditer(r'"(\w+)"', code if closed < 0 else code[:closed]):
+            if m.group(1) in names:
+                raise DocError(path, number, "engine_events: '%s' is listed twice" % m.group(1))
+            names[m.group(1)] = number
+        if closed >= 0:
+            return names
+    raise DocError(path, start + 1, "engine_events list is not closed")
+
+
+def check_engine_events(paths, objects, names):
+    """engine_events of axr_main.script must hold the same names as kEngineEvents."""
+    for name, info in objects["engine"].items():
+        if name not in names:
+            raise DocError(paths["axr_main"], min(names.values()) if names else 1, "engine_events: '%s' of "
+                           "kEngineEvents (addon_object_events.cpp) is missing; add it" % name)
+    for name, number in names.items():
+        if name not in objects["engine"]:
+            raise DocError(paths["axr_main"], number, "engine_events: '%s' is not in kEngineEvents "
+                           "(addon_object_events.cpp); remove it" % name)
 
 
 def parse_manual(path):
@@ -668,6 +718,7 @@ def main():
         meta = parse_meta(paths["meta"])
         manual = parse_manual(paths["manual"])
         events = build(paths, bus, objects, intercepts, meta)
+        check_engine_events(paths, objects, parse_engine_events_lua(paths["axr_main"]))
     except DocError as error:
         print(error)
         return 2

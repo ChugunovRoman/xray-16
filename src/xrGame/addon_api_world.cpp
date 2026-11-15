@@ -339,6 +339,91 @@ float GWP_CALL ApiWeatherRainFactor()
 }
 
 // ---------------------------------------------------------------------------------------------
+// engine gaps P11 (plans/addon_api_ideas/spec.md): the weather lock. level_weathers.script picks the weather at
+// every change of the game hour and on a load; with a lock it applies the locked cycle instead of its own pick.
+// One lock at a time, owned by a plugin ("plugin:<id>") or by Lua (an owner name). It lives until unlocked, the
+// owning plugin stops, or a game starts that is not a level change (a new game, a loaded save). Not saved.
+// ---------------------------------------------------------------------------------------------
+
+struct WeatherLockState
+{
+    bool active = false;
+    xr_string cycle;
+    xr_string owner;
+    const GwpPlugin* plugin = nullptr; // the owning plugin, nullptr for a Lua lock
+};
+WeatherLockState g_weather_lock;
+
+GwpResult WeatherLockSet(pcstr owner, const GwpPlugin* plugin, pcstr name, bool forced)
+{
+    if (!name || !*name)
+        return GWP_ERROR_INVALID_ARGUMENT; // SetWeather stops the game on an empty name
+    if (!g_pGameLevel || !g_pGamePersistent || Device.editor_mode())
+        return GWP_ERROR_INVALID_STATE;
+    if (g_weather_lock.active && g_weather_lock.owner != owner)
+        return GWP_ERROR_ACCESS_DENIED;
+    CEnvironment& environment = g_pGamePersistent->Environment();
+    if (environment.WeatherCycles.find(shared_str(name)) == environment.WeatherCycles.end())
+        return GWP_ERROR_NOT_FOUND;
+    g_weather_lock.active = true;
+    g_weather_lock.cycle = name;
+    g_weather_lock.owner = owner;
+    g_weather_lock.plugin = plugin;
+    // as weather_set: forced during an effect only remembers the cycle (the forced branch asserts on the effect)
+    environment.SetWeather(name, forced && !environment.IsWFXPlaying());
+    if (IsDebugLog())
+        Msg("~ [weather] lock '%s' by %s%s", name, owner, forced ? " (forced)" : "");
+    return GWP_OK;
+}
+
+GwpResult WeatherLockRelease(pcstr owner)
+{
+    if (!g_weather_lock.active)
+        return GWP_ERROR_NOT_FOUND;
+    if (g_weather_lock.owner != owner)
+        return GWP_ERROR_ACCESS_DENIED;
+    if (IsDebugLog())
+        Msg("~ [weather] unlock '%s' by %s", g_weather_lock.cycle.c_str(), owner);
+    g_weather_lock = {};
+    return GWP_OK;
+}
+
+xr_string WeatherPluginOwner(const GwpPlugin* self)
+{
+    xr_string owner = "plugin:";
+    owner += PluginAddonId(self);
+    return owner;
+}
+
+GwpResult GWP_CALL ApiWeatherLock(const GwpPlugin* self, const char* name, int forced)
+{
+    if (!WorldCheckCall("weather_lock"))
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!self)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    const GwpResult result = WeatherLockSet(WeatherPluginOwner(self).c_str(), self, name, forced != 0);
+    if (result == GWP_ERROR_ACCESS_DENIED && IsDebugLog())
+        Msg("~ [plugin:%s] weather_lock: the weather is locked by %s", PluginAddonId(self), g_weather_lock.owner.c_str());
+    return result;
+}
+
+GwpResult GWP_CALL ApiWeatherUnlock(const GwpPlugin* self)
+{
+    if (!WorldCheckCall("weather_unlock"))
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!self)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    return WeatherLockRelease(WeatherPluginOwner(self).c_str());
+}
+
+uint32_t GWP_CALL ApiWeatherLocked(char* out, uint32_t cap)
+{
+    if (!WorldCheckCall("weather_locked") || !g_weather_lock.active)
+        return WorldNone(out, cap);
+    return WorldCopy(g_weather_lock.cycle.c_str(), out, cap);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Plugin API (group world): writing the game time
 // ---------------------------------------------------------------------------------------------
 
@@ -383,6 +468,71 @@ GwpResult GWP_CALL ApiGameTimeSetFactor(const GwpPlugin* self, double factor)
 }
 } // namespace
 
+// ---------------------------------------------------------------------------------------------
+// Plugin API (group world): the level of the actor (plans/addon_api_ideas/spec.md P20)
+// ---------------------------------------------------------------------------------------------
+
+// The level change of the actor needs a running game with the actor alive (the server moves it at the next network
+// update; the autosave and on_level_changing come as for a level changer)
+GwpResult WorldActorLevelGate(const GwpPlugin* self, pcstr function)
+{
+    const GwpResult gate = WorldWriteGate(self, function);
+    if (gate != GWP_OK)
+        return gate;
+    if (!ai().get_alife() || !ai().get_game_graph() || !g_actor || !g_actor->g_Alive())
+    {
+        if (IsDebugLog())
+            Msg("~ [plugin:%s] %s: no game or no live actor", PluginAddonId(self), function);
+        return GWP_ERROR_INVALID_STATE;
+    }
+    return GWP_OK;
+}
+
+GwpResult GWP_CALL ApiActorChangeLevel(const GwpPlugin* self, uint32_t game_vertex, uint32_t level_vertex,
+    const float position[3], const float angles[3])
+{
+    const GwpResult gate = WorldActorLevelGate(self, "actor_change_level");
+    if (gate != GWP_OK)
+        return gate;
+    const CGameGraph::CGameVertex* vertex = WorldGameVertex(game_vertex);
+    if (!vertex)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    for (const float* v : { position, angles })
+    {
+        if (v && (!std::isfinite(v[0]) || !std::isfinite(v[1]) || !std::isfinite(v[2])))
+            return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    // The packet of game.jump_to_level (level_script.cpp): the game vertex, the level vertex, the position, the angles
+    GameGraph::_GRAPH_ID graph_id = static_cast<GameGraph::_GRAPH_ID>(game_vertex);
+    u32 level_id = level_vertex == GWP_INVALID_LEVEL_VERTEX ? vertex->level_vertex_id() : level_vertex;
+    const Fvector place = position ? Fvector().set(position[0], position[1], position[2]) : vertex->level_point();
+    const Fvector turn = angles ? Fvector().set(angles[0], angles[1], angles[2]) : Fvector().set(0.f, 0.f, 0.f);
+    NET_Packet packet;
+    packet.w_begin(M_CHANGE_LEVEL);
+    packet.w(&graph_id, sizeof(graph_id));
+    packet.w(&level_id, sizeof(level_id));
+    packet.w_vec3(place);
+    packet.w_vec3(turn);
+    Level().Send(packet, net_flags(TRUE));
+    Msg("* [plugin:%s] actor_change_level: game vertex %u (level '%s'), level vertex %u", PluginAddonId(self),
+        game_vertex, ai().game_graph().header().level(vertex->level_id()).name().c_str(), level_id);
+    return GWP_OK;
+}
+
+GwpResult GWP_CALL ApiActorChangeLevelTo(const GwpPlugin* self, const char* level_name)
+{
+    const GwpResult gate = WorldActorLevelGate(self, "actor_change_level_to");
+    if (gate != GWP_OK)
+        return gate;
+    if (!level_name || !*level_name)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!ai().game_graph().header().level_exist(level_name))
+        return GWP_ERROR_NOT_FOUND;
+    Msg("* [plugin:%s] actor_change_level_to: '%s'", PluginAddonId(self), level_name);
+    ai().alife().jump_to_level(level_name); // game.jump_to_level(name): the nearest game vertex of the level
+    return GWP_OK;
+}
+
 void FillWorldApi(GwpEngineApi& api)
 {
     api.graph_vertex_count = &ApiGraphVertexCount;
@@ -405,5 +555,56 @@ void FillWorldApi(GwpEngineApi& api)
     api.weather_rain_factor = &ApiWeatherRainFactor;
     api.game_time_advance = &ApiGameTimeAdvance;
     api.game_time_set_factor = &ApiGameTimeSetFactor;
+    // engine gaps P11: the weather lock
+    api.weather_lock = &ApiWeatherLock;
+    api.weather_unlock = &ApiWeatherUnlock;
+    api.weather_locked = &ApiWeatherLocked;
+    api.actor_change_level = &ApiActorChangeLevel; // P20
+    api.actor_change_level_to = &ApiActorChangeLevelTo;
+}
+
+// engine gaps P11: the weather lock for Lua (level.weather_lock / weather_unlock / weather_locked, level_script.cpp)
+bool LuaWeatherLock(pcstr name, bool forced, pcstr owner)
+{
+    if (!WorldCheckCall("level.weather_lock"))
+        return false;
+    const pcstr who = owner && *owner ? owner : "lua";
+    const GwpResult result = WeatherLockSet(who, nullptr, name, forced);
+    if (result == GWP_OK)
+        return true;
+    if (result == GWP_ERROR_ACCESS_DENIED)
+        Msg("! [weather] level.weather_lock('%s'): the weather is locked by %s", name, g_weather_lock.owner.c_str());
+    else if (result == GWP_ERROR_NOT_FOUND)
+        Msg("! [weather] level.weather_lock('%s'): no such weather cycle", name);
+    else
+        Msg("! [weather] level.weather_lock('%s'): no level or no name", name ? name : "");
+    return false;
+}
+
+bool LuaWeatherUnlock(pcstr owner)
+{
+    if (!WorldCheckCall("level.weather_unlock"))
+        return false;
+    return WeatherLockRelease(owner && *owner ? owner : "lua") == GWP_OK;
+}
+
+pcstr WeatherLockedCycle() { return g_weather_lock.active ? g_weather_lock.cycle.c_str() : nullptr; }
+pcstr WeatherLockOwner() { return g_weather_lock.active ? g_weather_lock.owner.c_str() : nullptr; }
+
+void WeatherLockOnGameStart(bool level_change)
+{
+    // A level change keeps the lock: the next level applies it (level_weathers on its load)
+    if (!level_change)
+        g_weather_lock = {};
+}
+
+void ReleasePluginWeatherLock(const GwpPlugin* plugin)
+{
+    if (plugin && g_weather_lock.active && g_weather_lock.plugin == plugin)
+    {
+        Msg("* [weather] the lock '%s' of %s is released: the plugin stops", g_weather_lock.cycle.c_str(),
+            g_weather_lock.owner.c_str());
+        g_weather_lock = {};
+    }
 }
 } // namespace gw::addons

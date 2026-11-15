@@ -30,6 +30,14 @@ void GetWeaponIconUiTexelSizeForSection(pcstr weapon_section, EWeaponInvIconPres
 bool SectionSharedInvIconPresetReady(pcstr weapon_section, EWeaponInvIconPreset preset);
 bool IsEnabledForSection(pcstr weapon_section);
 bool IsEnabledForItem(const CInventoryItem* item);
+// Model icon: the section's key inv_icon_model names a model (as a visual key: "dynamics\\stul\\stul_wood_01") or a
+// section whose visual is shot instead of the item's own one (a placement kit shows the decor it places). Such a
+// section has a dynamic icon without use_dynamic_inv_icon (use_dynamic_inv_icon = false turns it off), framed by the
+// box of the model, one shared RT per section. True: enabled ([weapon_inv_icon] enabled) and the key is set.
+bool SectionUsesModelIcon(pcstr section);
+// Queues the model icon of a section with no item behind it (CUIInventoryCellItem built from a section string: Lua
+// drag-drop lists). No-op for sections without inv_icon_model: their icon needs a live item.
+void ScheduleSection(pcstr section, EWeaponInvIconPreset preset = eWpnInvIcon_Inventory);
 
 // Очередь GPU-иконки: только после смены аддонов (InvalidateDynamicInventoryIcons), GE_ADDON_CHANGE, HotReload.
 // Спавн, reload() и открытие инвентаря не вызывают — в UI остаются inv_icon / inv_upgrade_icon до регенерации.
