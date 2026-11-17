@@ -194,11 +194,11 @@ jobs:
 
     container: ${{ matrix.platform.container || '' }}
 
-    defaults:
+    defaults: &cmake_defaults
       run:
         shell: ${{ matrix.platform.shell || 'bash -e {0}' }}
 
-    env:
+    env: &cmake_env
       CFLAGS: "-w"
       CXXFLAGS: "-w"
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -225,15 +225,11 @@ jobs:
         #- { name: Haiku,     os: ubuntu-latest,    arch: x86_64,  cc: x86_64-unknown-haiku-gcc, cxx: x86_64-unknown-haiku-g++, container: 'haiku/cross-compiler:x86_64-r1beta4', }
         - { name: AppImage,  os: ubuntu-latest,    arch: amd64,   cc: gcc,   flags: "-DBUILD_SHARED_LIBS=OFF", linuxdeploy: linuxdeploy-x86_64.AppImage }
         - { name: AppImage,  os: ubuntu-24.04-arm, arch: arm64,   cc: gcc,   flags: "-DBUILD_SHARED_LIBS=OFF", linuxdeploy: linuxdeploy-aarch64.AppImage }
-        # macOS images have tighter concurrency limits; keep the matrix minimal.
-        # Pin the deployment target so newer runner images don't pass an unsupported
-        # system version (e.g. 25.4.0) down to AppleClang/LuaJIT architecture detection.
-        - { name: macOS,          os: macos-latest,    arch: arm64,  cc: clang, threads: 3, flags: "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCPACK_GENERATOR=ZIP" }
-        - { name: macOS Intel,    os: macos-15-intel,  arch: x86_64, cc: clang, flags: "-DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCPACK_GENERATOR=ZIP" }
+        # macOS lives in the separate cmake_macos job below (its own max-parallel).
 
-        configuration: [Debug, Mixed, Release, ReleaseMasterGold]
+        configuration: &cmake_configurations [Debug, Mixed, Release, ReleaseMasterGold]
 
-    steps:
+    steps: &cmake_steps
     # setup-alpine downloads apk.static from gitlab.alpinelinux.org, which from GitHub runners often does not answer at
     # all (curl: (28) Timeout was reached). apk.static is taken from the Alpine CDN instead (the same host the packages
     # come from) and put where setup-alpine looks for it ($RUNNER_TEMP/apk): when the file is there and its sha256
@@ -489,6 +485,33 @@ jobs:
           engine-*.zip
           symbols-*.zip
 
+  # macOS is a separate job only to cap its concurrency: the account runs at most 5 macOS jobs at once, and the
+  # 2 platforms x 4 configurations = 8 jobs of one matrix used to overrun it (jobs were dropped with "not acquired by
+  # Runner of type hosted", failing the release). strategy.max-parallel applies to a whole matrix, so it can't limit
+  # macOS inside the cmake matrix without slowing Linux down too. 4 keeps the job under the limit with a spare slot.
+  # Steps, env, defaults and configurations are the cmake ones via YAML aliases (Actions has no `<<:` merge keys).
+  cmake_macos:
+    name: ${{ matrix.platform.name }} ${{ matrix.configuration }} ${{ matrix.platform.arch }} (${{ matrix.platform.cc || 'unknown compiler' }})
+    runs-on: ${{ matrix.platform.os }}
+
+    defaults: *cmake_defaults
+
+    env: *cmake_env
+
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        platform:
+        # Pin the deployment target so newer runner images don't pass an unsupported
+        # system version (e.g. 25.4.0) down to AppleClang/LuaJIT architecture detection.
+        - { name: macOS,          os: macos-latest,    arch: arm64,  cc: clang, threads: 3, flags: "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCPACK_GENERATOR=ZIP" }
+        - { name: macOS Intel,    os: macos-15-intel,  arch: x86_64, cc: clang, flags: "-DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCPACK_GENERATOR=ZIP" }
+
+        configuration: *cmake_configurations
+
+    steps: *cmake_steps
+
   bsd:
     name: ${{ matrix.platform.name }} ${{ matrix.configuration }} ${{ matrix.platform.arch }}
     runs-on: ubuntu-latest
@@ -666,7 +689,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/') && success()
-    needs: [windows, cmake, bsd, flatpak, gw_merge]
+    needs: [windows, cmake, cmake_macos, bsd, flatpak, gw_merge]
     runs-on: ubuntu-latest
     permissions:
       contents: write
