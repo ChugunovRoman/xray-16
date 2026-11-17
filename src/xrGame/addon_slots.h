@@ -103,6 +103,10 @@ void RequestStartupForSave(pcstr pack_id, const xr_vector<std::pair<xr_string, x
 // The Lua of the menu restarts without a rebuild of the menu; gw_slots.on_slots_applied runs, the callback of the menu
 // (ui_main_menu.on_level_pack_applied) does not: the level load goes on itself
 void ApplyStartupNow();
+// 50z1-startup-addon-content.md: the notifications that the content set is applied (gw_slots.on_slots_applied,
+// gw_slots.on_merge_report, the addons_content_applied event) - deferred while there is no Lua state, run right after
+// RestartScriptEngine at the start of the game (gw::FinishStartupContentEarly). No-op otherwise
+void FinishStartupContentApplied();
 bool ApplyPending();
 // CGamePersistent::OnFrame through OnFrameLevelPacks: the switch asked for, in the main menu without a level
 void OnFrame();

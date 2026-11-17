@@ -153,9 +153,24 @@ void CGamePersistent::OnAppStart()
     GMLib.Load(); // XXX: not ready to be loaded in parallel. Crashes on Linux, rare crashes on Windows and bugs with water became mercury on Windows.
     xray::StartupMark("app_gmlib"); // 50z1: game materials, their sounds and wallmarks
 
-    // init game globals: the files of the base - nothing of the addons is mounted yet; the content set reads them again
-    // with the layers of the addons (addon_slots.cpp ReloadContentConfigs: reload_game_globals), always after the wait
-    // below (the first frame of the menu, ApplyStartupContentForLevel at the end)
+    // 50z1-startup-addon-content.md: the content of the start is mounted here - after the game materials above, which
+    // are read from the base (00-roadmap.md 5a, decision 36: an addon cannot change them, addon_slots.cpp
+    // WarnUnsupportedFiles), and before init_game_globals, the UI and the main menu are built on it. At the first frame
+    // of the menu the content set would mount it and read everything again (ReloadContentConfigs, StringTable,
+    // UI().OnUIReset, MainMenu::RestartScripts): that is the freeze at the menu. A level load of the command line keeps
+    // its own path (the end of this function: the save it loads may ask for other content) - nothing is mounted here
+    gw::RequestStartupLevelPack();
+    if (gw::ApplyStartupContentEarly())
+    {
+        // The Lua state of CAI_Space::init was made over the scripts of the base: it is made again on the layers
+        gw::RestartLuaForStartupContent();
+        // The notifications that the content set is applied need that state (addon_slots.cpp)
+        gw::FinishStartupContentEarly();
+    }
+
+    // init game globals: read over the layers of the addons mounted above (addon_slots.cpp ReloadContentConfigs does it
+    // again on a switch of the content). Always after the wait below (the first frame of the menu,
+    // ApplyStartupContentForLevel at the end)
 #ifndef XR_PLATFORM_WINDOWS
     init_game_globals();
 #else
@@ -173,9 +188,6 @@ void CGamePersistent::OnAppStart()
         m_pLoadingScreen = xr_new<UILoadingScreen>();
 
     inherited::OnAppStart();
-    // 10-location-packs.md: the game starts on the built-in location pack; the chosen one is applied at the first frame
-    // of the menu, the way a switch in the menu goes (before the level when the command line starts one: see the end)
-    gw::RequestStartupLevelPack();
     // A level load right away from the command line (-start, -load): the save it loads may bring other content (see
     // the end) - the map waits for it, else the content set would wait here for the map of the old all.spawn to load
     const bool level_waits = Engine.Event.Peek("KERNEL:start");

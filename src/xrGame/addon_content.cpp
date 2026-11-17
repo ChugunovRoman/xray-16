@@ -487,8 +487,10 @@ void WriteContentBaseFiles()
 }
 } // namespace
 
-void SyncContentLayers(const xr_vector<ContentLayer>& desired_order, xr_vector<xr_string>& failed_groups)
+bool SyncContentLayers(const xr_vector<ContentLayer>& desired_order, xr_vector<xr_string>& failed_groups)
 {
+    // A layer mounted or unmounted: the content is not what it was (the result, for the callers)
+    bool changed = false;
     // The rules of the player over the order of the addons (addon_content.h): the stack as it is to be mounted
     g_content_rules.clear();
     g_content_built = ConflictRulesReadAt();
@@ -526,9 +528,10 @@ void SyncContentLayers(const xr_vector<ContentLayer>& desired_order, xr_vector<x
                 failed_groups.push_back(ContentGroupOf(desired[i]));
             FinishContentMerge(desired);
             CollectContentConflicts();
-            return;
+            return changed;
         }
         g_content_mounted.pop_back();
+        changed = true;
     }
 
     for (size_t i = keep; i < desired.size(); ++i)
@@ -540,6 +543,7 @@ void SyncContentLayers(const xr_vector<ContentLayer>& desired_order, xr_vector<x
         if (MountContentLayerOf(layer))
         {
             g_content_mounted.push_back(layer);
+            changed = true;
             continue;
         }
         // The mounted layers of its group are the top ones: they go too
@@ -547,6 +551,7 @@ void SyncContentLayers(const xr_vector<ContentLayer>& desired_order, xr_vector<x
         {
             UnmountContentLayer(g_content_mounted.back().layer_id.c_str());
             g_content_mounted.pop_back();
+            changed = true;
         }
         failed_groups.push_back(group);
         Msg("! [addons] the content layer '%s' [%s] is not mounted%s%s", layer.layer_id.c_str(), layer.folder.c_str(),
@@ -555,6 +560,7 @@ void SyncContentLayers(const xr_vector<ContentLayer>& desired_order, xr_vector<x
     FinishContentMerge(desired);
     CollectContentConflicts();
     CleanContentMergeFolders(); // the folders of the other sets are not mounted now
+    return changed;
 }
 
 const xr_vector<ContentLayer>& MountedContentLayers() { return g_content_mounted; }

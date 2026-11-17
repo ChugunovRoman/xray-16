@@ -618,6 +618,13 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
 {
     CTimer timer;
     timer.Start();
+    // 50z1-startup-addon-content.md: the content of the start is mounted inside CAI_Space::init, before
+    // g_pGamePersistent is assigned (xrGameModule::create_persistent makes the AI space that calls it) and before the
+    // UI, the loading screen and the main menu are built. Nothing is loaded yet: there is nothing to drop or rebuild,
+    // and the UI and the menu are built on the new content already. False for the rest - the menu shows (OnFrame) or is
+    // on its way (-start)
+    const bool early_mount = g_pGamePersistent == nullptr;
+    const bool ui_built = GEnv.UI != nullptr;
     LogProviderChanges(*world, target, startup);
 
     // 1. Nothing reads the index of the file system on other threads while the layers change (a reader keeps a
@@ -630,6 +637,8 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
         GEnv.Sound->prefetch_stop();
     }
 
+    // The last round of the loop above decides what has to be read again (a fallback may have rebuilt the stack)
+    bool content_changed = false;
     const LevelPackInfo& builtin = LevelPacks().front();
     const LevelPackInfo* const requested_world = world; // a fallback below is for this run: g_level_pack keeps it
     for (;;)
@@ -663,7 +672,10 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
         xr_vector<addons::ContentLayer> desired;
         BuildContentLayers(*world, target, desired);
         xr_vector<xr_string> failed_groups;
-        addons::SyncContentLayers(desired, failed_groups);
+        // 50z1-startup-addon-content.md: false - the stack is what it was: nothing to reload below, the configs, the
+        // strings, the UI and the Lua of the menu keep what they have (the switch of the menu is a no-op then). A round
+        // that fell back may have unmounted something: the change sticks
+        content_changed |= addons::SyncContentLayers(desired, failed_groups);
         bool fallback = false;
         for (const xr_string& group : failed_groups)
         {
@@ -693,8 +705,10 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
         if (fallback)
             continue; // the stack without them
 
-        // 4. The configs, then the plugins that read them
-        ReloadContentConfigs();
+        // 4. The configs, then the plugins that read them. Only when the layers changed: the configs, the strings and
+        // the Lua of the menu would be read again over the very same content (50z1-startup-addon-content.md)
+        if (content_changed)
+            ReloadContentConfigs();
         xr_vector<xr_string> failed;
         addons::LoadOnDemandPlugins(plugins, failed);
         bool failed_now = false;
@@ -711,19 +725,25 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
         // their layers go, the configs are read again. The list of the failed addons only grows: the loop ends
     }
 
-    // 5. The strings (ReloadLanguage keeps them while the language is the same)
-    StringTable().Destroy();
-    StringTable().Init();
+    // 5. The strings (ReloadLanguage keeps them while the language is the same). Only over a content that is not what
+    // it was: the strings of the layers mounted before stay as they are
+    if (content_changed)
+    {
+        StringTable().Destroy();
+        StringTable().Init();
+    }
 
     // 6. What keeps files by name: the prefetched objects (script classes among them - before the Lua restart),
-    // models, motions, texture descriptions, sound sources
-    g_pGamePersistent->ObjectPool.clear();
+    // models, motions, texture descriptions, sound sources. Nothing of that is loaded at the early mount of the start:
+    // g_pGamePersistent is not assigned yet (see `early_mount`), so there is nothing to drop
+    if (!early_mount)
+        g_pGamePersistent->ObjectPool.clear();
     GEnv.Render->AssetsSwitchEnd();
     if (GEnv.Sound)
         GEnv.Sound->refresh_sources();
     // The weathers: the names of the cycles and effects come from the layers (a cycle of an addon is known only now),
     // the cycles read by a level before go - a provider of world.weather may have changed them (no level here)
-    if (g_pGamePersistent->pEnvironment)
+    if (!early_mount && g_pGamePersistent->pEnvironment)
         g_pGamePersistent->Environment().OnContentChanged();
     // The ids of the ui textures (ui\textures_descr\ of the layers: the spots and the maps of a pack, the icons of an
     // addon) and the color defs: read with the UI at the start, before any layer, as ui_restart reads them. A window
@@ -731,12 +751,15 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
     if (GEnv.UI)
         UI().OnUIReset();
     // The loading screen: its layout (ui_mm_loading_screen.xml) and textures from the new layers, after the ui
-    // textures. Never shown here: no level, no precache (OnFrame, ApplyStartupNow)
-    GamePersistent().RecreateLoadingScreen();
+    // textures. Never shown here: no level, no precache (OnFrame, ApplyStartupNow). Only once it is made: at the early
+    // mount of the start the loading screen of OnAppStart is not there yet (it reads the layers mounted now)
+    if (!early_mount && ui_built)
+        GamePersistent().RecreateLoadingScreen();
 
     // 7. The levels of the pack. The start position chosen in the faction select of the previous content belongs to
     // its game graph: it goes (the faction select of the new menu sets it again)
-    g_pGamePersistent->Level_Scan();
+    if (content_changed && !early_mount)
+        g_pGamePersistent->Level_Scan();
     g_start_position_smart = nullptr;
     g_start_game_vertex_id = u16(-1);
     g_start_level_vertex_id = u32(-1);
@@ -768,8 +791,12 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
     Console->Execute("cfg_save"); // g_level_pack
     addons::LogContentConflicts();
     // The visuals of the old menu go back into the pool when it is destroyed (after AssetsSwitchEnd): the new menu
-    // must not take a model of the same name from there
-    MainMenu()->RestartScripts([] { GEnv.Render->models_Clear(true); });
+    // must not take a model of the same name from there. Only over a content that is not what it was, and only when
+    // there is a menu: at the early mount of the start the Lua state is created after this (CAI_Space::init) and the
+    // menu is built on the new content - the entries of the addons run in that state as usual. MainMenu() itself
+    // reads g_pGamePersistent, which is not assigned at the early mount
+    if (content_changed && !early_mount && MainMenu())
+        MainMenu()->RestartScripts([] { GEnv.Render->models_Clear(true); });
 
     CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle("all");
     Msg("* [slots] the content is applied, %.2f sec", timer.GetElapsed_sec());
@@ -809,6 +836,36 @@ void EmitContentApplied(bool startup, bool ok)
     events::Emit(events::EBuiltin::AddonsContentApplied, args, static_cast<u32>(std::size(args)));
 }
 
+// The notifications that the content set is applied (ApplyRequest). They need the Lua state: the entries of the
+// providers run under lua_pcall, the summary of the merge goes to the menu, and the plugins are told after the entries
+void NotifyContentApplied(const SlotRequest& request, bool changes, bool ok)
+{
+    // Under lua_pcall: it runs the entries of the providers (<entry>.on_slot_active - the code of the addons)
+    const pcstr slots_action = request.world_callback ? "" : request.action.c_str();
+    if (addons::CallLuaProtected("gw_slots.on_slots_applied", { slots_action, ok }) == addons::ELuaCall::NotFound)
+        Msg("! [slots] Lua function gw_slots.on_slots_applied not found: the entries of the providers do not run");
+    // The merge of the files several addons replace (addon_merge.h): its summary for the menu (the line of a warning
+    // about the unresolved conflicts), after each build of the content stack
+    if (changes &&
+        addons::CallLuaProtected("gw_slots.on_merge_report", { &addons::PushContentMergeSummary }) ==
+            addons::ELuaCall::NotFound)
+        Msg("~ [slots] Lua function gw_slots.on_merge_report not found: the menu does not warn about the merge");
+    // The plugins: after the entries of the providers, before the world callback (it may start a level load)
+    if (changes)
+        EmitContentApplied(request.startup, ok);
+}
+
+// 50z1-startup-addon-content.md: the content of the start is mounted before the Lua state is made (CAI_Space::init).
+// The notifications above wait for it and run from FinishStartupContentApplied, right after RestartScriptEngine
+struct PendingNotification
+{
+    SlotRequest request;
+    bool changes = false;
+    bool ok = false;
+};
+PendingNotification g_pending_notification;
+bool g_notification_pending = false;
+
 void ApplyRequest(const SlotRequest& request)
 {
     const LevelPackInfo* world = request.world_set ? FindLevelPack(request.world.c_str()) : &ActiveLevelPack();
@@ -843,19 +900,16 @@ void ApplyRequest(const SlotRequest& request)
         const SlotInfo* slot = FindSlot(slot_id.c_str());
         ok_slots &= slot && (slot->restart || slot->active_provider().id == provider_id);
     }
-    // Under lua_pcall: it runs the entries of the providers (<entry>.on_slot_active - the code of the addons)
-    const pcstr slots_action = request.world_callback ? "" : request.action.c_str();
-    if (addons::CallLuaProtected("gw_slots.on_slots_applied", { slots_action, ok_slots }) == addons::ELuaCall::NotFound)
-        Msg("! [slots] Lua function gw_slots.on_slots_applied not found: the entries of the providers do not run");
-    // The merge of the files several addons replace (addon_merge.h): its summary for the menu (the line of a warning
-    // about the unresolved conflicts), after each build of the content stack
-    if (changes &&
-        addons::CallLuaProtected("gw_slots.on_merge_report", { &addons::PushContentMergeSummary }) ==
-            addons::ELuaCall::NotFound)
-        Msg("~ [slots] Lua function gw_slots.on_merge_report not found: the menu does not warn about the merge");
-    // The plugins: after the entries of the providers, before the world callback (it may start a level load)
-    if (changes)
-        EmitContentApplied(request.startup, ok_world && ok_slots);
+    // Under lua_pcall: it runs the entries of the providers (<entry>.on_slot_active - the code of the addons).
+    // 50z1-startup-addon-content.md: the content of the start is mounted before the Lua state exists (CAI_Space::init):
+    // these notifications need it, so they run from FinishStartupContentApplied right after RestartScriptEngine
+    if (GEnv.ScriptEngine)
+        NotifyContentApplied(request, changes, ok_world && ok_slots);
+    else
+    {
+        g_pending_notification = { request, changes, ok_world && ok_slots };
+        g_notification_pending = true;
+    }
     if (!request.world_callback)
         return;
     const xr_string pack_id = request.world_set ? request.world : ActiveLevelPack().id;
@@ -867,6 +921,15 @@ void ApplyRequest(const SlotRequest& request)
             request.action.c_str());
 }
 } // namespace
+
+void FinishStartupContentApplied()
+{
+    if (!g_notification_pending)
+        return;
+    g_notification_pending = false;
+    NotifyContentApplied(g_pending_notification.request, g_pending_notification.changes,
+        g_pending_notification.ok);
+}
 
 void Init()
 {

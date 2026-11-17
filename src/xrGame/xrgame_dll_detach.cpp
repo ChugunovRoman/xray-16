@@ -73,6 +73,11 @@ void clean_game_data()
 }
 } // namespace
 
+// 50z1-startup-addon-content.md: the game globals are read at the start (init_game_globals of
+// CGamePersistent::OnAppStart), over the content mounted before it. A content set that mounts before that reads nothing
+// here (reload_game_globals): the read of the start takes the layers mounted now
+bool g_game_globals_loaded = false;
+
 void init_game_globals()
 {
     ZoneScoped;
@@ -91,6 +96,7 @@ void init_game_globals()
     CHARACTER_RANK::InitInternal();
     CHARACTER_REPUTATION::InitInternal();
     MONSTER_COMMUNITY::InitInternal();
+    g_game_globals_loaded = true;
 }
 
 void clean_game_globals()
@@ -133,6 +139,11 @@ void clean_game_globals()
 bool reload_game_globals()
 {
     ZoneScoped;
+
+    // Not read yet (50z1-startup-addon-content.md): the content of the start is mounted before
+    // init_game_globals, which reads the layers mounted now - nothing to read again here
+    if (!g_game_globals_loaded)
+        return true;
 
     const int users = (GEnv.isDedicatedServer ? 0 :
         CInfoPortion::SharedDataUsers() + CEncyclopediaArticle::SharedDataUsers() + CPhraseDialog::SharedDataUsers()) +

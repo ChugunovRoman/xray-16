@@ -8,6 +8,7 @@
 #include "addon_lua_entry.h"
 #include "saved_game_wrapper.h"
 #include "MainMenu.h"
+#include "ai_space.h"
 
 #include "xrEngine/Engine.h"
 #include "xrEngine/IGame_Level.h"
@@ -332,6 +333,13 @@ bool LevelPackSwitchPending() { return slots::ApplyPending(); }
 
 void RequestStartupLevelPack()
 {
+    // Once per start: the content of the start is mounted and the request is consumed (ApplyStartupContentEarly,
+    // 50z1-startup-addon-content.md) - a second call would ask for the very same content again at the first frame of the
+    // menu, where it would be read over again
+    static bool requested = false;
+    if (requested)
+        return;
+    requested = true;
     if (!g_packs_initialized)
         return; // a dedicated server: no addon host, no packs, no content of the addons
     string64 id{};
@@ -353,6 +361,37 @@ void RequestStartupLevelPack()
     // The content of the addons and the chosen slot providers are mounted at the first frame of the menu too, with
     // the pack (one apply)
     slots::RequestStartup(id[0] ? id : nullptr);
+}
+
+bool ApplyStartupContentEarly()
+{
+    if (!g_packs_initialized)
+        return false; // a dedicated server: no addon host, no packs, no content of the addons
+    // The save of the command line may ask for other content (RequestStartupForSave, ApplyStartupContentForLevel):
+    // that path runs after init_game_globals and mounts it there
+    if (Engine.Event.Peek("KERNEL:start"))
+        return false;
+    if (!slots::ApplyPending())
+        return false; // nothing to mount: the game goes on on the base, as without addons
+    Msg("- [level_pack] the content of the start is mounted before init_game_globals, the UI and the menu are built on it");
+    slots::ApplyStartupNow();
+    return true;
+}
+
+void RestartLuaForStartupContent()
+{
+    if (!g_packs_initialized)
+        return;
+    ai().RestartScriptEngine();
+}
+
+void FinishStartupContentEarly()
+{
+    if (!g_packs_initialized)
+        return;
+    if (Engine.Event.Peek("KERNEL:start"))
+        return; // that path notifies from ApplyStartupContentForLevel, with the Lua state of the start
+    slots::FinishStartupContentApplied();
 }
 
 namespace

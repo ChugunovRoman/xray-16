@@ -70,7 +70,10 @@ bool ContentLayerServes(const ContentLayer& layer, const xr_string& name);
 //    common content of any addon (a provider brings its set whole, 13 4.1), the location pack over all;
 //  - file:<file> = <addon | core>: every layer above the topmost layer of that addon that gives the file gives it up
 //    (ContentLayer::yielded); core - every layer of an addon gives it up, the base serves it.
-void SyncContentLayers(const xr_vector<ContentLayer>& desired, xr_vector<xr_string>& failed_groups);
+// Returns true when the stack changed: a layer was mounted or unmounted. False - the content is what it was, and the
+// callers (addon_slots.cpp ApplyContentSet) have nothing to reload: the configs, the strings, the UI and the Lua of
+// the menu stay as they are
+bool SyncContentLayers(const xr_vector<ContentLayer>& desired, xr_vector<xr_string>& failed_groups);
 const xr_vector<ContentLayer>& MountedContentLayers();
 
 // The conflicts of the files (13-extension-model.md, 4.2): one name (relative to gamedata\) the public roots of
