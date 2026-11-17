@@ -130,7 +130,8 @@ private:
         shared_str resolved_pose;
     };
 
-    static constexpr u32 kPreviewDiskCacheVersion = 1;
+    // 2: the auto pose fills every partition (no collapsed torso / head in the cached pictures, 2026-11-17)
+    static constexpr u32 kPreviewDiskCacheVersion = 2;
     static constexpr pcstr kPreviewCacheAlias = "$preview_cache$";
     static constexpr pcstr kPreviewCacheIndexFile = "index.txt";
 

@@ -194,6 +194,78 @@ static MotionID PreviewSceneFindFallbackCycle(IKinematicsAnimated* anim)
     return {};
 }
 
+// A cycle of the partition `part` (its motion def plays on that partition only): the standing idles of the stalker
+// animations first, then the "norm_*idle*" cycles of the partition, any idle of it, any cycle of it
+static MotionID PreviewSceneFindPartCycle(IKinematicsAnimated* anim, u16 part)
+{
+    static constexpr pcstr preferred[] = {
+        "norm_torso_0_idle_0", // torso: the standing idle without a weapon (CStalkerAnimationManager::object_slot 0)
+        "norm_torso_9_idle_0",
+        "head_idle_0", // head: eyes, eyelids, jaw
+        "norm_idle_0", // legs
+        "norm_idle_1",
+    };
+    for (pcstr name : preferred)
+    {
+        const MotionID id = anim->ID_Cycle_Safe(name);
+        if (!id.valid())
+            continue;
+        const CMotionDef* def = anim->LL_GetMotionDef(id);
+        if (def && def->bone_or_part == part)
+            return id;
+    }
+
+    const u16 slot_count = anim->LL_MotionsSlotCount();
+    for (int pass = 0; pass < 3; ++pass)
+    {
+        for (u16 slot = 0; slot < slot_count; ++slot)
+        {
+            accel_map* cycles = anim->LL_MotionsSlot(slot).cycle();
+            if (!cycles)
+                continue;
+            for (const auto& it : *cycles)
+            {
+                pcstr name = it.first.c_str();
+                if (!name || !name[0])
+                    continue;
+                const bool idle = strstr(name, "idle") != nullptr;
+                if (pass == 0 && !(idle && strstr(name, "norm_") == name))
+                    continue;
+                if (pass == 1 && !idle)
+                    continue;
+                const MotionID id = anim->ID_Cycle_Safe(it.first);
+                if (!id.valid())
+                    continue;
+                const CMotionDef* def = anim->LL_GetMotionDef(id);
+                if (def && def->bone_or_part == part)
+                    return id;
+            }
+        }
+    }
+    return {};
+}
+
+// The partitions left without a cycle after the pose cycle get a cycle of their own. A partition without any blend
+// gets the zero quaternion in its bone matrices (MixInterlerp, b_count 0): all its bones collapse into points. The
+// stalker idle "norm_idle_0" plays on the legs partition only - the torso partition (spine1/2, neck, bip01_head,
+// arms) collapsed and the preview had no head (the companion tiles, 2026-11-17). Returns the count of the filled ones
+static u32 PreviewSceneFillEmptyPartitions(IKinematicsAnimated* anim)
+{
+    u32 filled = 0;
+    const CPartition& partition = anim->partitions();
+    for (u16 part = 0; part < MAX_PARTS; ++part)
+    {
+        if (!partition.part(part).Name.size() || anim->LL_PartBlendsCount(part) != 0)
+            continue;
+        const MotionID id = PreviewSceneFindPartCycle(anim, part);
+        if (!id.valid())
+            continue;
+        anim->PlayCycle(part, id, FALSE);
+        ++filled;
+    }
+    return filled;
+}
+
 static MotionID PreviewSceneResolveAnimationPose(IKinematicsAnimated* anim, const SPreviewSceneSettings& settings, shared_str* resolved_pose_name)
 {
     if (!anim)
@@ -253,6 +325,8 @@ static void PreviewSceneEnsureAnimationPose(IKinematicsAnimated* anim, const SPr
     }
 
     anim->PlayCycle(cycle, FALSE);
+    // a pose cycle of one partition (the legs idle of the auto pose) leaves the others empty - collapsed bones
+    PreviewSceneFillEmptyPartitions(anim);
 }
 
 static void PreviewSceneUpdateKinematics(IRenderVisual* visual, const SPreviewSceneSettings& settings, shared_str* resolved_pose_name = nullptr)
@@ -323,9 +397,199 @@ static void PreviewSceneBuildCamera(const Fvector& pivot, const Fbox& bounds, Fm
     proj.build_projection(deg2rad(preview_fov_deg), preview_aspect, preview_near, preview_far);
 }
 
-static void PreviewSceneBuildCamera(
-    const Fvector& pivot, const Fbox& bounds, const SPreviewSceneSettings& settings, Fmatrix& view, Fmatrix& proj)
+// The fitted part of the model in its preview pose (model space): top - the top of the head, ground - the feet, the
+// horizontal center and half sizes of the body around it. By the bones when the model has bip01_head (all the stalker
+// skeletons): every model of that skeleton stands the same in the frame whatever its bounding box (a backpack, a
+// weapon bone, the OBB of a bone); otherwise by the box
+struct SPreviewFitBody
 {
+    bool by_bones{};
+    float top{};
+    float ground{};
+    Fvector center{};
+    float half_w{};
+    float half_depth{};
+};
+
+// The head above the bip01_head bone (its origin is at the base of the skull): the top of the head bone box when it is
+// sane (the head mesh with a helmet / a mask), clamped to HEAD_TOP_MIN..MAX, else HEAD_TOP_DEFAULT
+constexpr float kPreviewHeadTopMin = 0.15f;
+constexpr float kPreviewHeadTopMax = 0.40f;
+constexpr float kPreviewHeadTopDefault = 0.25f;
+// the flesh around the bone origins when the width is taken by the bones
+constexpr float kPreviewBodyFlesh = 0.12f;
+
+static bool PreviewSceneFitBodyByBones(IRenderVisual* visual, SPreviewFitBody& body)
+{
+    IKinematics* kin = visual ? visual->dcast_PKinematics() : nullptr;
+    if (!kin)
+        return false;
+    const u16 head = kin->LL_BoneID("bip01_head");
+    if (head == BI_NONE)
+        return false;
+
+    const Fmatrix& head_xform = kin->LL_GetTransform(head);
+    float head_top = kPreviewHeadTopDefault;
+    const Fobb& obb = kin->LL_GetData(head).obb;
+    if (obb.m_halfsize.magnitude() > EPS_L)
+    {
+        Fmatrix box_xform, x;
+        obb.xform_get(box_xform);
+        x.mul_43(head_xform, box_xform);
+        float obb_top = -flt_max;
+        const Fvector& h = obb.m_halfsize;
+        for (int i = 0; i < 8; ++i)
+        {
+            Fvector corner, p;
+            corner.set((i & 1) ? h.x : -h.x, (i & 2) ? h.y : -h.y, (i & 4) ? h.z : -h.z);
+            x.transform_tiny(p, corner);
+            obb_top = _max(obb_top, p.y);
+        }
+        head_top = obb_top - head_xform.c.y;
+        clamp(head_top, kPreviewHeadTopMin, kPreviewHeadTopMax);
+    }
+    body.top = head_xform.c.y + head_top;
+
+    // the horizontal center: between the head and the pelvis (a leaning pose stays centered)
+    body.center.set(head_xform.c.x, 0.f, head_xform.c.z);
+    const u16 pelvis = kin->LL_BoneID("bip01_pelvis");
+    if (pelvis != BI_NONE)
+    {
+        const Fvector& pc = kin->LL_GetTransform(pelvis).c;
+        body.center.x = 0.5f * (body.center.x + pc.x);
+        body.center.z = 0.5f * (body.center.z + pc.z);
+    }
+
+    // the feet: the lowest bone origin; the half sizes: the spread of the bone origins around the center
+    float ground = flt_max;
+    float spread_x = 0.f, spread_z = 0.f;
+    const u16 bone_count = kin->LL_BoneCount();
+    for (u16 b = 0; b < bone_count; ++b)
+    {
+        const Fvector& c = kin->LL_GetTransform(b).c;
+        if (!_valid(c))
+            continue;
+        ground = _min(ground, c.y);
+        spread_x = _max(spread_x, _abs(c.x - body.center.x));
+        spread_z = _max(spread_z, _abs(c.z - body.center.z));
+    }
+    if (ground >= body.top)
+        return false;
+    body.ground = ground;
+    body.half_w = _sqrt(spread_x * spread_x + spread_z * spread_z) + kPreviewBodyFlesh;
+    body.half_depth = spread_z + kPreviewBodyFlesh;
+    body.by_bones = true;
+    return true;
+}
+
+static void PreviewSceneFitBody(IRenderVisual* visual, const Fvector& pivot, const Fbox& bounds, SPreviewFitBody& body)
+{
+    if (PreviewSceneFitBodyByBones(visual, body))
+        return;
+    body = {};
+    if (bounds.is_valid())
+    {
+        Fvector size;
+        bounds.getsize(size);
+        bounds.getcenter(body.center);
+        body.top = bounds.vMax.y;
+        body.ground = bounds.vMin.y;
+        body.half_w = 0.5f * _sqrt(size.x * size.x + size.z * size.z);
+        body.half_depth = 0.5f * _max(size.x, size.z);
+    }
+    else
+    {
+        body.center = pivot;
+        body.top = pivot.y + 0.25f;
+        body.ground = pivot.y - 0.25f;
+        body.half_w = body.half_depth = 0.25f;
+    }
+}
+
+// Fit framing (SPreviewSceneSettings::frame_fit > 0, level.ui_preview_fit): the top part of the body of frame_fit of
+// its height (the head down: top of the head .. feet, PreviewSceneFitBody; 1 - the whole model) and the body width are
+// fitted in the frame. The vertical FOV is 30 degrees, the horizontal one follows the frame proportions, and the
+// projection takes the real proportions (Fmatrix::build_projection wants height / width, as Device.fASPECT): a wide
+// frame shows more to the sides, never less of the height, and the model is not stretched. offset /
+// camera_distance_offset are the adjustments on top
+static void PreviewSceneBuildFitCamera(IRenderVisual* visual, const Fvector& pivot, const Fbox& bounds,
+    const SPreviewSceneSettings& settings, Fmatrix& view, Fmatrix& proj)
+{
+    constexpr float preview_fov_deg = 30.f;
+    constexpr float preview_near = 0.01f;
+    constexpr float preview_far = 50.f;
+    // free space around the fitted part: 6% of its size on each side
+    constexpr float fit_margin = 1.06f;
+
+    const float frame_w = float(settings.frame_width ? settings.frame_width : 256);
+    const float frame_h = float(settings.frame_height ? settings.frame_height : 256);
+    const float height_over_width = frame_h / frame_w;
+    const float tan_v = tanf(deg2rad(preview_fov_deg) * 0.5f);
+    const float tan_h = tan_v / height_over_width;
+
+    float fit = settings.frame_fit;
+    clamp(fit, 0.05f, 1.f);
+
+    SPreviewFitBody body;
+    PreviewSceneFitBody(visual, pivot, bounds, body);
+
+    // the fitted part: from the top of the head down by fit of the body height, centered on the body in x / z
+    const float part_h = (body.top - body.ground) * fit;
+    Fvector focus;
+    focus.set(body.center.x, body.top - part_h * 0.5f, body.center.z);
+
+    // half sizes to fit: the height of the part and the body width seen from any yaw
+    const float half_h = _max(0.05f, part_h * 0.5f) * fit_margin;
+    const float half_w = _max(0.05f, body.half_w) * fit_margin;
+    // the distance to the center plane that fits both sizes, plus half the depth: the near side of the body fits too
+    const float fit_dist = _max(half_h / tan_v, half_w / tan_h) + body.half_depth;
+    const float cam_dist = _max(0.25f, fit_dist + settings.camera_distance_offset);
+
+    // the camera on the level of the part center, turned around it by yaw / pitch / roll
+    Fvector eye;
+    eye.set(0.f, 0.f, cam_dist);
+    Fvector look_at;
+    look_at.set(0.f, 0.f, 0.f);
+
+    Fmatrix rotation;
+    rotation.identity();
+    rotation.setHPB(deg2rad(settings.yaw_deg), deg2rad(settings.pitch_deg), deg2rad(settings.roll_deg));
+    rotation.transform_tiny(eye);
+
+    eye.add(focus);
+    look_at.add(focus);
+
+    if (!fis_zero(settings.offset.x) || !fis_zero(settings.offset.y) || !fis_zero(settings.offset.z))
+    {
+        Fvector axis, delta;
+        delta.set(0.f, 0.f, 0.f);
+        rotation.transform_dir(axis, Fvector().set(1.f, 0.f, 0.f));
+        delta.mad(axis, settings.offset.x);
+        rotation.transform_dir(axis, Fvector().set(0.f, 1.f, 0.f));
+        delta.mad(axis, settings.offset.y);
+        rotation.transform_dir(axis, Fvector().set(0.f, 0.f, 1.f));
+        delta.mad(axis, settings.offset.z);
+        eye.add(delta);
+        look_at.add(delta);
+    }
+
+    view.build_camera(eye, look_at, Fvector().set(0.f, 1.f, 0.f));
+    proj.build_projection(2.f * atanf(tan_v), height_over_width, preview_near, preview_far);
+}
+
+static void PreviewSceneBuildCamera(IRenderVisual* visual, const Fvector& pivot, const Fbox& bounds,
+    const SPreviewSceneSettings& settings, Fmatrix& view, Fmatrix& proj)
+{
+    if (settings.frame_fit > 0.f)
+    {
+        PreviewSceneBuildFitCamera(visual, pivot, bounds, settings, view, proj);
+        return;
+    }
+
+    // The legacy framing of the faction editor grids (ui_mm_faction_editor.xml: their frame sizes, camera offsets and
+    // distances are tuned for it). Note: it passes width / height to build_projection, which wants height / width -
+    // a non-square frame comes out stretched by (width / height)^2 along x; kept as is, the grids are tuned for it,
+    // the fit framing above is the correct one
     constexpr float preview_fov_deg = 30.f;
     constexpr float preview_near = 0.01f;
     constexpr float preview_far = 50.f;
@@ -409,6 +673,9 @@ static u32 PreviewSceneSettingsHash(const SPreviewSceneSettings& settings)
     hash = crc32(settings.pose_name.c_str(), settings.pose_name.size(), hash);
     hash = crc32(&settings.frame_width, sizeof(settings.frame_width), hash);
     hash = crc32(&settings.frame_height, sizeof(settings.frame_height), hash);
+    // only when set: the names of the legacy previews (the faction editor, their disk cache) stay the same
+    if (settings.frame_fit != 0.f)
+        hash = crc32(&settings.frame_fit, sizeof(settings.frame_fit), hash);
     return hash;
 }
 
@@ -910,7 +1177,7 @@ bool CPreviewSceneRenderer::RenderModelIntoRT(
     shared_str local_resolved_pose_name;
     const Fvector pivot = PreviewSceneModelPivot(visual, settings, &local_resolved_pose_name);
     Fmatrix view, proj;
-    PreviewSceneBuildCamera(pivot, bounds, settings, view, proj);
+    PreviewSceneBuildCamera(visual, pivot, bounds, settings, view, proj);
 
     CPreviewSceneRenderable subject{};
     subject.renderable.visual = visual;

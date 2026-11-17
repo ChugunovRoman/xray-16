@@ -569,6 +569,13 @@
       ],
       "when": "кнопка «Вернуться в игру»"
     },
+    "main_menu_on_achievements_click": {
+      "section": "main_menu",
+      "args": [
+        "`LUA_REF` окно меню"
+      ],
+      "when": "клик по плитке «Достижения» в стартовом меню (плитка строится, только когда загружен аддон gwd_achievements)"
+    },
     "opt_menu_on_init": {
       "section": "main_menu",
       "args": [

@@ -25,13 +25,17 @@ struct ENGINE_API SPreviewSceneSettings
     shared_str pose_name{};
     u32 frame_width{256};
     u32 frame_height{256};
+    // Fit framing (level.ui_preview_fit): 0 - the legacy framing of the faction editor grids (the camera at 1.85 x the
+    // box radius); > 0 - the top part of the model box of this fraction of its height (1 - the whole model) is fitted
+    // in the frame, with the projection of the real frame proportions (PreviewSceneRenderer.cpp)
+    float frame_fit{};
 
     [[nodiscard]] bool operator==(const SPreviewSceneSettings& rhs) const noexcept
     {
         return yaw_deg == rhs.yaw_deg && pitch_deg == rhs.pitch_deg && roll_deg == rhs.roll_deg &&
             offset.x == rhs.offset.x && offset.y == rhs.offset.y && offset.z == rhs.offset.z &&
             camera_distance_offset == rhs.camera_distance_offset && pose_name == rhs.pose_name &&
-            frame_width == rhs.frame_width && frame_height == rhs.frame_height;
+            frame_width == rhs.frame_width && frame_height == rhs.frame_height && frame_fit == rhs.frame_fit;
     }
 
     [[nodiscard]] bool operator!=(const SPreviewSceneSettings& rhs) const noexcept { return !(*this == rhs); }

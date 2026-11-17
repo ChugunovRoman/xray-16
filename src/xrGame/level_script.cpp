@@ -783,6 +783,16 @@ static luabind::object objects_in_radius(lua_State* L, const Fvector& position, 
     return result;
 }
 
+// The framing of the next UI previews of models (level.ui_preview_thumb / level.ui_preview_live_set): the pan of the
+// camera along its axes and its distance to the model, added to the framing of the engine (the camera at the center of
+// the model box, distance by its radius). Part of the cache key of the preview
+static Fvector g_ui_preview_pan{};
+static float g_ui_preview_distance_offset = 0.f;
+// The aspect (width / height) of the frame of the next previews; 0 or less - a square frame
+static float g_ui_preview_frame_aspect = 0.f;
+// The fit framing of the next previews (level.ui_preview_fit): 0 - the engine framing by the box radius, > 0 - the top
+// part of the model box of this fraction of its height is fitted in the frame (SPreviewSceneSettings::frame_fit)
+static float g_ui_preview_fit = 0.f;
 
 // The settings of a UI preview of a model (level.ui_preview_*): the camera turned by yaw / pitch around the model
 // (framed by its box), a square texture of size texels
@@ -794,6 +804,18 @@ static SPreviewSceneSettings ui_preview_settings(float yaw, float pitch, u32 siz
     clamp<u32>(size, 32, 512);
     settings.frame_width = size;
     settings.frame_height = size;
+    // a non-square frame: width / height = frame_aspect of ui_preview_framing (0 or less - a square one)
+    if (g_ui_preview_frame_aspect > 0.f)
+    {
+        // clamp() of xrCommon/math_funcs_inline.h takes its first argument by non-const reference and returns void:
+        // the value is clamped in place, a temporary cannot be passed to it
+        float frame_height = float(size) / g_ui_preview_frame_aspect;
+        clamp(frame_height, 32.f, 512.f);
+        settings.frame_height = u32(frame_height + 0.5f); // rounded: the addons compute the same height
+    }
+    settings.offset = g_ui_preview_pan;
+    settings.camera_distance_offset = g_ui_preview_distance_offset;
+    settings.frame_fit = g_ui_preview_fit;
     return settings;
 }
 CUISequencer* g_tutorial = NULL;
@@ -1211,6 +1233,24 @@ void CLevel::script_register(lua_State* luaState)
         // texture name for CUIStatic:InitTexture; kept for the session (DX11 - on disk too). ui_preview_live_* - a
         // live slot 0..3: the model stays created, the texture of the slot is rendered again only when yaw / pitch /
         // the model change (a turning model); live_texture - its name, live_ready - it holds the model
+        // The framing of the next calls: the pan of the camera along its axes (positive y - the view up, the model lower
+        // in the picture), its distance to the model (positive - farther, more of the model in the picture) and the
+        // aspect of the frame (width / height, 0 or less - a square)
+        def("ui_preview_framing", +[](float pan_x, float pan_y, float pan_z, float distance_offset, float frame_aspect)
+        {
+            g_ui_preview_pan.set(pan_x, pan_y, pan_z);
+            g_ui_preview_distance_offset = distance_offset;
+            g_ui_preview_frame_aspect = frame_aspect;
+        }),
+        // The fit framing of the next calls: fit > 0 - the top part of the model box of this fraction of its height (the
+        // head down; 1 - the whole model) and the box width are fitted in the frame, with the real frame proportions
+        // (no stretch for any frame_aspect); the framing pan / distance are adjustments on top. 0 - the engine framing
+        // (camera at 1.85 x the box radius). Its presence (level.ui_preview_fit ~= nil) marks the engine with it
+        def("ui_preview_fit", +[](float fit)
+        {
+            clamp(fit, 0.f, 1.f);
+            g_ui_preview_fit = fit;
+        }),
         def("ui_preview_supported", +[]() -> bool { return GEnv.Render->PreviewScene_LiveTextureName(0).size() != 0; }),
         def("ui_preview_thumb", +[](pcstr visual, float yaw, float pitch, u32 size) -> pcstr
         {
