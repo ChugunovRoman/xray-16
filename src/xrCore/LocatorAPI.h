@@ -203,12 +203,34 @@ private:
         xr_vector<alias_root> aliases;
         xr_vector<xr_string> private_masks; // PatternMatch masks of names relative to physical_root, lower case, '\'
         xr_vector<xr_string> private_names; // the files the masks kept out of virtual_root: relative, lower case
+
+        // What layer_walk found on the disk, kept so that mount_layer_alias registers the same entries under an alias
+        // root without enumerating those folders again (the alias roots lie under physical_root - addon_content.cpp:
+        // <addon>\gamedata\textures\ and <addon>\gamedata\meshes\ are walked once, not twice). relative: the path under
+        // physical_root, as the disk spells it, '\' separated, no trailing delimiter
+        struct walked_entry
+        {
+            xr_string relative;
+            u32 size{};
+            u32 time_write{};
+            bool folder{};
+            bool priv{}; // kept out of virtual_root by the private masks: an alias root serves it (private_prefix 0)
+        };
+        xr_vector<walked_entry> walked;
     };
     xr_vector<fs_layer*> m_layers; // a stack: m_layers[i] is the layer i + 1
 
     // files - the counter of the root walked; private_prefix - the length of the physical root the private masks are
     // relative to (0 - no filter: an alias root, a layer without masks)
     bool layer_walk(u16 index, pcstr physical_dir, pcstr virtual_dir, u32& files, size_t private_prefix);
+    // One entry of a walk of a layer under the names virtual_dir (both with the delimiter): registers it - a folder, and
+    // the walk into it while `on_disk` - or keeps it out by the rules of the walk. `name` is the last component of the
+    // entry. While `on_disk` (the walk of the disk) the entry goes into fs_layer::walked (layer_replay plays it again).
+    void layer_walk_entry(fs_layer& L, u16 index, pcstr physical_dir, pcstr virtual_dir, pcstr name, bool folder,
+        u32 size, u32 time_write, size_t private_prefix, u32& files, bool on_disk);
+    // The entries of fs_layer::walked that lie under the alias root `A`, registered under its names as layer_walk would:
+    // no disk - the walk of physical_root saw them already. False - `A` does not lie under physical_root
+    bool layer_replay(u16 index, fs_layer& L, const fs_layer::alias_root& A, u32& files);
     bool layer_private(const fs_layer& L, pcstr relative_name) const;
     u32 layer_covered_files(const fs_layer& L) const;
     void register_under_layers(const file& top, const file& desc);

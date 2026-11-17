@@ -359,6 +359,11 @@ xr_vector<xr_unique_ptr<AddonRecord>>* g_addons = nullptr;
 GwpEngineApi g_engine_api{};
 bool g_initialized = false;
 bool g_debug_log = false;
+// -addon_rehash: the SHA-256 of the plugin libraries is computed again, the cache of it (below) is not read. The key
+// of the cache is the size and the time of the library - the name of the shadow copy is built from them: a build that
+// keeps both would take the digest of the previous one. Every check of a library that matters (plugin_sha256,
+// plugin_consent of appdata/addons.ltx) is against a digest computed in this run unless the flag says otherwise
+bool g_rehash = false;
 // appdata/addons.ltx is there, but cannot be read or parsed (ReadLauncherList): the addon folders are scanned as
 // without the list (the content and the Lua of the addons work), but no plugin is loaded - the list is what gives
 // the hashes and the consent of the player, a broken one must not turn into "loaded unchecked" (LoadPlugin)
@@ -2567,35 +2572,116 @@ void ResolveDependencies()
 // Plugin loading
 // ---------------------------------------------------------------------------------------------
 
-// Loads a copy from $app_data_root$\cache\plugins\<addon id>\ so the original can be rebuilt while the game runs.
-// shadow_without_ext: UTF-8 path of the copy without extension - the form XRay::ModuleHandle::Open (SDL_LoadObject) wants.
-bool MakeShadowCopy(AddonRecord& addon, const fs::path& original, xr_string& shadow_without_ext)
+// The name of the digest cache of a plugin library, and the start of the name of the copy of it (MakeShadowCopy):
+// "<plugin name>_<size>_<time of the library>", as the library has them now
+xr_string PluginStamp(const AddonRecord& addon, const fs::path& library)
 {
     std::error_code ec;
-    const auto size = fs::file_size(original, ec);
+    const auto size = fs::file_size(library, ec);
+    const auto mtime = fs::last_write_time(library, ec).time_since_epoch().count();
+    xr_string stamp = addon.plugin_name;
+    stamp += "_";
+    stamp += std::to_string(static_cast<unsigned long long>(size)).c_str();
+    stamp += "_";
+    stamp += std::to_string(static_cast<long long>(mtime)).c_str();
+    return stamp;
+}
+
+// $app_data_root$\cache\plugins\<addon id>\: the copy of the plugin library and its digest cache (MakeShadowCopy)
+fs::path PluginCacheDir(const AddonRecord& addon)
+{
+    string_path cache_root;
+    FS.update_path(cache_root, "$app_data_root$", "cache\\plugins\\");
+    return PathFromUtf8(cache_root) / PathFromUtf8(addon.id);
+}
+
+// The SHA-256 of a plugin library, kept from a previous run: one small text file in the folder of the copy,
+// "<plugin name>_<size>_<time>.sha256", one line of 64 lower case hex digits. Read only when the digest is compared
+// with nothing (CheckPluginLibrary, the unchecked case): where plugin_sha256 or plugin_consent of appdata/addons.ltx
+// is checked against it, the library is read in full and hashed at every start - a library rebuilt with the size and
+// the time it had must not take the digest of the previous build. -addon_rehash does not read the file.
+constexpr pcstr kDigestCacheExt = ".sha256";
+
+// A digest as Sha256Hex gives it: 64 lower case hex digits
+bool IsDigest(const xr_string& text)
+{
+    return text.size() == 64 && std::all_of(text.begin(), text.end(), [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    });
+}
+
+// False - no digest of this library in the cache (-addon_rehash, no file, not a digest): the caller hashes
+bool ReadPluginDigestCache(const fs::path& cache_file, xr_string& digest)
+{
+    if (g_rehash)
+        return false;
+    std::error_code ec;
+    if (!fs::is_regular_file(cache_file, ec))
+        return false;
+    std::ifstream in(cache_file, std::ios::binary);
+    if (!in)
+        return false;
+    std::string line;
+    if (!std::getline(in, line))
+        return false;
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+        line.pop_back();
+    digest = line.c_str();
+    return IsDigest(digest);
+}
+
+// The cache is a convenience only: a file that cannot be written is no reason to refuse the plugin (the digest is
+// computed again at the next start)
+void WritePluginDigestCache(const fs::path& cache_file, const xr_string& digest)
+{
+    std::filesystem::path temporary = cache_file;
+    temporary += ".tmp"; // renamed over the cache: a reader never sees half a digest
+    {
+        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+        out << digest << '\n';
+        out.close();
+        if (out.fail())
+            return;
+    }
+    std::error_code ec;
+    std::filesystem::rename(temporary, cache_file, ec);
     if (ec)
+        std::filesystem::remove(temporary, ec);
+}
+
+// Loads a copy from $app_data_root$\cache\plugins\<addon id>\ so the original can be rebuilt while the game runs.
+// The copy is named after the digest of the library too (<stamp>_<digest>): a copy of another build has another name,
+// so a copy of that name is the copy of that library - the copy is not hashed again to find that out (CheckPluginLibrary
+// hashes it once, when it is made). `created` - the copy was made now. shadow_without_ext: UTF-8 path of the copy
+// without extension - the form XRay::ModuleHandle::Open (SDL_LoadObject) wants.
+bool MakeShadowCopy(AddonRecord& addon, const fs::path& original, const xr_string& stamp, const xr_string& digest,
+    bool& created, xr_string& shadow_without_ext)
+{
+    created = false;
+    std::error_code ec;
+    if (!fs::is_regular_file(original, ec))
     {
         addon.reason = "cannot stat plugin library";
         return false;
     }
-    const auto mtime = fs::last_write_time(original, ec).time_since_epoch().count();
-
-    string_path cache_root;
-    FS.update_path(cache_root, "$app_data_root$", "cache\\plugins\\");
-    const fs::path cache_dir = PathFromUtf8(cache_root) / PathFromUtf8(addon.id);
+    const fs::path cache_dir = PluginCacheDir(addon);
     fs::create_directories(cache_dir, ec);
     if (ec)
     {
         addon.reason = "cannot create plugin cache directory";
         return false;
     }
+    // The first 12 hex digits of the digest: enough to tell two builds of one size and one time apart
+    const xr_string digest_tag = digest.size() > 12 ? digest.substr(0, 12) : digest;
+    const xr_string stem = stamp + "_" + digest_tag;
+    const xr_string shadow_name = stem + kLibraryExt;
+    const fs::path shadow = cache_dir / PathFromUtf8(shadow_name);
+    // The digest of the library of a previous run (ReadPluginDigestCache), named after the stamp of the library
+    const xr_string digest_cache_name = stamp + kDigestCacheExt;
+    const fs::path digest_cache = cache_dir / PathFromUtf8(digest_cache_name);
 
-    string256 stem;
-    xr_sprintf(stem, "%s_%llu_%lld", addon.plugin_name.c_str(), static_cast<unsigned long long>(size),
-        static_cast<long long>(mtime));
-    const fs::path shadow = cache_dir / PathFromUtf8(xr_string(stem) + kLibraryExt);
-
-    if (!fs::exists(shadow, ec))
+    created = !fs::exists(shadow, ec);
+    if (created)
     {
         fs::copy_file(original, shadow, fs::copy_options::overwrite_existing, ec);
         if (ec)
@@ -2610,25 +2696,18 @@ bool MakeShadowCopy(AddonRecord& addon, const fs::path& original, xr_string& sha
     for (fs::directory_iterator it(cache_dir, ec), end; !ec && it != end; it.increment(ec))
     {
         const xr_string name = PathToUtf8(it->path().filename()); // string() throws on a stray non-ANSI file name
-        if (name.rfind(prefix, 0) == 0 && it->path() != shadow)
+        if (name.rfind(prefix, 0) == 0 && name != shadow_name && name != digest_cache_name)
         {
             std::error_code rm_ec;
             fs::remove(it->path(), rm_ec);
         }
     }
 
-    // The PDB next to the copy under the name the library refers to (<name>.pdb), and the folder in the dbghelp
-    // search path: a stack trace of a crash names the functions of the plugin. Copied while no copy of the plugin is
-    // loaded (dbghelp keeps the file open until the module leaves it); a failed copy only costs the names.
-    const fs::path pdb = original.parent_path() / PathFromUtf8(addon.plugin_name + ".pdb");
-    if (fs::is_regular_file(pdb, ec))
-    {
-        std::error_code pdb_ec;
-        fs::copy_file(pdb, cache_dir / pdb.filename(), fs::copy_options::update_existing, pdb_ec);
-        if (pdb_ec && g_debug_log)
-            Logf("  ", AddonTag(addon).c_str(), "the PDB is not copied next to the library: %s",
-                ErrorText(pdb_ec).c_str());
-    }
+    // The folder the plugin was built in goes into the dbghelp search path: a stack trace of a crash names its
+    // functions from <name>.pdb there. The PDB is not copied next to the copy in the cache - a debug build carries
+    // tens of megabytes of it, and with a thousand plugins the copies would be gigabytes: the loader needs the library
+    // itself, only the names come from the folder of the author
+    xrDebug::AddSymbolSearchPath(ToAnsiForDbgHelp(original.parent_path()).c_str());
     xrDebug::AddSymbolSearchPath(ToAnsiForDbgHelp(cache_dir).c_str());
 
     addon.shadow_path = PathToUtf8(shadow);
@@ -2766,19 +2845,22 @@ xr_string ShortDigest(const xr_string& digest)
     return digest.size() > 12 ? digest.substr(0, 12) + "..." : digest;
 }
 
-// E5 (11-catalog-distribution.md 8.6, lua_to_cpp/03-build-and-discovery.md 4a): the library about to be loaded
-// against appdata/addons.ltx, after MakeShadowCopy:
+// E5 (11-catalog-distribution.md 8.6, lua_to_cpp/03-build-and-discovery.md 4a): the library about to be loaded against
+// appdata/addons.ltx, and the copy of it that is loaded (MakeShadowCopy):
 //  - plugin_sha256 given (any trust): the library must have it;
 //  - trust = local of an addon listed in appdata/addons.ltx: plugin_consent must be given and be the hash of the
 //    library - the launcher asks the player when the addon is switched on and every time the hash changes;
 //  - an addon not in the list (no appdata/addons.ltx, -addon_dir: the development) - not checked, a warning; a listed
 //    first_party without plugin_sha256 - the same.
 //  - a plugin_sha256 (any trust) or a plugin_consent (a listed local addon) that is not 64 hex digits is a mismatch.
-// The copy in the cache is what is loaded, so the copy is hashed - and compared with the library itself: a stale or
-// swapped copy under the same name (<name>_<size>_<time>) is made again once. The copy is hashed through `lock`, which
-// stays open until the library is loaded (PluginFileLock: the copy cannot change in between). Every load is checked,
-// plugin_reload too: a library rebuilt after the launcher wrote the hash is refused. The copy is compared with the
-// library also with nothing to check against (unchecked): a stale copy of the same size and time is made again.
+// The digest of the library is computed fresh whenever it is compared with something (plugin_sha256, plugin_consent):
+// a library rebuilt with the size and the time it had must not take the digest of the previous build. Only the
+// unchecked case - nothing to compare it with - takes the digest of a previous run from the cache
+// (ReadPluginDigestCache). The copy is named after the digest of the library (<name>_<size>_<time>_<digest>,
+// MakeShadowCopy): a copy of another build has another name, so a copy of that name is the copy of that library - the
+// copy is not hashed again to find that out, only a copy made now is checked against the library once. `lock` holds
+// the copy from here until it is loaded (PluginFileLock): what is named is what loads. Every load is checked,
+// plugin_reload too: a library rebuilt after the launcher wrote the hash is refused.
 // false - reason set (MarkPluginUnavailable), `lock` released; true - `lock` holds the copy
 bool CheckPluginLibrary(
     AddonRecord& addon, const fs::path& library, xr_string& shadow_without_ext, PluginFileLock& lock)
@@ -2809,34 +2891,54 @@ bool CheckPluginLibrary(
                 addon.plugin_name.c_str());
     }
 
-    // Unchecked too: the copy is compared with the library. The name of the copy (<name>_<size>_<time>) does not tell
-    // two builds of one size apart when the time of the file stays (a copy keeps it): the old copy would load
-    const xr_string digest = FileSha256(library);
-    const auto hash_copy = [&]() -> xr_string {
-        return lock.Open(PathFromUtf8(addon.shadow_path)) ? lock.Sha256() : xr_string();
-    };
-    xr_string loaded = digest.empty() ? xr_string() : hash_copy();
-    if (!digest.empty() && loaded != digest)
+    // The digest of the library: fresh when it is compared with something, else the one of a previous run
+    const xr_string stamp = PluginStamp(addon, library);
+    const fs::path digest_cache = PluginCacheDir(addon) / PathFromUtf8(stamp + kDigestCacheExt);
+    xr_string digest;
+    const bool from_cache = unchecked && ReadPluginDigestCache(digest_cache, digest);
+    if (!from_cache)
+        digest = FileSha256(library);
+    if (digest.empty())
     {
-        lock.Release();
-        std::error_code ec;
-        fs::remove(PathFromUtf8(addon.shadow_path), ec);
-        if (!MakeShadowCopy(addon, library, shadow_without_ext))
-            return false;
-        loaded = hash_copy();
-    }
-    if (digest.empty() || loaded != digest)
-    {
-        addon.reason = digest.empty() ? "cannot read the plugin library to check its SHA-256" :
-            !lock.IsOpen() ? "cannot open the copy of the plugin library in the cache for the check (" +
-                    addon.shadow_path + "): another program has it open for writing or deleting" :
-                             "the copy of the plugin library in the cache differs from the library (" +
-                    addon.shadow_path + "), its SHA-256 is not checked";
-        lock.Release();
+        addon.reason = "cannot read the plugin library to check its SHA-256";
         return false;
     }
+
+    bool created = false;
+    if (!MakeShadowCopy(addon, library, stamp, digest, created, shadow_without_ext))
+        return false;
+    // The copy stays open until the library is loaded from it (PluginFileLock): what is named here is what loads
+    lock.Open(PathFromUtf8(addon.shadow_path));
+    if (!lock.IsOpen())
+    {
+        addon.reason = "cannot open the copy of the plugin library in the cache for the check (" + addon.shadow_path +
+            "): another program has it open for writing or deleting";
+        return false;
+    }
+    // A copy made now is checked against the library once, to confirm the copy (a copy of a previous run is named
+    // after the digest of the library it was made from)
+    if (created)
+    {
+        const xr_string copy_digest = lock.Sha256();
+        if (copy_digest.empty() || copy_digest != digest)
+        {
+            addon.reason = copy_digest.empty() ?
+                "cannot read the copy of the plugin library in the cache to check its SHA-256 (" + addon.shadow_path +
+                    ")" :
+                "the copy of the plugin library in the cache differs from the library (" + addon.shadow_path +
+                    "), its SHA-256 is not checked";
+            lock.Release();
+            return false;
+        }
+    }
     if (unchecked)
+    {
+        // For the next start: the library is not read again (the cache is only trusted here, nothing is checked
+        // against the digest)
+        if (!from_cache)
+            WritePluginDigestCache(digest_cache, digest);
         return true; // the copy is the library, nothing to compare it with
+    }
 
     if (!addon.plugin_sha256.empty() && digest != addon.plugin_sha256)
     {
@@ -3080,9 +3182,8 @@ void LoadPlugin(AddonRecord& addon)
     }
 
     xr_string shadow_without_ext;
-    PluginFileLock shadow_lock; // E5: from the hash of the copy until it is loaded (CheckPluginLibrary)
-    if (!MakeShadowCopy(addon, library, shadow_without_ext) ||
-        !CheckPluginLibrary(addon, library, shadow_without_ext, shadow_lock))
+    PluginFileLock shadow_lock; // E5: from the check until the copy is loaded (CheckPluginLibrary)
+    if (!CheckPluginLibrary(addon, library, shadow_without_ext, shadow_lock))
     {
         MarkPluginUnavailable(addon);
         return;
@@ -3426,6 +3527,7 @@ void Initialize()
     g_initialized = true;
     g_host_thread_id = std::this_thread::get_id();
     g_debug_log = strstr(Core.Params, "-addon_debug") != nullptr;
+    g_rehash = strstr(Core.Params, "-addon_rehash") != nullptr; // the SHA-256 of the plugin libraries, not the cache
     g_launcher_list_unreadable = false; // ReadLauncherList below says it again (Shutdown allows a new Initialize)
     g_addons = xr_new<xr_vector<xr_unique_ptr<AddonRecord>>>();
     FillEngineApi();

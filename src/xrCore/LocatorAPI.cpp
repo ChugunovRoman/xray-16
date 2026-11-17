@@ -801,60 +801,150 @@ bool CLocatorAPI::layer_walk(u16 index, pcstr physical_dir, pcstr virtual_dir, u
 
     fs_layer& L = *m_layers[index - 1];
     for (const entry& it : entries)
-    {
-        pcstr name = it.name.c_str();
-        if (0 == xr_strcmp(name, ".") || 0 == xr_strcmp(name, "..") || ignore_name(name))
-            continue;
+        layer_walk_entry(L, index, physical_dir, virtual_dir, it.name.c_str(), it.folder, it.size, it.time_write,
+            private_prefix, files, true);
+    return true;
+}
 
-        // A name that does not fit a path of the index (UTF-8 doubles the bytes of Cyrillic, an alias root adds
-        // "@<id>\"): Register and the readers would fail on it - the file is not mounted. The rule of the library
-        // (xray::content_merge::WalkNameTooLong: gw_merge plan skips the same names)
-        static_assert(sizeof(string_path) == xray::content_merge::kIndexPathBytes, "the index paths of the library");
-        if (xray::content_merge::WalkNameTooLong(xr_strlen(physical_dir), xr_strlen(virtual_dir), it.name.size(),
-                it.folder))
+// One entry of a walk of a layer under the names virtual_dir (both with the trailing delimiter): registers it - a
+// folder, and the walk into it while `on_disk` - or keeps it out by the rules of the walk. `name` is the last component
+// of the entry. While `on_disk` (the walk of the disk) the entry goes into fs_layer::walked, so that layer_replay
+// registers the same entries under an alias root without enumerating those folders of the disk again.
+void CLocatorAPI::layer_walk_entry(fs_layer& L, u16 index, pcstr physical_dir, pcstr virtual_dir, pcstr name,
+    bool folder, u32 size, u32 time_write, size_t private_prefix, u32& files, bool on_disk)
+{
+    if (0 == xr_strcmp(name, ".") || 0 == xr_strcmp(name, "..") || ignore_name(name))
+        return;
+
+    // A name that does not fit a path of the index (UTF-8 doubles the bytes of Cyrillic, an alias root adds
+    // "@<id>\"): Register and the readers would fail on it - the file is not mounted. The rule of the library
+    // (xray::content_merge::WalkNameTooLong: gw_merge plan skips the same names)
+    static_assert(sizeof(string_path) == xray::content_merge::kIndexPathBytes, "the index paths of the library");
+    if (xray::content_merge::WalkNameTooLong(xr_strlen(physical_dir), xr_strlen(virtual_dir), xr_strlen(name), folder))
+    {
+        Msg("! FS: layer '%s': name too long (%u bytes and more), skipped [%s%s]", L.id.c_str(),
+            u32(sizeof(string_path)), virtual_dir, name);
+        return;
+    }
+    string_path physical, virtual_name;
+    strconcat(sizeof physical, physical, physical_dir, name);
+    strconcat(sizeof virtual_name, virtual_name, virtual_dir, name);
+    xr_fs_strlwr(virtual_name);
+    // The path of the entry under the physical root of the layer, as the disk spells it: what the walk records
+    pcstr relative = physical + xr_strlen(L.physical_root);
+    // A layer without an owner has no alias roots (mount_layer_alias), and an entry outside physical_root belongs to no
+    // replay: nothing to record for
+    const bool record = on_disk && !L.owner.empty() &&
+        0 == strncmp(physical_dir, L.physical_root, xr_strlen(L.physical_root));
+    if (folder)
+    {
+        if (!L.owner.empty() && name[0] == '@')
+        {
+            // 14-addon-resource-scoping.md: "@<id>\" are the names of the alias roots of the addons
+            Msg("! FS: layer '%s': a folder named '@...' is reserved for the addon aliases, skipped [%s]",
+                L.id.c_str(), physical);
+            return;
+        }
+        // Recorded before the trailing delimiter goes onto `physical`: `relative` names the folder itself, not
+        // "the folder\" (layer_replay splits it back into a folder and a name)
+        if (record)
+        {
+            fs_layer::walked_entry recorded;
+            recorded.relative = relative;
+            recorded.folder = true;
+            L.walked.push_back(std::move(recorded));
+        }
+        xr_strcat(physical, DELIMITER);
+        xr_strcat(virtual_name, DELIMITER);
+        Register(virtual_name, VFS_STANDARD_FILE, 0, 0, 0, 0, 0, index); // "insert self" of Recurse
+        if (on_disk)
+            layer_walk(index, physical, virtual_name, files, private_prefix);
+        return;
+    }
+    if (LayerArchiveExtension(strext(virtual_name)))
+    {
+        Msg("! FS: layer '%s': archives are not mounted from a layer, skipped [%s]", L.id.c_str(), physical);
+        return;
+    }
+    bool priv = false;
+    if (private_prefix && !L.private_masks.empty())
+    {
+        // 14-addon-resource-scoping.md: a private file of the addon - only under its alias roots
+        string_path under_root;
+        xr_strcpy(under_root, physical + private_prefix);
+        xr_fs_strlwr(under_root);
+        if (layer_private(L, under_root))
+        {
+            L.private_names.emplace_back(under_root);
+            priv = true;
+        }
+    }
+    if (record)
+    {
+        fs_layer::walked_entry recorded;
+        recorded.relative = relative;
+        recorded.size = size;
+        recorded.time_write = time_write;
+        recorded.priv = priv;
+        L.walked.push_back(std::move(recorded));
+    }
+    if (priv)
+        return; // an alias root serves it (private_prefix 0 there), not the public root of the layer
+    Register(virtual_name, VFS_STANDARD_FILE, 0, 0, size, size, time_write, index);
+    ++files;
+}
+
+// The entries of fs_layer::walked that lie under the alias root `A`, registered under its names as layer_walk would:
+// no disk - the walk of the physical root of the layer saw them already (mount_layer_alias). False - there is nothing
+// to replay (the root does not lie under physical_root, or the layer was walked without a recording)
+bool CLocatorAPI::layer_replay(u16 index, fs_layer& L, const fs_layer::alias_root& A, u32& files)
+{
+    const size_t root_length = xr_strlen(L.physical_root);
+    const size_t alias_length = xr_strlen(A.physical_root);
+    if (L.walked.empty() || alias_length <= root_length || 0 != strncmp(A.physical_root, L.physical_root, root_length))
+        return false;
+    // The entries it takes are the ones under "<name>\" at the start of their relative path; the folder of the root
+    // itself is the root, not an entry under it
+    pcstr prefix = A.physical_root + root_length;
+    const size_t prefix_length = alias_length - root_length;
+    for (const fs_layer::walked_entry& it : L.walked)
+    {
+        if (it.relative.size() <= prefix_length)
+            continue;
+        // The disk may spell the folder of the root in another case than the caller gives it
+        bool under = true;
+        for (size_t i = 0; i < prefix_length; ++i)
+        {
+            const char a = it.relative[i];
+            const char b = prefix[i];
+            if (a == b || (a >= 'A' && a <= 'Z' && char(a + 32) == b) || (b >= 'A' && b <= 'Z' && char(b + 32) == a))
+                continue;
+            under = false;
+            break;
+        }
+        if (!under)
+            continue;
+        pcstr below = it.relative.c_str() + prefix_length;
+        pcstr slash = strrchr(below, '\\');
+        const pcstr slash_posix = strrchr(below, '/');
+        if (!slash || (slash_posix && slash_posix > slash))
+            slash = slash_posix;
+        const xr_string dir = slash ? xr_string(below, size_t(slash - below) + 1) : xr_string();
+        pcstr name = slash ? slash + 1 : below;
+        // The name must fit an index path under the alias root, as the walk of the disk checks it: the paths below are
+        // built only when they fit (strconcat would clear them and the entry would go under a bare leaf name)
+        if (xray::content_merge::WalkNameTooLong(alias_length + dir.size(), A.virtual_root_length + dir.size(),
+                xr_strlen(name), it.folder))
         {
             Msg("! FS: layer '%s': name too long (%u bytes and more), skipped [%s%s]", L.id.c_str(),
-                u32(sizeof(string_path)), virtual_dir, name);
+                u32(sizeof(string_path)), A.virtual_root, name);
             continue;
         }
-        string_path physical, virtual_name;
-        strconcat(sizeof physical, physical, physical_dir, name);
-        strconcat(sizeof virtual_name, virtual_name, virtual_dir, name);
-        xr_fs_strlwr(virtual_name);
-        if (it.folder)
-        {
-            if (!L.owner.empty() && name[0] == '@')
-            {
-                // 14-addon-resource-scoping.md: "@<id>\" are the names of the alias roots of the addons
-                Msg("! FS: layer '%s': a folder named '@...' is reserved for the addon aliases, skipped [%s]",
-                    L.id.c_str(), physical);
-                continue;
-            }
-            xr_strcat(physical, DELIMITER);
-            xr_strcat(virtual_name, DELIMITER);
-            Register(virtual_name, VFS_STANDARD_FILE, 0, 0, 0, 0, 0, index); // "insert self" of Recurse
-            layer_walk(index, physical, virtual_name, files, private_prefix);
-            continue;
-        }
-        if (LayerArchiveExtension(strext(virtual_name)))
-        {
-            Msg("! FS: layer '%s': archives are not mounted from a layer, skipped [%s]", L.id.c_str(), physical);
-            continue;
-        }
-        if (private_prefix && !L.private_masks.empty())
-        {
-            // 14-addon-resource-scoping.md: a private file of the addon - only under its alias roots
-            string_path relative;
-            xr_strcpy(relative, physical + private_prefix);
-            xr_fs_strlwr(relative);
-            if (layer_private(L, relative))
-            {
-                L.private_names.emplace_back(relative);
-                continue;
-            }
-        }
-        Register(virtual_name, VFS_STANDARD_FILE, 0, 0, it.size, it.size, it.time_write, index);
-        ++files;
+        string_path physical_dir, virtual_dir;
+        strconcat(sizeof physical_dir, physical_dir, A.physical_root, dir.c_str());
+        strconcat(sizeof virtual_dir, virtual_dir, A.virtual_root, dir.c_str());
+        xr_fs_strlwr(virtual_dir);
+        layer_walk_entry(L, index, physical_dir, virtual_dir, name, it.folder, it.size, it.time_write, 0, files, false);
     }
     return true;
 }
@@ -1064,7 +1154,11 @@ bool CLocatorAPI::mount_layer_alias(pcstr id, pcstr physical_root, pcstr virtual
     // Before the walk: physical_name of the entries it registers needs the root
     L->aliases.push_back(A);
     fs_layer::alias_root& root = L->aliases.back();
-    if (!layer_walk(index, root.physical_root, root.virtual_root, root.files, 0))
+    // The folders of the alias root were walked already, as a part of physical_root (the walk of it keeps what it found
+    // in fs_layer::walked): the entries come from that walk, the disk is enumerated again only when there is nothing to
+    // replay - a root outside physical_root, or a layer walked without a recording
+    if (!layer_replay(index, *L, root, root.files) &&
+        !layer_walk(index, root.physical_root, root.virtual_root, root.files, 0))
         Msg("! FS: layer '%s': cannot enumerate [%s] for the alias root", id, root.physical_root);
     Msg("FS: layer %u '%s': alias root [%s]: %u files from [%s], %f sec", index, id, root.virtual_root, root.files,
         root.physical_root, timer.GetElapsed_sec());
