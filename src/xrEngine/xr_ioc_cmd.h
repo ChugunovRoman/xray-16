@@ -265,21 +265,26 @@ public:
 
         I[0] = 0;
         const xr_token* tok = GetToken();
+        if (!tok)
+            return;
         while (tok->name)
         {
-            if (I[0])
-                xr_strcat(I, "/");
-
+            // The separator counts against the buffer as well: without it this check accepts a name that does not fit
+            // with its "/", and xr_strcat (strcat_s outside MASTER_GOLD) reports the overflow through the CRT invalid
+            // parameter handler. Long token lists (the UTF-8 sound device names) reach the limit in practice.
+            const auto separator_size = I[0] ? 1 : 0;
             const auto name_size = (std::intptr_t)xr_strlen(tok->name);
-            if (name_size > available_size)
+            if (name_size + separator_size > available_size)
             {
                 if (available_size >= 3)
                     xr_strcat(I, "...");
                 break; // don't just crash there, come in
             }
 
+            if (separator_size)
+                xr_strcat(I, "/");
             xr_strcat(I, tok->name);
-            available_size -= name_size;
+            available_size -= name_size + separator_size;
             tok++;
         }
     }

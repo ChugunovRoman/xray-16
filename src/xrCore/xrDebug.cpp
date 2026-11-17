@@ -1631,10 +1631,19 @@ static void handler_base(const char* reason)
 }
 
 #if defined(XR_PLATFORM_WINDOWS)
+// A CRT invalid parameter is recoverable: after this handler returns, the call that reported it returns EINVAL
+// (strcat_s and friends leave an empty string), and the engine goes on. Reporting it through xrDebug::Fail made
+// every one of them fatal - the dialog's Exit, or no dialog at all in Master Gold - over errors the code around
+// them survives. The report below runs CRT conversions of its own, which can report again: the re-entry flag drops
+// those. A stack trace costs a symbol walk, so only the first few reports carry one.
 static void invalid_parameter_handler(const wchar_t* expression, const wchar_t* function, const wchar_t* file,
                                       unsigned int line, uintptr_t reserved)
 {
-    bool ignoreAlways = false;
+    static thread_local bool s_tl_reporting = false;
+    if (s_tl_reporting)
+        return;
+    s_tl_reporting = true;
+
     string4096 mbExpression;
     string4096 mbFunction;
     string4096 mbFile;
@@ -1654,7 +1663,24 @@ static void invalid_parameter_handler(const wchar_t* expression, const wchar_t* 
         line = __LINE__;
         xr_strcpy(mbFile, __FILE__);
     }
-    xrDebug::Fail(ignoreAlways, {mbFile, int(line), mbFunction}, mbExpression, "invalid parameter");
+
+    string256 threadName{};
+    get_current_thread_name(threadName, sizeof(threadName));
+    Msg("! [error] invalid parameter: %s | %s at %s:%d [thread: 0x%llX \"%s\"]", mbExpression, mbFunction, mbFile,
+        line, static_cast<unsigned long long>(get_current_thread_id()), threadName);
+
+    static u32 s_stack_report_count = 0;
+    constexpr u32 kMaxStackReports = 8;
+    if (s_stack_report_count < kMaxStackReports)
+    {
+        ++s_stack_report_count;
+        xrDebug::LogStackTrace("! [error] invalid parameter: stack trace:");
+        if (s_stack_report_count == kMaxStackReports)
+            Msg("! [error] invalid parameter: stack traces of further reports are suppressed");
+    }
+    FlushLog();
+
+    s_tl_reporting = false;
 }
 #endif
 
