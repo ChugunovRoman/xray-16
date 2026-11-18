@@ -252,6 +252,23 @@ void CMapLocation::CalcPosition()
     {
         if (m_owner_se_object)
         {
+            if (m_owner_se_object->m_bOnline)
+            {
+                // Online: no smoothing. A squad has no client object even online and its server position is
+                // copied from the commander only on the ALife squad update, so it lags and moves in steps;
+                // follow the commander's client object instead (the real NPC position every frame)
+                IGameObject* commander = nullptr;
+                const auto* squad = smart_cast<const CSE_ALifeOnlineOfflineGroup*>(m_owner_se_object);
+                if (squad && !squad->squad_members().empty())
+                    commander = Level().Objects.net_Find(squad->squad_members().begin()->first);
+
+                m_position_global = commander ? commander->Position() : m_owner_se_object->draw_level_position();
+                m_cached.m_Position.set(m_position_global.x, m_position_global.z);
+                m_display_position = m_cached.m_Position;
+                m_display_position_valid = true;
+                return;
+            }
+
             m_position_global = m_owner_se_object->draw_level_position();
             m_cached.m_Position.set(m_position_global.x, m_position_global.z);
             if (!g_map_spot_config.test(MAP_SPOT_SMOOTH))
@@ -482,7 +499,8 @@ void CMapLocation::UpdateSpot(CUICustomMap* map, CMapSpot* sp)
             }
         }
 
-        // update spot position (smoothed for offline objects); not computed yet this frame for another level
+        // update spot position (smoothed for offline objects only; online squads follow the commander's client
+        // object); not computed yet this frame for another level
         RefreshPosition();
         Fvector2 position = GetDisplayPosition();
 

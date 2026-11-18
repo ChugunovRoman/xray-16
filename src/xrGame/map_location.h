@@ -75,7 +75,8 @@ protected:
     };
     SCachedValues m_cached;
 
-    // Smoothed position for map spot display (offline ALife objects only)
+    // Smoothed position for map spot display (offline ALife objects only; online squads use the commander's
+    // client object position without smoothing)
     Fvector2 m_display_position{10000, 10000};
     bool m_display_position_valid{false};
     // Frame and time of the last CalcPosition: positions are computed on demand (RefreshPosition), and the smoothing
