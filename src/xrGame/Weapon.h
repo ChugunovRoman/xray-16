@@ -688,6 +688,14 @@ public:
     Fvector m_tmp_rot;
     // Заполняется в UpdateHudAdditional(), читается через GetHudZoomOffset().
     Fmatrix m_hud_zoom_offset{ Fidentity };
+    // Aim settle wobble state (cosmetic, not part of m_hud_zoom_offset).
+    float m_fAimSettleTimer{ -1.f }; // seconds since the sight was reached, < 0 - inactive
+    float m_fPrevAimProgress{ 0.f }; // hip -> sight transition progress of the previous frame
+    // Aim HUD pose interpolated towards the target, port of xray-monolith (hud_aim_transition_mode 2).
+    Fvector m_aim_lerp_offs{ 0.f, 0.f, 0.f };
+    Fquaternion m_aim_lerp_rot; // initialized on the first update (m_aim_lerp_valid)
+    u32 m_aim_lerp_frame{ 0 }; // Device.dwFrame of the last interpolation step
+    bool m_aim_lerp_valid{ false };
 
 public:
     virtual EHandDependence HandDependence() const { return eHandDependence; }

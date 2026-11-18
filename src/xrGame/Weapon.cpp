@@ -48,6 +48,20 @@ ENGINE_API extern float g_fov;
 extern float g_aim_z_offset_coff;
 extern float g_second_aim_z_offset_coff;
 extern int g_3d_scope_type;
+extern int g_hud_aim_transition_mode;
+extern Fvector g_hud_aim_arc_offset;
+extern float g_hud_aim_arc_roll;
+extern float g_hud_aim_arc_pitch;
+extern float g_hud_aim_settle_pitch;
+extern float g_hud_aim_settle_roll;
+extern float g_hud_aim_settle_time;
+extern float g_hud_aim_settle_freq;
+extern float g_hud_aim_lerp_speed;
+extern float g_hud_aim_curve_lead;
+extern float g_hud_aim_curve_lag;
+extern float g_hud_aim_settle_yaw;
+extern float g_hud_aim_settle_offset_x;
+extern float g_hud_aim_settle_damping;
 // Персональные пресеты HUD FOV в прицеливании для сочетаний "оружие+прицел"
 // Ключ формата "<weapon_section>;<scope_section>"
 extern xr_map<shared_str, float> g_scope_hud_fov_presets;
@@ -3612,6 +3626,28 @@ float _lerp(const float& _val_a, const float& _val_b, const float& _factor)
     return (_val_a * (1.0 - _factor)) + (_val_b * _factor);
 }
 
+// Smootherstep: zero velocity at both ends, no start jerk and no end snap.
+static float aim_ease(float t)
+{
+    clamp(t, 0.f, 1.f);
+    return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
+}
+
+// Same rotation order as the hands offset in UpdateHudAdditional: X, then Y, then Z, then translation.
+static void make_hud_offset_matrix(Fmatrix& m, const Fvector& rot, const Fvector& offs)
+{
+    Fmatrix r;
+    m.identity();
+    m.rotateX(rot.x);
+    r.identity();
+    r.rotateY(rot.y);
+    m.mulA_43(r);
+    r.identity();
+    r.rotateZ(rot.z);
+    m.mulA_43(r);
+    m.translate_over(offs);
+}
+
 void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 {
     // Сбрасываем до любого из выходов ниже: поза покоя ЛЦУ читает это поле каждый кадр
@@ -3637,18 +3673,128 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
     }
 
     //============= Поворот ствола во время аима =============//
-    if (((IsZoomed() || IsSecondZoomed()) && t <= 1.f) || ((!IsZoomed() || !IsSecondZoomed()) && t > 0.f))
+    // Progress of the hip -> sight transition, used to trigger the settle wobble (mode 1).
+    const float aim_progress = _max(m_zoom_params.m_fZoomRotationFactor, m_zoom_params.m_fSecondZoomRotationFactor);
+
+    if (g_hud_aim_transition_mode == 2)
+    {
+        // Port of xray-monolith CWeapon::InterpolateOffset / InterpolateHudRotation: every frame the HUD
+        // covers a fixed fraction of the remaining way to the target pose (position - lerp, rotation -
+        // quaternion slerp). Fast start, long soft deceleration near the target, a changed target (aim
+        // cancelled mid-way, sight switched) is simply chased from the current pose. No arc, no settle.
+        const bool second_aim = IsZoomSecondEnabled() && IsSecondZoomed();
+        const bool aiming = IsZoomed() || second_aim;
+        const bool use_second = second_aim ||
+            (!IsZoomed() && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom);
+
+        Fvector target_offs = { 0.f, 0.f, 0.f };
+        Fvector target_rot = { 0.f, 0.f, 0.f };
+        if (aiming)
+        {
+            target_offs = use_second ? m_hands_offset[0][1] : hi->m_measures.m_hands_offset[0][1];
+            target_rot = use_second ? m_hands_offset[1][1] : hi->m_measures.m_hands_offset[1][1];
+        }
+
+        // Same X, Y, Z composition as the legacy path; rotation is interpolated as an orientation.
+        Fmatrix target_m;
+        make_hud_offset_matrix(target_m, target_rot, Fvector().set(0.f, 0.f, 0.f));
+        Fquaternion target_q;
+        target_q.set(target_m);
+        target_q.normalize();
+
+        float factor = Device.fTimeDelta / _max(m_fZoomRotateTime, EPS);
+        if (m_aim_lerp_frame == Device.dwFrame)
+            factor = 0.f; // already interpolated this frame
+        else if (!m_aim_lerp_valid || Device.dwFrame - m_aim_lerp_frame > 1)
+        {
+            // HUD was not updated last frame (weapon hidden, etc.): do not animate from a stale pose.
+            m_aim_lerp_offs = target_offs;
+            m_aim_lerp_rot.set(target_q);
+            m_aim_lerp_valid = true;
+        }
+        m_aim_lerp_frame = Device.dwFrame;
+
+        // monolith: clampr(factor * 2.5f, 0.f, 1.f)
+        const float k = clampr(factor * g_hud_aim_lerp_speed, 0.f, 1.f);
+
+        // Curved path: X (towards the screen center) and Y (up to the eye) get different rates, so the
+        // HUD first moves sideways and rises later. On the way back the rates are swapped: the HUD first
+        // drops and then moves aside, so it returns along the same bent path instead of a loop.
+        // Both multipliers 1.0 - straight line as in xray-monolith.
+        const float lead = aiming ? g_hud_aim_curve_lead : g_hud_aim_curve_lag;
+        const float lag = aiming ? g_hud_aim_curve_lag : g_hud_aim_curve_lead;
+        const Fvector axis_k = {
+            clampr(factor * g_hud_aim_lerp_speed * lead, 0.f, 1.f),
+            clampr(factor * g_hud_aim_lerp_speed * lag, 0.f, 1.f),
+            k };
+
+        if (target_offs.similar(m_aim_lerp_offs, EPS))
+            m_aim_lerp_offs.set(target_offs);
+        else
+        {
+            for (int i = 0; i < 3; ++i)
+                m_aim_lerp_offs[i] += (target_offs[i] - m_aim_lerp_offs[i]) * axis_k[i];
+        }
+
+        Fquaternion blended;
+        blended.slerp(m_aim_lerp_rot, target_q, k);
+        blended.normalize();
+        if (blended.cmp(target_q, EPS))
+            m_aim_lerp_rot.set(target_q);
+        else
+            m_aim_lerp_rot.set(blended);
+
+        // Keep the legacy intermediate position in sync (used by the sight switch branches of mode 0/1).
+        m_tmp_offs = m_aim_lerp_offs;
+
+        Fmatrix hud_rotation;
+        hud_rotation.rotation(m_aim_lerp_rot);
+        hud_rotation.translate_over(m_aim_lerp_offs);
+        trans.mulB_43(hud_rotation);
+
+        // Laser designator rest pose follows the real (smoothed) aim offset, see the comment in the
+        // legacy branch below.
+        m_hud_zoom_offset.set(hud_rotation);
+
+        // Gameplay factors (FOV, inertia, strafe, SVP) stay linear in time as before (same as monolith).
+        if (pActor->IsZoomAimingMode())
+            m_zoom_params.m_fZoomRotationFactor += Device.fTimeDelta / m_fZoomRotateTime;
+        else
+            m_zoom_params.m_fZoomRotationFactor -= Device.fTimeDelta / m_fZoomRotateTime;
+
+        if (pActor->IsZoomAimingMode() && IsSecondZoomed())
+            m_zoom_params.m_fSecondZoomRotationFactor += Device.fTimeDelta / m_fZoomRotateTime;
+        else
+            m_zoom_params.m_fSecondZoomRotationFactor -= Device.fTimeDelta / m_fZoomRotateTime;
+
+        clamp(m_zoom_params.m_fZoomRotationFactor, 0.f, 1.f);
+        clamp(m_zoom_params.m_fSecondZoomRotationFactor, 0.f, 1.f);
+    }
+    else if (((IsZoomed() || IsSecondZoomed()) && t <= 1.f) || ((!IsZoomed() || !IsSecondZoomed()) && t > 0.f))
     {
         Fvector curr_offs;
         Fvector curr_rot;
 
-        float out = 1.f - powf(1.f - t, 0.5f);
-        float in = 1.f - powf(1.f - t, 3.0f);
-        if (in > 1.f)
-            in = 1.f;
-        float curve = out;
-        if ((IsZoomed() || IsSecondZoomed()))
-            curve = in;
+        float curve;
+        if (g_hud_aim_transition_mode != 0)
+        {
+            // One symmetric curve for both directions: the value depends only on t, so cancelling
+            // the aim mid-transition continues from the same pose instead of jumping between curves.
+            curve = aim_ease(t);
+        }
+        else
+        {
+            float out = 1.f - powf(1.f - t, 0.5f);
+            float in = 1.f - powf(1.f - t, 3.0f);
+            if (in > 1.f)
+                in = 1.f;
+            curve = out;
+            if ((IsZoomed() || IsSecondZoomed()))
+                curve = in;
+        }
+
+        // True for hip <-> sight branches (the arc is skipped when switching between sights).
+        bool hip_aim_transition = true;
 
         // Из дефолтного состояния в первичный зум
         if ((IsZoomed() || (!IsSecondZoomed() && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom)) && (m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::noZoom || m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom))
@@ -3671,6 +3817,7 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
         // Из первичного зума во вторичный зум
         else if (IsZoomSecondEnabled() && IsSecondZoomed() && (m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom || m_zoom_params.m_bSwitchBetweenSecondsZooms))
         {
+            hip_aim_transition = false;
             Fvector curr_offs1, curr_rot1;
             curr_offs1 = curr_offs = m_tmp_offs;
             curr_rot1 = curr_rot = m_tmp_rot;
@@ -3687,6 +3834,7 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
         // Из вторичного зума в первичный зум
         else if (IsZoomed() && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom)
         {
+            hip_aim_transition = false;
             Fvector curr_offs1, curr_rot1;
             curr_offs1 = curr_offs = m_tmp_offs;
             curr_rot1 = curr_rot = m_tmp_rot;
@@ -3744,6 +3892,25 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
         // инерция ниже по функции в позу покоя НЕ входят, это анимация.
         m_hud_zoom_offset.set(hud_rotation);
 
+        // Arc of the hip <-> sight transition: bump is 0 at both ends, so rest and aim poses stay intact.
+        // Applied after m_hud_zoom_offset was captured: it is animation (like strafe), not part of the
+        // rest pose, otherwise the laser designator rest point would wobble with it.
+        if (g_hud_aim_transition_mode != 0 && hip_aim_transition && !gw_bodycam_motion::active())
+        {
+            const float bump = _sin(PI * clampr(curve, 0.f, 1.f));
+            if (bump > EPS)
+            {
+                Fvector arc_offs = g_hud_aim_arc_offset;
+                arc_offs.mul(bump);
+                Fvector arc_rot = { deg2rad(g_hud_aim_arc_pitch), 0.f, deg2rad(g_hud_aim_arc_roll) };
+                arc_rot.mul(bump);
+
+                Fmatrix arc_m;
+                make_hud_offset_matrix(arc_m, arc_rot, arc_offs);
+                trans.mulB_43(arc_m);
+            }
+        }
+
         if (pActor->IsZoomAimingMode())
             m_zoom_params.m_fZoomRotationFactor += Device.fTimeDelta / m_fZoomRotateTime;
         else
@@ -3757,6 +3924,47 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
         clamp(m_zoom_params.m_fZoomRotationFactor, 0.f, 1.f);
         clamp(m_zoom_params.m_fSecondZoomRotationFactor, 0.f, 1.f);
     }
+
+    // Settle wobble: a short damped nod right after the HUD reaches the sight (gives the weapon weight).
+    // Like the arc it is cosmetic and is not included into m_hud_zoom_offset.
+    {
+        // Mode 1 only: mode 2 is a pure port of xray-monolith, which has no settle wobble.
+        constexpr float settle_trigger = 0.98f;
+        const bool settle_enabled = g_hud_aim_transition_mode == 1 && g_hud_aim_settle_time > EPS;
+        if (settle_enabled && pActor->IsZoomAimingMode())
+        {
+            if (aim_progress >= settle_trigger && m_fPrevAimProgress < settle_trigger)
+                m_fAimSettleTimer = 0.f;
+        }
+        else
+            m_fAimSettleTimer = -1.f;
+        m_fPrevAimProgress = aim_progress;
+
+        if (m_fAimSettleTimer >= 0.f && !gw_bodycam_motion::active())
+        {
+            const float u = m_fAimSettleTimer / g_hud_aim_settle_time; // 0..1 over the settle window
+            // Envelope: soft attack (no kick on the first frame), exponential decay and a (1-u)^2 tail,
+            // so the wobble reaches exactly zero with zero velocity at the end of the window (no pop).
+            const float attack = aim_ease(u / 0.15f);
+            const float tail = (1.f - u) * (1.f - u);
+            const float env = attack * expf(-g_hud_aim_settle_damping * u) * tail;
+            const float k = env * _sin(PI_MUL_2 * g_hud_aim_settle_freq * m_fAimSettleTimer);
+
+            // Mostly sideways sway: yaw + roll + lateral shift; pitch is optional (0 by default).
+            const Fvector settle_rot = { deg2rad(g_hud_aim_settle_pitch) * k, deg2rad(g_hud_aim_settle_yaw) * k,
+                deg2rad(g_hud_aim_settle_roll) * k };
+            const Fvector settle_offs = { g_hud_aim_settle_offset_x * k, 0.f, 0.f };
+
+            Fmatrix settle_m;
+            make_hud_offset_matrix(settle_m, settle_rot, settle_offs);
+            trans.mulB_43(settle_m);
+
+            m_fAimSettleTimer += Device.fTimeDelta;
+            if (m_fAimSettleTimer >= g_hud_aim_settle_time)
+                m_fAimSettleTimer = -1.f;
+        }
+    }
+
     if (!IsZoomed() && !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor == 0.f)
         m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::noZoom;
 

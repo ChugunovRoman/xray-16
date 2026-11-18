@@ -186,6 +186,27 @@ int g_hud_shot_aim_mode = 1;
 float g_hud_shot_aim_factor = 0.3f; // доля пинка, которая остаётся (0 - пинка нет, 1 - как в анимации)
 float g_hud_shot_aim_kick_time = 150.f; // мс времени анимации от старта выстрела, пока пинок гасится полностью
 float g_hud_shot_aim_kick_fade = 100.f; // мс плавного возврата к анимации после окна
+// HUD aim transition (CWeapon::UpdateHudAdditional).
+// Mode: 0 - legacy curves, 1 - smootherstep curve + arc + settle, 2 - xray-monolith interpolation (default).
+int g_hud_aim_transition_mode = 2;
+// Mode 2: fraction of the remaining way covered per zoom_rotate_time (xray-monolith uses 2.5).
+// Lower - slower and longer approach to the sight.
+float g_hud_aim_lerp_speed = 2.5f;
+// Mode 2 curved path: rate multipliers of the X axis (lead) and Y axis (lag) when entering the aim,
+// swapped when leaving. 1.0 / 1.0 - straight line as in xray-monolith.
+float g_hud_aim_curve_lead = 1.6f;
+float g_hud_aim_curve_lag = 0.65f;
+Fvector g_hud_aim_arc_offset = { 0.f, -0.015f, 0.f }; // m, HUD offset at the middle of the transition
+float g_hud_aim_arc_roll = 6.f; // deg, roll at the middle of the transition
+float g_hud_aim_arc_pitch = 1.f; // deg, pitch at the middle of the transition
+// Settle wobble after reaching the sight: mostly sideways (yaw + roll + lateral shift).
+float g_hud_aim_settle_pitch = 0.f; // deg, up/down component (off by default)
+float g_hud_aim_settle_yaw = 0.9f; // deg, left/right sway
+float g_hud_aim_settle_roll = 0.6f; // deg, roll sway
+float g_hud_aim_settle_offset_x = 0.003f; // m, lateral shift sway
+float g_hud_aim_settle_time = 1.0f; // s, settle duration (0 - off)
+float g_hud_aim_settle_freq = 1.6f; // Hz, settle oscillation frequency
+float g_hud_aim_settle_damping = 2.5f; // exponential decay over the window (higher - fades faster)
 xr_map<shared_str, float> g_scope_hud_fov_presets;
 xr_map<shared_str, float> g_weapon_hud_fov_presets;
 //-Alundaio
@@ -4175,6 +4196,22 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "hud_shot_aim_factor", &g_hud_shot_aim_factor, 0.f, 1.f);
     CMD4(CCC_Float, "hud_shot_aim_kick_time", &g_hud_shot_aim_kick_time, 0.f, 2000.f);
     CMD4(CCC_Float, "hud_shot_aim_kick_fade", &g_hud_shot_aim_kick_fade, 0.f, 1000.f);
+    CMD4(CCC_Integer, "hud_aim_transition_mode", &g_hud_aim_transition_mode, 0, 2);
+    CMD4(CCC_Float, "hud_aim_lerp_speed", &g_hud_aim_lerp_speed, 0.5f, 10.f);
+    CMD4(CCC_Float, "hud_aim_curve_lead", &g_hud_aim_curve_lead, 0.2f, 5.f);
+    CMD4(CCC_Float, "hud_aim_curve_lag", &g_hud_aim_curve_lag, 0.2f, 5.f);
+    CMD4(CCC_Float, "hud_aim_arc_offset_x", &g_hud_aim_arc_offset.x, -0.1f, 0.1f);
+    CMD4(CCC_Float, "hud_aim_arc_offset_y", &g_hud_aim_arc_offset.y, -0.1f, 0.1f);
+    CMD4(CCC_Float, "hud_aim_arc_offset_z", &g_hud_aim_arc_offset.z, -0.1f, 0.1f);
+    CMD4(CCC_Float, "hud_aim_arc_roll", &g_hud_aim_arc_roll, -30.f, 30.f);
+    CMD4(CCC_Float, "hud_aim_arc_pitch", &g_hud_aim_arc_pitch, -15.f, 15.f);
+    CMD4(CCC_Float, "hud_aim_settle_pitch", &g_hud_aim_settle_pitch, 0.f, 5.f);
+    CMD4(CCC_Float, "hud_aim_settle_yaw", &g_hud_aim_settle_yaw, -5.f, 5.f);
+    CMD4(CCC_Float, "hud_aim_settle_roll", &g_hud_aim_settle_roll, -5.f, 5.f);
+    CMD4(CCC_Float, "hud_aim_settle_offset_x", &g_hud_aim_settle_offset_x, -0.05f, 0.05f);
+    CMD4(CCC_Float, "hud_aim_settle_time", &g_hud_aim_settle_time, 0.f, 3.f);
+    CMD4(CCC_Float, "hud_aim_settle_freq", &g_hud_aim_settle_freq, 0.5f, 10.f);
+    CMD4(CCC_Float, "hud_aim_settle_damping", &g_hud_aim_settle_damping, 0.f, 10.f);
     CMD3(CCC_Mask, "g_pnv_in_scope", &psActorFlags, AF_PNV_W_SCOPE_DIS);
     CMD3(CCC_Mask, "g_weapons_cam_anims", &psActorFlags, AF_USE_CAM_ANIMS);
 #ifndef MASTER_GOLD
