@@ -303,6 +303,11 @@ void CRenderDevice::DestroyImGui()
 #endif
 
     ImGuiIO& io = ImGui::GetIO();
+    // DestroyContext writes imgui.ini only while IniFilename is set, and it is freed right below: written here (as
+    // DestroyContext would - only after the file was read). Without it a change of the last ~5 s (IniSavingRate) before
+    // the exit was lost: a window moved or opened, the open flags of the tools of the addons (20-imgui-addon-tools.md)
+    if (io.IniFilename && m_imgui_context->SettingsLoaded)
+        ImGui::SaveIniSettingsToDisk(io.IniFilename);
     xr_free(io.IniFilename);
     xr_free(io.LogFilename);
 

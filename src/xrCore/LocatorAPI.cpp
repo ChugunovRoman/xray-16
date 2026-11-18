@@ -1087,6 +1087,11 @@ u16 CLocatorAPI::mount_layer(
     // The DLTX / XMLOverride patch lookups depend on the layers: dropped after the lock is released (lock order)
     const PatchCacheReset patch_cache_reset;
     ScopeLock files_scope(m_files_lock); // Register locks it again: recursive
+    // The record of the walk of the layer below (fs_layer::walked) serves only mount_layer_alias, and an alias root goes
+    // only onto the top layer: from here on nobody replays it. Freed, so that the records of all the addons do not stay
+    // for the whole session (one entry per file of each of them)
+    if (!m_layers.empty())
+        xr_vector<fs_layer::walked_entry>().swap(m_layers.back()->walked);
     m_layers.push_back(L);
     const u16 index = u16(m_layers.size());
     const bool walked = layer_walk(index, L->physical_root, L->virtual_root, L->files,

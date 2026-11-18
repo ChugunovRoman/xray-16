@@ -74,6 +74,7 @@ GROUPS = {
     "threads": ("Рабочие потоки", "api/threads.md"),
     "services": ("Сервисы плагинов", "api/services.md"),
     "user_data": ("Файлы в профиле пользователя", "api/user_data.md"),
+    "imgui": ("ImGui-инструменты", "api/imgui.md"),
     "plugin": ("Класс gwp::Plugin", "api/plugin.md"),
 }
 

@@ -31,6 +31,7 @@
 #include "xrNetServer/NET_Messages.h"
 #include "lua_spike_probe.h"
 #include "xrMessages.h"
+#include "Weapon.h"
 
 CInventoryOwner::CInventoryOwner()
     : m_inventory(xr_new<CInventory>()),
@@ -164,14 +165,12 @@ void CInventoryOwner::net_Destroy()
 
     inventory().Clear();
     inventory().SetActiveSlot(NO_ACTIVE_SLOT);
-    // npc_equipment.md: the flag and the swap are runtime only, the addon sets them again at the next net_spawn
+    // npc_equipment.md: the flag is runtime only, its owner sets it again at the next net_spawn
     if (m_equipment_editable)
     {
         m_equipment_editable = false;
         inventory().SetBeltUseful(false);
     }
-    ResetEquipmentSwap();
-    m_equipment_enemy_time = 0;
 }
 
 void CInventoryOwner::save(NET_Packet& output_packet)
@@ -695,9 +694,6 @@ void CInventoryOwner::set_equipment_editable(bool value)
         return;
     }
 
-    // not editable any more: no swap (the weapon taken out stays in the ruck)
-    ResetEquipmentSwap();
-
     // the belt is off again: what was on it goes to the ruck (copy - Ruck changes m_belt)
     const TIItemContainer belt = inventory().m_belt;
     for (PIItem item : belt)
@@ -711,37 +707,16 @@ bool CInventoryOwner::EquipmentSlotOverride(u16 slot_id) const
     return m_equipment_editable && (slot_id == OUTFIT_SLOT || slot_id == PDA_SLOT);
 }
 
-namespace
+bool CInventoryOwner::EquipmentSlotWeaponReady(CInventoryItem* item) const
 {
-// the index of the swap of a weapon slot or -1
-int equipment_swap_index(u16 slot_id)
-{
-    return slot_id == INV_SLOT_2 ? 0 : slot_id == INV_SLOT_3 ? 1 : -1;
-}
-} // namespace
-
-u16 CInventoryOwner::EquipmentSwapped(u16 slot_id) const
-{
-    const int i = equipment_swap_index(slot_id);
-    return i < 0 ? u16(-1) : m_equipment_swap[i];
-}
-
-void CInventoryOwner::SetEquipmentSwapped(u16 slot_id, u16 item_id)
-{
-    const int i = equipment_swap_index(slot_id);
-    if (i >= 0)
-        m_equipment_swap[i] = item_id;
-}
-
-bool CInventoryOwner::IsEquipmentSwapped(u16 item_id) const
-{
-    return item_id != u16(-1) && (m_equipment_swap[0] == item_id || m_equipment_swap[1] == item_id);
-}
-
-void CInventoryOwner::ResetEquipmentSwap()
-{
-    m_equipment_swap[0] = u16(-1);
-    m_equipment_swap[1] = u16(-1);
+    if (!m_equipment_editable || !item || !inventory().InSlot(item))
+        return false;
+    if (item->CurrSlot() != INV_SLOT_2 && item->CurrSlot() != INV_SLOT_3)
+        return false;
+    // unlimited_ammo: the owner shoots without ammo (alive stalker, eTraderFlagInfiniteAmmo of CSE_ALifeHumanStalker)
+    // and the cartridge of the weapon may be unlimited (cfCanBeUnlimited); otherwise real ammo is needed (can_kill)
+    CWeapon* weapon = smart_cast<CWeapon*>(item);
+    return weapon && weapon->unlimited_ammo();
 }
 
 void CInventoryOwner::OnEquipmentEvent(NET_Packet& P, u16 type)

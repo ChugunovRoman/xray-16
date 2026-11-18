@@ -3,6 +3,7 @@
 #include "addon_lua_entry.h"
 #include "addon_host.h"
 #include "addon_lua_console.h"
+#include "addon_imgui_tools.h"
 #include "addon_content.h"
 #include "addon_merge.h"
 #include "addon_slots.h"
@@ -442,6 +443,9 @@ bool UnloadLuaEntryForReload(pcstr addon_id)
     if (!ReloadCall(kLuaReloadRemove, {}))
         Msg("! [addon:%s] addon_reload: its registrations were not removed (the error is above)", addon_id);
     lua_console::RemoveOwner(addon_id); // addons.register_command: the console commands of the addon (gap P03)
+    // addons.register_imgui_tool: the ImGui tools of the addon that gw_registry.remove_owner did not take (registered
+    // past the facade); quiet - no on_close, the open flag stays for the next on_load (20-imgui-addon-tools.md)
+    imgui_tools::RemoveOwner(addon_id);
     Msg("* [addon:%s] addon_reload: unloaded (on_unload: %s, save data: %s)", addon_id,
         unload_failed ? "failed" : "ok", save_failed ? "incomplete, not carried over" : "ok");
     return present;
@@ -694,12 +698,15 @@ bool AddonProtectedReportCount(u32 failures)
     return false;
 }
 
+} // namespace
+
 // The log of a failed callback of an addon (protected_call, protected_report): the message and the Lua stack the first
 // kAddonProtectedFullReports times per owner + what in this Lua state, then one line at the 10th, 100th ... failure.
 // group (nullptr - what): what the failures are counted as, for a what that names one of many callbacks made at run
 // time (_g.ProcessEventQueue: "time event [<event id>][<action id>] ..." - the ids are often made per object, a count
-// per what would add a key for each of them and never reach its limit). The full lines name what, the count - group
-void ReportAddonProtectedFailure(pcstr owner, pcstr what, const xr_string& text, pcstr group = nullptr)
+// per what would add a key for each of them and never reach its limit). The full lines name what, the count - group.
+// Declared in addon_lua_entry.h (the ImGui tools of the addons log the errors of draw with it)
+void ReportAddonProtectedFailure(pcstr owner, pcstr what, const xr_string& text, pcstr group /*= nullptr*/)
 {
     if (!g_addon_protected_failures)
         g_addon_protected_failures = xr_new<xr_unordered_map<xr_string, u32>>();
@@ -728,6 +735,9 @@ void ReportAddonProtectedFailure(pcstr owner, pcstr what, const xr_string& text,
             first_line.c_str());
     }
 }
+
+namespace
+{
 
 // The owner and the what of protected_call / protected_report: strings (else "unknown", "a callback")
 pcstr AddonProtectedOwner(lua_State* L, int index)

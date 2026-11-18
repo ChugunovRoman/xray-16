@@ -613,17 +613,17 @@ void LogProviderChanges(const LevelPackInfo& world, const xr_vector<size_t>& tar
 // level and no ALife, the start of a frame: no Lua, no plugin and no deferred event of the engine on the stack. Or the
 // end of CGamePersistent::OnAppStart before a level load of the command line (ApplyStartupNow): the same state, the
 // menu is not shown yet (RestartScripts does not rebuild it), no reader of the file system runs (init_game_globals is
-// waited for, the map of smart terrains is not started while the content of the start waits).
+// waited for, the map of smart terrains is not started while the content of the start waits). Or the early mount of the
+// start (gw::ApplyStartupContentEarly, OnAppStart after GMLib.Load): no UI, no menu, init_game_globals not run yet.
 void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool startup)
 {
     CTimer timer;
     timer.Start();
-    // 50z1-startup-addon-content.md: the content of the start is mounted inside CAI_Space::init, before
-    // g_pGamePersistent is assigned (xrGameModule::create_persistent makes the AI space that calls it) and before the
-    // UI, the loading screen and the main menu are built. Nothing is loaded yet: there is nothing to drop or rebuild,
-    // and the UI and the menu are built on the new content already. False for the rest - the menu shows (OnFrame) or is
-    // on its way (-start)
-    const bool early_mount = g_pGamePersistent == nullptr;
+    // 50z1-startup-addon-content.md: the content of the start is mounted in CGamePersistent::OnAppStart, after
+    // GMLib.Load and before the UI (GEnv.UI), the loading screen and the main menu are built (gw::ApplyStartupContentEarly).
+    // g_pGamePersistent is assigned there already (CApplication creates it before OnAppStart): what is not built yet is
+    // told by GEnv.UI and MainMenu(), each step below checks what it needs. The environment is there (made with the
+    // persistent, its configs read from the base) - it is read again below at the early mount too
     const bool ui_built = GEnv.UI != nullptr;
     LogProviderChanges(*world, target, startup);
 
@@ -734,16 +734,16 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
     }
 
     // 6. What keeps files by name: the prefetched objects (script classes among them - before the Lua restart),
-    // models, motions, texture descriptions, sound sources. Nothing of that is loaded at the early mount of the start:
-    // g_pGamePersistent is not assigned yet (see `early_mount`), so there is nothing to drop
-    if (!early_mount)
-        g_pGamePersistent->ObjectPool.clear();
+    // models, motions, texture descriptions, sound sources (empty at the early mount of the start)
+    g_pGamePersistent->ObjectPool.clear();
     GEnv.Render->AssetsSwitchEnd();
     if (GEnv.Sound)
         GEnv.Sound->refresh_sources();
     // The weathers: the names of the cycles and effects come from the layers (a cycle of an addon is known only now),
-    // the cycles read by a level before go - a provider of world.weather may have changed them (no level here)
-    if (!early_mount && g_pGamePersistent->pEnvironment)
+    // the cycles read by a level before go - a provider of world.weather may have changed them (no level here). At the
+    // early mount too: CEnvironment read ambients.ltx, sound_channels.ltx and effects.ltx of the base when it was made
+    // (with the persistent), IGame_Persistent::OnAppStart (Environment().load()) does not read them again
+    if (g_pGamePersistent->pEnvironment)
         g_pGamePersistent->Environment().OnContentChanged();
     // The ids of the ui textures (ui\textures_descr\ of the layers: the spots and the maps of a pack, the icons of an
     // addon) and the color defs: read with the UI at the start, before any layer, as ui_restart reads them. A window
@@ -753,12 +753,12 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
     // The loading screen: its layout (ui_mm_loading_screen.xml) and textures from the new layers, after the ui
     // textures. Never shown here: no level, no precache (OnFrame, ApplyStartupNow). Only once it is made: at the early
     // mount of the start the loading screen of OnAppStart is not there yet (it reads the layers mounted now)
-    if (!early_mount && ui_built)
+    if (ui_built)
         GamePersistent().RecreateLoadingScreen();
 
     // 7. The levels of the pack. The start position chosen in the faction select of the previous content belongs to
     // its game graph: it goes (the faction select of the new menu sets it again)
-    if (content_changed && !early_mount)
+    if (content_changed)
         g_pGamePersistent->Level_Scan();
     g_start_position_smart = nullptr;
     g_start_game_vertex_id = u16(-1);
@@ -767,6 +767,12 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
     ++g_content_generation; // the caches of the engine that compare it read again (the new menu among them)
 
     // 8. The state, then the scripts and the menu with the new content
+    // A provider that brings no files (only [slot.*] entry, a plugin) changes no layer: the Lua state is made again
+    // all the same - only a new state runs the entry of the provider now active (gw_slots.run_next_entry, on_load) and
+    // drops the registrations of the one that went. The configs and the strings above stay (their files are the same)
+    bool providers_changed = world != &ActiveLevelPack();
+    for (size_t i = 0; i < g_slot_list.size() && !providers_changed; ++i)
+        providers_changed = g_slot_list[i].id != kWorldSlot && target[i] != g_slot_list[i].active;
     SetActiveLevelPack(*world);
     if (world != requested_world)
     {
@@ -791,11 +797,10 @@ void ApplyContentSet(const LevelPackInfo* world, xr_vector<size_t> target, bool 
     Console->Execute("cfg_save"); // g_level_pack
     addons::LogContentConflicts();
     // The visuals of the old menu go back into the pool when it is destroyed (after AssetsSwitchEnd): the new menu
-    // must not take a model of the same name from there. Only over a content that is not what it was, and only when
-    // there is a menu: at the early mount of the start the Lua state is created after this (CAI_Space::init) and the
-    // menu is built on the new content - the entries of the addons run in that state as usual. MainMenu() itself
-    // reads g_pGamePersistent, which is not assigned at the early mount
-    if (content_changed && !early_mount && MainMenu())
+    // must not take a model of the same name from there. Only over a content or a set of providers that is not what it
+    // was, and only when there is a menu: at the early mount of the start (no CMainMenu yet) the Lua state is made
+    // again right after this (gw::RestartLuaForStartupContent) and the menu is built on the new content
+    if ((content_changed || providers_changed) && MainMenu())
         MainMenu()->RestartScripts([] { GEnv.Render->models_Clear(true); });
 
     CSpawnSmartTerrainMapDataSource::StartSharedLoadingWhenIdle("all");
@@ -855,8 +860,11 @@ void NotifyContentApplied(const SlotRequest& request, bool changes, bool ok)
         EmitContentApplied(request.startup, ok);
 }
 
-// 50z1-startup-addon-content.md: the content of the start is mounted before the Lua state is made (CAI_Space::init).
-// The notifications above wait for it and run from FinishStartupContentApplied, right after RestartScriptEngine
+// 50z1-startup-addon-content.md: the content of the start is mounted in CGamePersistent::OnAppStart before the UI and
+// the main menu are built. The Lua state that is there then (CAI_Space::init) is made again right after it
+// (gw::RestartLuaForStartupContent), and the menu the notifications talk to (ui_main_menu.on_slots_applied,
+// show_merge_warning) does not exist yet: they wait for the first frame of the menu (OnFrame, FinishStartupContentApplied)
+// - where they came before the early mount, in the Lua state the menu runs in
 struct PendingNotification
 {
     SlotRequest request;
@@ -901,9 +909,9 @@ void ApplyRequest(const SlotRequest& request)
         ok_slots &= slot && (slot->restart || slot->active_provider().id == provider_id);
     }
     // Under lua_pcall: it runs the entries of the providers (<entry>.on_slot_active - the code of the addons).
-    // 50z1-startup-addon-content.md: the content of the start is mounted before the Lua state exists (CAI_Space::init):
-    // these notifications need it, so they run from FinishStartupContentApplied right after RestartScriptEngine
-    if (GEnv.ScriptEngine)
+    // 50z1-startup-addon-content.md: at the early mount of the start (no UI yet, see PendingNotification) GEnv.ScriptEngine
+    // is the state of CAI_Space::init, about to be dropped: the notifications wait for the first frame of the menu
+    if (GEnv.ScriptEngine && GEnv.UI)
         NotifyContentApplied(request, changes, ok_world && ok_slots);
     else
     {
@@ -929,6 +937,9 @@ void FinishStartupContentApplied()
     g_notification_pending = false;
     NotifyContentApplied(g_pending_notification.request, g_pending_notification.changes,
         g_pending_notification.ok);
+    // For the launcher (ApplyContentSet wrote it before the UI and the menu read their XML): the patches of the ui
+    // files are recorded by now
+    addons::WriteAddonsReport("startup");
 }
 
 void Init()
@@ -1266,10 +1277,15 @@ u32 ContentGeneration() { return g_content_generation; }
 
 void OnFrame()
 {
-    if (!g_slot_request.pending)
+    if (!g_notification_pending && !g_slot_request.pending)
         return;
     if (g_pGameLevel || Device.dwPrecacheFrame || !MainMenu() || !MainMenu()->IsActive())
         return; // later: a level is loading or unloading, the menu is not shown yet
+    // 50z1-startup-addon-content.md: the notifications of the early mount of the start, in the Lua state of the menu
+    // (PendingNotification) - before a request of the menu, which notifies on its own
+    FinishStartupContentApplied();
+    if (!g_slot_request.pending)
+        return;
     const SlotRequest request = g_slot_request;
     g_slot_request = {};
     ApplyRequest(request);

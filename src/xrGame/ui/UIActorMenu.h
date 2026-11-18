@@ -251,9 +251,6 @@ protected:
     void UpdatePartnerEquipment();       // every frame of the equipment mode
     void SendEvent_PartnerItem2Place(PIItem pItem, u16 event_type, u16 slot_id);
     void SendEvent_PartnerItem2Actor(PIItem pItem);
-    // the player moves a weapon of the slots 2 / 3 of the partner (to such a slot, out of it, or the weapon the partner
-    // swapped out): the temporary swap of the partner is dropped - the will of the player first
-    void NotePartnerWeaponMove(PIItem item, u16 target_slot);
 
 public:
 

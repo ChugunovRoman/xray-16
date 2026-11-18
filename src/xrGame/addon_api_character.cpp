@@ -39,6 +39,10 @@ static_assert(GWP_RELATION_NEUTRAL == ALife::eRelationTypeNeutral);
 static_assert(GWP_RELATION_ENEMY == ALife::eRelationTypeEnemy);
 static_assert(GWP_RELATION_WORST_ENEMY == ALife::eRelationTypeWorstEnemy);
 
+// xrgame_dll_detach.cpp: the tables of init_game_globals (the communities, their relations) are filled. The plugins are
+// loaded before that (CAI_Space::init, on_init), and at the start the tables are filled on a task of the scheduler
+bool GameGlobalsReady();
+
 namespace gw::addons::character
 {
 namespace
@@ -92,16 +96,30 @@ bool IsCharacterGoodwillValue(int32_t value)
     return value >= -kCharacterGoodwillLimit && value <= kCharacterGoodwillLimit;
 }
 
-// The index of a community of game_relations.ltx; NO_COMMUNITY_INDEX for an unknown name (no assert, unlike Lua)
+// The index of a community of game_relations.ltx; NO_COMMUNITY_INDEX for an unknown name (no assert, unlike Lua).
+// NO_COMMUNITY_INDEX too while the communities are not read yet (GameGlobalsReady: on_init of a plugin loaded at the
+// start, before the first frame of the menu) - the callers answer "no data" then (NEUTRAL_GOODWILL, 0, a refusal)
 CHARACTER_COMMUNITY_INDEX CharacterCommunityIndex(const char* name)
 {
-    if (!name || !*name)
+    if (!name || !*name || !GameGlobalsReady())
         return NO_COMMUNITY_INDEX;
     return CHARACTER_COMMUNITY::IdToIndex(name, NO_COMMUNITY_INDEX, true);
 }
 
+// A setter refused while the communities are not read yet: GWP_OK - go on
+GwpResult CommunitiesReadyOr(const GwpPlugin* self, pcstr function)
+{
+    if (GameGlobalsReady())
+        return GWP_OK;
+    return api::PluginRefusal(self, function, GWP_ERROR_INVALID_STATE,
+        "the communities are not read yet (on_init at the start of the game: call it from addons_content_applied or "
+        "later)");
+}
+
 pcstr CharacterCommunityName(int index)
 {
+    if (!GameGlobalsReady())
+        return "";
     const CHARACTER_COMMUNITY_ID id = CHARACTER_COMMUNITY::IndexToId(index, nullptr, true);
     return id.size() ? id.c_str() : "";
 }
@@ -286,6 +304,8 @@ GwpResult GWP_CALL ApiCharacterSetCommunity(const GwpPlugin* self, GwpObjectId i
     constexpr pcstr function = "character_set_community";
     if (!api::CheckPluginMutation(self, kGroup, function))
         return api::PluginCallRefused(self);
+    if (const GwpResult ready = CommunitiesReadyOr(self, function); ready != GWP_OK)
+        return ready;
     const CHARACTER_COMMUNITY_INDEX index = CharacterCommunityIndex(community);
     if (index == NO_COMMUNITY_INDEX)
         return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "an unknown community");
@@ -431,6 +451,8 @@ GwpResult ChangeCommunityGoodwill(const GwpPlugin* self, const char* community, 
         return api::PluginCallRefused(self);
     if (!IsCharacterGoodwillValue(value))
         return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "a value out of -1000000 .. 1000000");
+    if (const GwpResult ready = CommunitiesReadyOr(self, function); ready != GWP_OK)
+        return ready;
     const CHARACTER_COMMUNITY_INDEX index = CharacterCommunityIndex(community);
     if (index == NO_COMMUNITY_INDEX)
         return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "an unknown community");
@@ -475,6 +497,8 @@ GwpResult GWP_CALL ApiCommunitySetRelation(const GwpPlugin* self, const char* fr
         return api::PluginCallRefused(self);
     if (!IsCharacterGoodwillValue(goodwill))
         return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "a goodwill out of -1000000 .. 1000000");
+    if (const GwpResult ready = CommunitiesReadyOr(self, function); ready != GWP_OK)
+        return ready;
     const CHARACTER_COMMUNITY_INDEX index_from = CharacterCommunityIndex(from);
     const CHARACTER_COMMUNITY_INDEX index_to = CharacterCommunityIndex(to);
     if (index_from == NO_COMMUNITY_INDEX || index_to == NO_COMMUNITY_INDEX)

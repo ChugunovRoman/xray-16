@@ -470,49 +470,6 @@ bool equipment_slot_free_for(const CInventory& inv, const CInventoryItem* item)
         return !inv.ItemFromSlot(base == INV_SLOT_2 ? INV_SLOT_3 : INV_SLOT_2);
     return true; // the other slots (grenades...): CObjectActionShow replaces what lies there, as before
 }
-
-// No enemy for so long - the fight is over: the weapon the player gave goes back to its slot even without ammo (a lull
-// between the waves of one fight is shorter, the NPC keeps the loaded weapon for it; a minute would leave the companion
-// with the "wrong" weapon too long after the fight)
-constexpr u32 EQUIPMENT_SWAP_RESTORE_MS = 30000;
-
-// npc_equipment.md, the temporary swap (CInventoryOwner::SetEquipmentSwapped, show_slot in object_actions.cpp): the
-// weapon taken out of the slot 2 / 3 goes back when it can kill again (the player gave ammo, the NPC picked some up) or
-// the fight is over; the loaded one it replaced goes to the ruck. The record is dropped when the weapon is not in the
-// inventory of the NPC any more or is in a slot again (the player or the planner put it there)
-void equipment_swap_update(CAI_Stalker& npc, bool has_enemy)
-{
-    const u32 now = Device.dwTimeGlobal;
-    if (has_enemy)
-        npc.EquipmentEnemySeen(now);
-    const bool calm = now - npc.EquipmentEnemyTime() >= EQUIPMENT_SWAP_RESTORE_MS;
-
-    CInventory& inv = npc.inventory();
-    for (const u16 slot : { u16(INV_SLOT_2), u16(INV_SLOT_3) })
-    {
-        const u16 id = npc.EquipmentSwapped(slot);
-        if (id == u16(-1))
-            continue;
-        IGameObject* obj = Level().Objects.net_Find(id);
-        PIItem item = obj ? smart_cast<PIItem>(obj) : nullptr;
-        if (!item || obj->getDestroy() || item->m_pInventory != &inv || inv.InSlot(item))
-        {
-            npc.SetEquipmentSwapped(slot, u16(-1));
-            continue;
-        }
-        if (!calm && !item->can_kill())
-            continue;
-
-        if (PIItem current = inv.ItemFromSlot(slot))
-            inv.Ruck(current);
-        inv.Slot(slot, item, true);
-        npc.SetEquipmentSwapped(slot, u16(-1));
-#ifndef MASTER_GOLD
-        Msg("* [equipment] %s: the weapon [%s] is back in the slot %u (%s)", npc.cName().c_str(),
-            item->object().cNameSect().c_str(), u32(slot), calm ? "the fight is over" : "it has ammo");
-#endif
-    }
-}
 } // namespace
 
 void CAI_Stalker::update_best_item_info_impl()
@@ -580,11 +537,7 @@ void CAI_Stalker::update_best_item_info_impl()
     }
     */
 
-    // npc_equipment.md: the swapped weapon of the player goes back when it can (equipment_swap_update)
     const bool editable = equipment_editable();
-    const bool has_enemy = memory().enemy().selected() != nullptr;
-    if (editable)
-        equipment_swap_update(*this, has_enemy);
 
     // initialize parameters
     m_item_actuality = true;
@@ -599,9 +552,10 @@ void CAI_Stalker::update_best_item_info_impl()
     // try to find the best item which can kill
     // plans/addon_companion_extended/npc_equipment.md: an NPC whose equipment the player sets up (equipment_editable)
     // fights with the weapons of its slots 2 / 3 first - what the player gave it is not swapped for a "better" one of
-    // the ruck; the whole inventory (the knife too) only when none of them can kill (no ammo), and of the ruck only an
-    // item with a free slot (equipment_slot_free_for) or, in a fight, a weapon of the slots 2 / 3: it replaces a weapon
-    // without ammo for a while (the swap, show_slot in object_actions.cpp; out of a fight the slots stay as they are)
+    // the ruck. A weapon of these slots is ready even without ammo in the inventory while the NPC shoots without ammo
+    // (EquipmentSlotWeaponReady: unlimited_ammo, as every live stalker), so the whole inventory (the knife too) is
+    // looked at only when no weapon is there or its ammo cannot be unlimited; of the ruck - only an item with a free slot
+    // (equipment_slot_free_for): the slots the player filled stay as they are
     for (int pass = editable ? 0 : 1; pass < 2 && !m_best_item_to_kill; ++pass)
     {
         TIItemContainer::iterator I = inventory().m_all.begin();
@@ -611,10 +565,9 @@ void CAI_Stalker::update_best_item_info_impl()
             const bool in_slot = inventory().InSlot(*I);
             if (pass == 0 && !(in_slot && ((*I)->CurrSlot() == INV_SLOT_2 || (*I)->CurrSlot() == INV_SLOT_3)))
                 continue;
-            if (pass == 1 && editable && !in_slot && !equipment_slot_free_for(inventory(), *I) &&
-                !(has_enemy && ((*I)->BaseSlot() == INV_SLOT_2 || (*I)->BaseSlot() == INV_SLOT_3)))
+            if (pass == 1 && editable && !in_slot && !equipment_slot_free_for(inventory(), *I))
                 continue;
-            if ((*I)->can_kill())
+            if ((*I)->can_kill() || (pass == 0 && EquipmentSlotWeaponReady(*I)))
             {
                 ai().ef_storage().non_alife().member_item() = &(*I)->object();
                 float value;

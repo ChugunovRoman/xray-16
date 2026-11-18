@@ -80,7 +80,8 @@ public:
         return item ? item->id : default_id;
     }
 
-    static const T_INDEX GetMaxIndex() { return m_pItemDataVector->size() - 1; }
+    // Not loaded yet (InitInternal: init_game_globals runs after the plugins are loaded) - an empty table: -1
+    static const T_INDEX GetMaxIndex() { return m_pItemDataVector ? T_INDEX(m_pItemDataVector->size() - 1) : T_INDEX(-1); }
     //удаление статичекого массива
     static void DeleteIdToIndexData();
 };
@@ -96,6 +97,13 @@ LPCSTR CSINI_IdToIndex::line_name = NULL;
 TEMPLATE_SPECIALIZATION
 const ITEM_DATA* CSINI_IdToIndex::GetById(const T_ID& str_id, bool no_assert)
 {
+    // The table is not loaded yet (or freed): no item, as an unknown id - a plugin or a script that asks before
+    // init_game_globals (the start of the game) must not read a null vector
+    if (!m_pItemDataVector)
+    {
+        R_ASSERT3(no_assert, "item table is not loaded yet, id", str_id.c_str());
+        return NULL;
+    }
     typename T_VECTOR::iterator it;
     for (it = m_pItemDataVector->begin(); m_pItemDataVector->end() != it; ++it)
     {
@@ -115,7 +123,7 @@ const ITEM_DATA* CSINI_IdToIndex::GetById(const T_ID& str_id, bool no_assert)
 TEMPLATE_SPECIALIZATION
 const ITEM_DATA* CSINI_IdToIndex::GetByIndex(T_INDEX index, bool no_assert)
 {
-    if ((size_t)index >= m_pItemDataVector->size())
+    if (!m_pItemDataVector || (size_t)index >= m_pItemDataVector->size()) // not loaded yet - as not found (GetById)
     {
         if (!no_assert)
             xrDebug::Fatal(DEBUG_INFO, "item by index not found in section %s, line %s", section_name, line_name);

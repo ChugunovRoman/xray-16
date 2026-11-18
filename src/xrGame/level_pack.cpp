@@ -385,15 +385,6 @@ void RestartLuaForStartupContent()
     ai().RestartScriptEngine();
 }
 
-void FinishStartupContentEarly()
-{
-    if (!g_packs_initialized)
-        return;
-    if (Engine.Event.Peek("KERNEL:start"))
-        return; // that path notifies from ApplyStartupContentForLevel, with the Lua state of the start
-    slots::FinishStartupContentApplied();
-}
-
 namespace
 {
 // The save of the start of the command line that cannot load in this run (ApplyStartupContentForLevel): the menu shows

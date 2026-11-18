@@ -38,12 +38,23 @@ extern void gw_reset_specific_character_index(); // xrServer_Objects_ALife_Monst
 
 #include "xrEngine/IGame_Persistent.h"
 
+// 50z1-startup-addon-content.md: the tables init_game_globals fills (the communities and their relations, the ranks,
+// the reputations, the monster communities, the profiles, the info portions, the dialogs) are there. Set after the
+// last of them is filled - init_game_globals runs on a task of the scheduler at the start (CGamePersistent::OnAppStart)
+// - and dropped before they are freed (clean_game_data). Release / acquire: a reader that sees true sees the tables
+// whole. The plugins are loaded before it (CAI_Space::init): the Plugin API answers "no data" until then
+// (addon_api_character.cpp)
+std::atomic<bool> g_game_globals_ready{ false };
+
+bool GameGlobalsReady() { return g_game_globals_ready.load(std::memory_order_acquire); }
+
 namespace
 {
 // The data init_game_globals reads (the XML and the ini loaders): freed at the end of the game and before it is read
 // again (reload_game_globals)
 void clean_game_data()
 {
+    g_game_globals_ready.store(false, std::memory_order_release);
     if (!GEnv.isDedicatedServer)
     {
         CInfoPortion::DeleteSharedData();
@@ -73,11 +84,6 @@ void clean_game_data()
 }
 } // namespace
 
-// 50z1-startup-addon-content.md: the game globals are read at the start (init_game_globals of
-// CGamePersistent::OnAppStart), over the content mounted before it. A content set that mounts before that reads nothing
-// here (reload_game_globals): the read of the start takes the layers mounted now
-bool g_game_globals_loaded = false;
-
 void init_game_globals()
 {
     ZoneScoped;
@@ -96,7 +102,7 @@ void init_game_globals()
     CHARACTER_RANK::InitInternal();
     CHARACTER_REPUTATION::InitInternal();
     MONSTER_COMMUNITY::InitInternal();
-    g_game_globals_loaded = true;
+    g_game_globals_ready.store(true, std::memory_order_release); // the last: every table above is whole
 }
 
 void clean_game_globals()
@@ -142,7 +148,7 @@ bool reload_game_globals()
 
     // Not read yet (50z1-startup-addon-content.md): the content of the start is mounted before
     // init_game_globals, which reads the layers mounted now - nothing to read again here
-    if (!g_game_globals_loaded)
+    if (!GameGlobalsReady())
         return true;
 
     const int users = (GEnv.isDedicatedServer ? 0 :

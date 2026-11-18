@@ -73,6 +73,9 @@ bool IsPluginRunning(const GwpPlugin* plugin); // loading or loaded: not stopped
 // GwpPluginDesc::api_built (GWP_MAKE_VERSION) of the loaded plugin of the addon; 0 when the addon is unknown, its
 // plugin is not loaded or its description is too short to have the field (Lua plugins.version).
 u32 PluginApiBuilt(pcstr addon_id);
+// The addon whose plugin library is loaded at module_base (Windows: the HMODULE of the loaded copy); nullptr - none
+// (another module, or a platform without the module base: addon_api_imgui.cpp names the file then)
+pcstr PluginAddonIdOfModule(const void* module_base);
 // Ids of every addon found at the start - loaded, failed, skipped or disabled - known before the first plugin loads.
 // Empty before Initialize and after Shutdown.
 const xr_vector<xr_string>& KnownAddonIds();

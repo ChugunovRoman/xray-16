@@ -712,8 +712,6 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
 
         if (partner_equip && !PartnerEquipmentCanMove(iitem, true, "slot", slot_id))
             return false;
-        if (partner_equip)
-            NotePartnerWeaponMove(iitem, slot_id);
 
         /*if (slot_id == GRENADE_SLOT || !new_owner)
         {
@@ -863,8 +861,6 @@ bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_
     const bool from_partner = IsPartnerEquipItem(iitem);
     if (from_partner && !PartnerEquipmentCanMove(iitem, false, "ruck", 0))
         return false;
-    if (from_partner)
-        NotePartnerWeaponMove(iitem, NO_ACTIVE_SLOT);
 
     bool b_own_item = (iitem->parent_id() == m_pActorInvOwner->object_id());
 

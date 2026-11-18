@@ -521,6 +521,7 @@
     <ClInclude Include="addon_api_alife_ext.h" />
     <ClInclude Include="addon_api_world.h" />
     <ClInclude Include="addon_api_extra.h" />
+    <ClInclude Include="addon_api_imgui.h" />
     <ClInclude Include="addon_api_feedback.h" />
     <ClInclude Include="addon_api_character.h" />
     <ClInclude Include="addon_api_inventory_ext.h" />
@@ -534,6 +535,9 @@
     <ClInclude Include="addon_api_common.h" />
     <ClInclude Include="addon_content.h" />
     <ClInclude Include="addon_host.h" />
+    <ClInclude Include="addon_imgui_core.h" />
+    <ClInclude Include="addon_imgui_lua.h" />
+    <ClInclude Include="addon_imgui_tools.h" />
     <ClInclude Include="addon_lua_entry.h" />
     <ClInclude Include="addon_lua_console.h" />
     <ClInclude Include="addon_merge.h" />
@@ -1960,6 +1964,7 @@
     <ClCompile Include="addon_api_alife_ext.cpp" />
     <ClCompile Include="addon_api_world.cpp" />
     <ClCompile Include="addon_api_extra.cpp" />
+    <ClCompile Include="addon_api_imgui.cpp" />
     <ClCompile Include="addon_api_feedback.cpp" />
     <ClCompile Include="addon_api_character.cpp" />
     <ClCompile Include="addon_api_inventory_ext.cpp" />
@@ -1977,6 +1982,10 @@
     <ClCompile Include="addon_api_npc_control.cpp" />
     <ClCompile Include="addon_content.cpp" />
     <ClCompile Include="addon_host.cpp" />
+    <ClCompile Include="addon_imgui_core.cpp" />
+    <ClCompile Include="addon_imgui_lua.cpp" />
+    <ClCompile Include="addon_imgui_lua_widgets.cpp" />
+    <ClCompile Include="addon_imgui_tools.cpp" />
     <ClCompile Include="addon_lua_entry.cpp" />
     <ClCompile Include="addon_lua_console.cpp" />
     <ClCompile Include="addon_merge.cpp" />

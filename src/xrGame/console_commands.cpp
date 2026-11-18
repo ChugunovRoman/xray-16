@@ -45,6 +45,7 @@ int g_bodycamSession=0; // Kept through level teardown; updated by the session s
 #include "addon_api_console.h"
 #include "addon_api_extra.h" // game_on_before_save (plans/addon_api_ideas, group plugin)
 #include "addon_lua_console.h"
+#include "addon_imgui_tools.h"
 #include "addon_binders.h"
 #include "addon_callbacks.h"
 #include "addon_goap.h"
@@ -4214,6 +4215,8 @@ void CCC_RegisterCommands()
     CMD1(CCC_EventList, "event_list");
     CMD1(CCC_AddonPerf, "addon_perf");
     CMD1(CCC_AddonPerfReport, "addon_perf_report");
+    // 20-imgui-addon-tools.md: 0 hides the menu "Addons" of the editor and draws no window of an addon (user.ltx)
+    CMD4(CCC_Integer, "addon_imgui_tools", &gw::addons::imgui_tools::g_enabled, 0, 1);
     CMD1(CCC_EventEngineSources, "gw_event_engine_sources");
     CMD1(CCC_EventSchemaCheck, "gw_event_schema_check");
     CMD1(CCC_EventEngineLog, "gw_event_engine_log");

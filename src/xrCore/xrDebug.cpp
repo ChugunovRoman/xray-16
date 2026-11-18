@@ -1631,11 +1631,42 @@ static void handler_base(const char* reason)
 }
 
 #if defined(XR_PLATFORM_WINDOWS)
+// Release, Mixed, Master Gold (a Debug build, _DEBUG, takes every report to xrDebug::Fail - see the handler).
 // A CRT invalid parameter is recoverable: after this handler returns, the call that reported it returns EINVAL
 // (strcat_s and friends leave an empty string), and the engine goes on. Reporting it through xrDebug::Fail made
 // every one of them fatal - the dialog's Exit, or no dialog at all in Master Gold - over errors the code around
 // them survives. The report below runs CRT conversions of its own, which can report again: the re-entry flag drops
 // those. A stack trace costs a symbol walk, so only the first few reports carry one.
+//
+// Not every report is recoverable: _invalid_parameter_noinfo_noreturn (the STL checks of Release - _STL_VERIFY,
+// _Adjust_manually_vector_aligned on a block freed into the wrong heap - and _CRT_SECURE_INVALID_PARAMETER) calls
+// _invoke_watson once the handler returns, which ends the process by __fastfail: no crash handler, no Sentry, no
+// minidump of ours runs then. Such a report is taken to xrDebug::Fail without Continue, as every report was before.
+// Told apart by the return addresses on the stack: one of them lies inside _invalid_parameter_noinfo_noreturn
+static bool invalid_parameter_ends_process()
+{
+    void* frames[8]{};
+    const USHORT count = RtlCaptureStackBackTrace(0, static_cast<DWORD>(std::size(frames)), frames, nullptr);
+    // With the DLL CRT the addresses of the functions of ucrtbase (the import table); the body of the function is two
+    // calls (_invalid_parameter, _invoke_watson) - the return address of the first one lies near its start. The window
+    // stops at a CRT function that follows it, so that a report of another one is never taken for it
+    const auto begin = reinterpret_cast<uintptr_t>(&_invalid_parameter_noinfo_noreturn);
+    uintptr_t end = begin + 0x80;
+    for (const uintptr_t next : { reinterpret_cast<uintptr_t>(&_invalid_parameter_noinfo),
+             reinterpret_cast<uintptr_t>(&_invoke_watson) })
+    {
+        if (next > begin && next < end)
+            end = next;
+    }
+    for (USHORT i = 0; i < count; ++i)
+    {
+        const auto address = reinterpret_cast<uintptr_t>(frames[i]);
+        if (address > begin && address < end)
+            return true;
+    }
+    return false;
+}
+
 static void invalid_parameter_handler(const wchar_t* expression, const wchar_t* function, const wchar_t* file,
                                       unsigned int line, uintptr_t reserved)
 {
@@ -1669,13 +1700,42 @@ static void invalid_parameter_handler(const wchar_t* expression, const wchar_t* 
     Msg("! [error] invalid parameter: %s | %s at %s:%d [thread: 0x%llX \"%s\"]", mbExpression, mbFunction, mbFile,
         line, static_cast<unsigned long long>(get_current_thread_id()), threadName);
 
-    static u32 s_stack_report_count = 0;
-    constexpr u32 kMaxStackReports = 8;
-    if (s_stack_report_count < kMaxStackReports)
+    if (invalid_parameter_ends_process())
     {
-        ++s_stack_report_count;
+        // The report of Fail carries the stack trace and goes to Sentry; it does not return (no Continue)
+        Msg("! [error] invalid parameter: the CRT ends the process after it (_invalid_parameter_noinfo_noreturn)");
+        FlushLog();
+        const FailNoContinueScope noContinue;
+        bool ignoreAlways = false;
+        xrDebug::Fail(ignoreAlways, { mbFile, int(line), mbFunction }, mbExpression, "invalid parameter");
+        s_tl_reporting = false;
+        return;
+    }
+
+#ifdef _DEBUG
+    // Debug (the debug CRT, _DEBUG; not Mixed - DEBUG with the release CRT): every report is an error of the code that
+    // the developer must see at once - the dialog of xrDebug::Fail with the stack, the dump and Sentry as for any fatal
+    // error. Continue / Ignore always stay (the call returns EINVAL then, as in Release); Exit ends the session.
+    // The debug CRT asserts before it calls this handler (_ASSERT_EXPR of _VALIDATE_RETURN, _RPTF0 of the STL):
+    // its own "Debug Assertion Failed" comes first - Retry breaks into the debugger at the faulty call, Ignore goes on
+    // to this dialog. It is not silenced: _CrtSetReportMode(_CRT_ASSERT, ...) would mute every assert of the CRT, the
+    // heap checks that no invalid parameter follows among them
+    {
+        bool ignoreAlways = false;
+        xrDebug::Fail(ignoreAlways, { mbFile, int(line), mbFunction }, mbExpression, "invalid parameter");
+        s_tl_reporting = false;
+        return;
+    }
+#endif
+
+    // Several threads may report at once: the counter only limits the stack walks, LogStackTrace locks dbghelp itself
+    static std::atomic<u32> s_stack_report_count{ 0 };
+    constexpr u32 kMaxStackReports = 8;
+    const u32 report = s_stack_report_count.fetch_add(1, std::memory_order_relaxed);
+    if (report < kMaxStackReports)
+    {
         xrDebug::LogStackTrace("! [error] invalid parameter: stack trace:");
-        if (s_stack_report_count == kMaxStackReports)
+        if (report + 1 == kMaxStackReports)
             Msg("! [error] invalid parameter: stack traces of further reports are suppressed");
     }
     FlushLog();

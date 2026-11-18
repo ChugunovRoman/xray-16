@@ -72,16 +72,13 @@ void RequestStartupLevelPack();
 // command line keeps its own path
 // (ApplyStartupContentForLevel, after init_game_globals: the save it loads may ask for other content) - nothing is
 // mounted here then. No-op when there is nothing to mount (the game goes on on the base, as without addons)
-// Returns true when it mounted something (the notifications of it come from FinishStartupContentEarly)
+// Returns true when it mounted something. The notifications of it (gw_slots.on_slots_applied, on_merge_report, the
+// addons_content_applied event) come at the first frame of the menu (addon_slots.h FinishStartupContentApplied)
 bool ApplyStartupContentEarly();
 // The Lua state of CAI_Space::init was made before the content of the start was mounted, over the scripts of the base:
 // it is made again here, on the layers (the scripts an addon replaces and the entries of its [lua] part). Only when
 // ApplyStartupContentEarly mounted something
 void RestartLuaForStartupContent();
-// The notifications of the content set mounted by ApplyStartupContentEarly (addon_slots.h
-// FinishStartupContentApplied): right after the Lua state is made and the entries of the addons have run
-// (CAI_Space::RestartScriptEngine). No-op when nothing was mounted early
-void FinishStartupContentEarly();
 // CGamePersistent::OnFrame, its start (no Lua and no deferred event of the engine on the stack): the content set
 void OnFrameLevelPacks();
 // The very end of CGamePersistent::OnAppStart (init_game_globals done, no frame yet), a level load waits from the

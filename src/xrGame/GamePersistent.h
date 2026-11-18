@@ -7,6 +7,7 @@
 #include "weapons_textures_addons_position.h"
 #include "cam_anm_tool.h"
 #include "pda_map_editor.h"
+#include "addon_imgui_tools.h"
 
 class Task;
 class CMainMenu;
@@ -50,6 +51,8 @@ private:
     const CUITexturesAddonsPosition m_wpnTexturesPos;
     const CUICamAnmTool m_camAnmLst;
     const CPdaMapEditor m_pdaMapEditor;
+    // ImGui tools of the addons: the menu "Addons" of the editor and their windows (20-imgui-addon-tools.md)
+    gw::addons::imgui_tools::AddonToolsHost m_addonTools;
     IRender_Sector::sector_id_t m_lastSectorId{ static_cast<IRender_Sector::sector_id_t>(-1) };
 
     void start_logo_intro();

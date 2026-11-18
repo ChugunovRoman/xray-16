@@ -23,6 +23,8 @@
 #include "addon_user_data.h"
 #include "addon_lua_entry.h"
 #include "addon_lua_console.h"
+#include "addon_api_imgui.h" // the ImGui tools of the plugins (20-imgui-addon-tools.md)
+#include "addon_imgui_tools.h"
 #include "addon_slots.h"
 #include "MainMenu.h"
 
@@ -1091,6 +1093,7 @@ void FillEngineApi()
     items::FillEngineApi(g_engine_api);
     user_data::FillEngineApi(g_engine_api);
     extra::FillEngineApi(g_engine_api);              // plans/addon_api_ideas (group plugin)
+    imgui::FillEngineApi(g_engine_api);              // the ImGui tools of the plugins (20-imgui-addon-tools.md)
     g_engine_api.log_set_level = &ApiLogSetLevel;    // P57
     g_engine_api.save_write = &ApiSaveWrite;
     g_engine_api.save_read = &ApiSaveRead;
@@ -2683,11 +2686,30 @@ bool MakeShadowCopy(AddonRecord& addon, const fs::path& original, const xr_strin
     created = !fs::exists(shadow, ec);
     if (created)
     {
-        fs::copy_file(original, shadow, fs::copy_options::overwrite_existing, ec);
+        // Copied under a temporary name and renamed: a copy that exists under its name is whole. The name says which
+        // build it is, and a copy of a previous run is not hashed again (CheckPluginLibrary) - a copy cut by a crash
+        // or a full disk under the final name would load broken at every start until the library changes. The
+        // temporary name starts with the prefix of the plugin: one left by a crash goes with the stale copies below
+#if defined(XR_PLATFORM_WINDOWS)
+        const unsigned long pid = static_cast<unsigned long>(GetCurrentProcessId());
+#else
+        const unsigned long pid = static_cast<unsigned long>(getpid());
+#endif
+        fs::path temporary = shadow;
+        temporary += ("." + std::to_string(pid) + ".tmp").c_str();
+        fs::copy_file(original, temporary, fs::copy_options::overwrite_existing, ec);
+        if (!ec)
+            fs::rename(temporary, shadow, ec);
         if (ec)
         {
-            addon.reason = "cannot copy plugin library to cache";
-            return false;
+            std::error_code rm_ec;
+            fs::remove(temporary, rm_ec);
+            // Another instance of the game sharing the appdata made the same copy meanwhile: it is the same build
+            if (!fs::is_regular_file(shadow, rm_ec))
+            {
+                addon.reason = "cannot copy plugin library to cache";
+                return false;
+            }
         }
     }
 
@@ -2701,6 +2723,12 @@ bool MakeShadowCopy(AddonRecord& addon, const fs::path& original, const xr_strin
             std::error_code rm_ec;
             fs::remove(it->path(), rm_ec);
         }
+    }
+    // The PDB an older build of the loader copied next to the copy (<name>.pdb, tens of megabytes for a debug build):
+    // it is not copied any more (below) - nothing would remove it
+    {
+        std::error_code rm_ec;
+        fs::remove(cache_dir / PathFromUtf8(addon.plugin_name + ".pdb"), rm_ec);
     }
 
     // The folder the plugin was built in goes into the dbghelp search path: a stack trace of a crash names its
@@ -3041,6 +3069,7 @@ void StopPlugin(const GwpPlugin* plugin)
     extra::RemovePluginResources(plugin);
     console::DisablePluginCommands(plugin);
     ReleasePluginWeatherLock(plugin);         // engine gaps P11: its weather lock
+    imgui::RemovePluginTools(plugin);         // its ImGui tools (20-imgui-addon-tools.md): quietly, marked inside a draw
 }
 
 // StopPlugin and the rest, right before the library goes: the planners are destroyed, the variables and ini files
@@ -3664,6 +3693,7 @@ void Shutdown()
     ini::Shutdown();
     console::Shutdown();
     lua_console::Shutdown(); // the console commands of the Lua parts of addons (gap P03)
+    imgui_tools::Shutdown(); // the ImGui tools of the addons (20-imgui-addon-tools.md)
     timers::Shutdown();
     binders::Shutdown();
     storage::Shutdown();
@@ -4744,6 +4774,18 @@ u32 PluginApiBuilt(pcstr addon_id)
             return addon->desc.api_built;
     }
     return 0;
+}
+
+pcstr PluginAddonIdOfModule(const void* module_base)
+{
+    if (!detail::g_addons || !module_base)
+        return nullptr;
+    for (const auto& addon : *detail::g_addons)
+    {
+        if (addon->module_base == module_base)
+            return addon->id.c_str();
+    }
+    return nullptr;
 }
 
 namespace

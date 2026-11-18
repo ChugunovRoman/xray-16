@@ -260,19 +260,11 @@ public:
     // The slot is accepted although the class of the owner refuses it (CInventory::CanPutInSlot)
     bool EquipmentSlotOverride(u16 slot_id) const;
 
-    // npc_equipment.md, the temporary swap of a weapon (decision of the developer 2026-11-15): an equipment_editable
-    // NPC in a fight whose weapons of the slots 2 / 3 have no ammo puts a loaded weapon of its ruck into the slot
-    // (CObjectActionShow) and remembers the weapon it took out - the one the player gave; it goes back when it has
-    // ammo again or the fight is over (CAI_Stalker::update_best_item_info_impl). Runtime only: the addon keeps it in
-    // its save by the ids of the items and sets it again after a load (Lua set_equipment_swapped). A move of the player
-    // in the exchange window drops it (CUIActorMenu::NotePartnerWeaponMove)
-    u16 EquipmentSwapped(u16 slot_id) const; // the id of the weapon taken out of the slot 2 / 3, u16(-1) - none
-    void SetEquipmentSwapped(u16 slot_id, u16 item_id); // u16(-1) clears; slots other than 2 / 3 are ignored
-    bool IsEquipmentSwapped(u16 item_id) const;
-    void ResetEquipmentSwap();
-    // when the NPC last had an enemy (Device.dwTimeGlobal): the end of a fight for the swap
-    u32 EquipmentEnemyTime() const { return m_equipment_enemy_time; }
-    void EquipmentEnemySeen(u32 time) { m_equipment_enemy_time = time; }
+    // npc_equipment.md (decision of the developer 2026-11-18): a weapon of the slots 2 / 3 of an equipment_editable NPC
+    // is always ready to fight while the NPC shoots without ammo (CWeapon::unlimited_ammo - every live stalker: its
+    // reload fills the magazine without boxes), even with no box of its ammo in the inventory. The choice of the weapon
+    // (CAI_Stalker::update_best_item_info_impl) and the ammo of the planner (CObjectPropertyEvaluatorAmmo) take it so
+    bool EquipmentSlotWeaponReady(CInventoryItem* item) const;
 
 protected:
     // GEG_PLAYER_ITEM2SLOT / ITEM2BELT / ITEM2RUCK for an equipment_editable owner (CInventoryOwner::OnEvent)
@@ -280,8 +272,6 @@ protected:
 
 private:
     bool m_equipment_editable{};
-    u16 m_equipment_swap[2]{ u16(-1), u16(-1) }; // [0] - INV_SLOT_2, [1] - INV_SLOT_3
-    u32 m_equipment_enemy_time{};
 };
 
 #include "inventory_owner_inline.h"

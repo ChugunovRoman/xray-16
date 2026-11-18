@@ -6,6 +6,7 @@
 #include "addon_lua_console.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
+#include "addon_imgui_tools.h"
 
 #include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/xr_ioc_cmd.h"
@@ -325,6 +326,8 @@ void LocalizationChanged(pcstr language)
 {
     if (!IsMainThread())
         return;
+    // The titles, menus and tooltips of the ImGui tools of the addons (20-imgui-addon-tools.md)
+    imgui_tools::LocalizationChanged();
     static const GwpEventId id = events::Intern("on_localization_change");
     if (!events::HasSubscribers(id))
         return;

@@ -65,7 +65,8 @@ public:
         return item ? item->id : default_id;
     }
 
-    static int GetMaxIndex() { return m_pItemDataVector->size() - 1; }
+    // Not loaded yet - an empty table: -1
+    static int GetMaxIndex() { return m_pItemDataVector ? int(m_pItemDataVector->size()) - 1 : -1; }
     //удаление статичекого массива
     static void DeleteIdToIndexData();
 };
@@ -84,6 +85,12 @@ TEMPLATE_SPECIALIZATION
 const ITEM_DATA* CSXML_IdToIndex::GetById(const shared_str& str_id, bool no_assert)
 {
     T_INIT::InitXmlIdToIndex();
+    // Not loaded yet (InitInternal of init_game_globals runs after the plugins are loaded) or freed: as an unknown id
+    if (!m_pItemDataVector || !m_pIdMap)
+    {
+        R_ASSERT3(no_assert, "item table is not loaded yet, id", str_id.c_str());
+        return nullptr;
+    }
     const auto found = m_pIdMap->find(str_id);
     if (found == m_pIdMap->end())
     {
@@ -97,7 +104,7 @@ const ITEM_DATA* CSXML_IdToIndex::GetById(const shared_str& str_id, bool no_asse
 TEMPLATE_SPECIALIZATION
 const ITEM_DATA* CSXML_IdToIndex::GetByIndex(int index, bool no_assert)
 {
-    if ((size_t)index >= m_pItemDataVector->size())
+    if (!m_pItemDataVector || (size_t)index >= m_pItemDataVector->size()) // not loaded yet - as not found (GetById)
     {
         R_ASSERT3(no_assert, "item by index not found in files", file_str);
         return nullptr;

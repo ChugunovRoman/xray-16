@@ -117,19 +117,29 @@ void ide::ShowMain()
                     m_tool_added = false;
                 }
                 for (const auto& tool : m_tools)
+                {
+                    // A tool with its own menu (on_main_menu_bar) is not listed here: the tools of the addons
+                    if (!tool->in_tools_menu())
+                        continue;
                     ImGui::MenuItem(tool->tool_name(), nullptr, &tool->get_open_state());
+                }
 
                 ImGui::EndMenu();
             }
         }
+        // Menus of their own (plans/addons_api_support/20-imgui-addon-tools.md): the menu "Addons" of the tools of the
+        // addons is shown without -uidbg too
+        for (const auto& tool : m_tools)
+            tool->on_main_menu_bar();
         if (ImGui::BeginMenu("About"))
         {
-        if (UiDebuggerEnabled)
-        {
-            ImGui::MenuItem("ImGui demo", nullptr, &show_imgui_demo);
-            ImGui::MenuItem("ImGui metrics", nullptr, &show_imgui_metrics);
+            if (UiDebuggerEnabled)
+            {
+                ImGui::MenuItem("ImGui demo", nullptr, &show_imgui_demo);
+                ImGui::MenuItem("ImGui metrics", nullptr, &show_imgui_metrics);
+            }
+            // Always: BeginMenu returned true (without -uidbg the menu was opened and never closed - a broken stack)
             ImGui::EndMenu();
-        }
         }
         ImGui::EndMainMenuBar();
     }
@@ -157,6 +167,16 @@ bool ide::is_shown() const
     for (const auto& tool : m_tools)
     {
         if (tool->get_open_state())
+            return true;
+    }
+    return false;
+}
+
+bool ide::has_light_windows() const
+{
+    for (const auto& tool : m_tools)
+    {
+        if (tool->has_light_windows())
             return true;
     }
     return false;
@@ -192,7 +212,7 @@ void ide::SwitchToNextState()
         break;
 
     case visible_state::full:
-        if (is_shown())
+        if (is_shown() || has_light_windows())
             SetState(visible_state::light);
         else
             SetState(visible_state::hidden);

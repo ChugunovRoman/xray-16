@@ -134,4 +134,10 @@ enum class ELuaCall
 // Lua boolean (false on an error); `error` - the message of the Lua error. Main thread.
 ELuaCall CallLuaProtected(pcstr function, std::initializer_list<LuaCallArg> args, bool* result = nullptr,
     xr_string* error = nullptr);
+
+// The log of a failed callback of an addon (_gw_internal.protected_call / protected_report, the draw of an ImGui tool of
+// an addon): "! [addon:<owner>] <what> failed:" with the message and the Lua stack (text) the first 3 times per
+// owner + what (group, when given) in this Lua state, then one line at the 10th, 100th ... failure. A new Lua state
+// counts again. Main thread.
+void ReportAddonProtectedFailure(pcstr owner, pcstr what, const xr_string& text, pcstr group = nullptr);
 } // namespace gw::addons

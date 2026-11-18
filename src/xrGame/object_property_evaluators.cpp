@@ -56,8 +56,11 @@ CObjectPropertyEvaluatorAmmo::CObjectPropertyEvaluatorAmmo(CWeapon* item, CAI_St
 CObjectPropertyEvaluatorAmmo::_value_type CObjectPropertyEvaluatorAmmo::evaluate()
 {
     PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    // npc_equipment.md: a weapon of the slots 2 / 3 of an equipment_editable NPC "has ammo" while the NPC shoots
+    // without ammo (CInventoryOwner::EquipmentSlotWeaponReady): the reload refills it without boxes, the planner must
+    // not wait for ammo it would never get (fake_get_ammo1)
     if (!m_ammo_type)
-        return (_value_type(!!m_item->GetSuitableAmmoTotal()));
+        return (_value_type(!!m_item->GetSuitableAmmoTotal() || m_object->EquipmentSlotWeaponReady(m_item)));
     else
         return (_value_type(false));
 }

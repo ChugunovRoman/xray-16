@@ -24,6 +24,7 @@
 #include <exception>
 #include <format>
 #include <functional>
+#include <initializer_list>
 #include <new>
 #include <optional>
 #include <span>
@@ -862,6 +863,752 @@ public:
 };
 
 /*
+ * ImGui tools (group imgui, wiki/doc/plugins/api/imgui.md): a window of the plugin in the menu "Addons" of the in-game
+ * editor (F10). The tool is a class with draw(); gwp::Ui wraps the widget table GwpImGuiApi of the engine:
+ *
+ *     class CounterTool final : public gwp::ImGuiTool
+ *     {
+ *     public:
+ *         int clicks = 0;
+ *         void draw(gwp::Ui& ui, const GwpImGuiFrame&) override
+ *         {
+ *             ui.text_fmt("Clicks: {}", clicks);        // formatted here (std::format), shown as it is
+ *             if (ui.button("Click"))
+ *                 ++clicks;
+ *             if (auto table = ui.table("t", 2))         // EndTable in the destructor, only when it began
+ *             {
+ *                 ui.table_next_column(); ui.text("a");
+ *                 ui.table_next_column(); ui.text("b");
+ *             }
+ *         }
+ *     };
+ *     // in on_init: imgui_tool_register(m_tool, {.id = "my_addon_counter", .title = "Counter"});
+ *
+ * The scopes (child, table, tree, combo, tab_bar, popup, id, disabled...) are gwp::UiScope: the end function of the
+ * pair is called in the destructor and only when the pair needs it, so Begin/End stay balanced by construction, also
+ * on an early return or an exception.
+ */
+
+// A size or a position in pixels (the getters of gwp::Ui, ImGuiToolOptions).
+struct UiVec2
+{
+    float x = 0.f;
+    float y = 0.f;
+};
+
+/*
+ * UiScope: the end of a pair of gwp::Ui (RAII). Returned by child(), table(), tree()...: true when the content is to
+ * be drawn (the begin function returned true); the destructor calls the end function when the pair needs it - always
+ * for child / group / id / style / disabled / indent, only after true for table / tree / combo / tab_bar / popup /
+ * menu / tooltip.
+ */
+class UiScope
+{
+public:
+    // An empty scope: false, ends nothing. @group imgui @thread main
+    UiScope() noexcept = default;
+    // open: what the begin function returned; end: the end function of the table to call in the destructor (nullptr -
+    // nothing to end). @group imgui @thread main
+    UiScope(bool open, void(GWP_CALL* end)()) noexcept : m_end(end), m_open(open) {}
+    // @group imgui @thread main
+    ~UiScope() { end(); }
+    // Movable (returned by value), not copyable: one end per begin. @group imgui @thread main
+    UiScope(UiScope&& other) noexcept : m_end(other.m_end), m_open(other.m_open) { other.m_end = nullptr; }
+    UiScope& operator=(UiScope&& other) noexcept
+    {
+        if (this != &other)
+        {
+            end();
+            m_end = other.m_end;
+            m_open = other.m_open;
+            other.m_end = nullptr;
+        }
+        return *this;
+    }
+    UiScope(const UiScope&) = delete;
+    UiScope& operator=(const UiScope&) = delete;
+
+    // True: draw the content of the pair. @group imgui @thread main
+    explicit operator bool() const noexcept { return m_open; }
+
+    // Ends the pair now (the destructor does nothing then). @group imgui @thread main
+    void end() noexcept
+    {
+        if (m_end)
+        {
+            void(GWP_CALL* const fn)() = m_end;
+            m_end = nullptr;
+            fn();
+        }
+    }
+
+private:
+    void(GWP_CALL* m_end)() = nullptr;
+    bool m_open = false;
+};
+
+/*
+ * Ui: the widgets of ImGui for ImGuiTool::draw, a thin wrapper of GwpImGuiApi (the rules of the table apply: see
+ * "ImGui tools of addons" in gwp_api.h). Valid only inside draw. Strings are std::string_view (copied with a NUL: on
+ * the stack up to 255 bytes); a text is shown as it is - text_fmt formats it with std::format first. Values are
+ * references, changed in place; a widget returns true when the value changed (a button - when pressed). Flags are the
+ * constants GWP_IMGUI_*.
+ */
+class Ui
+{
+public:
+    // The table of the engine (draw gets it); gwp::Plugin makes the Ui for ImGuiTool::draw. @group imgui @thread main
+    explicit Ui(const GwpImGuiApi* api) noexcept : m_api(api) {}
+
+    // The raw table: the functions this class does not wrap, GWP_IMGUI_HAS(ui.raw(), field) for the ones appended
+    // later. @group imgui @thread main
+    const GwpImGuiApi* raw() const noexcept { return m_api; }
+
+    // --- layout ---
+
+    // The next widget on the same line. @group imgui @thread main
+    void same_line(float offset_from_start_x = 0.f, float spacing = -1.f) const { m_api->same_line(offset_from_start_x, spacing); }
+    // @group imgui @thread main
+    void new_line() const { m_api->new_line(); }
+    void spacing() const { m_api->spacing(); }
+    void separator() const { m_api->separator(); }
+    // A separator with a text in it. @group imgui @thread main
+    void separator_text(std::string_view label) const { m_api->separator_text(Str(label).c); }
+    // An empty space. @group imgui @thread main
+    void dummy(float w, float h) const { m_api->dummy(w, h); }
+    // The content goes right by w (0 - the style) until the scope ends. @group imgui @thread main
+    [[nodiscard]] UiScope indent(float w = 0.f) const
+    {
+        m_api->indent(w);
+        return UiScope(true, m_api->unindent);
+    }
+    // The widgets of the scope act as one item. @group imgui @thread main
+    [[nodiscard]] UiScope group() const
+    {
+        m_api->begin_group();
+        return UiScope(true, m_api->end_group);
+    }
+    // A scrolling region; w, h 0 - the rest of the window. Ends always (draw its content only when true).
+    // @group imgui @thread main
+    [[nodiscard]] UiScope child(std::string_view id, float w = 0.f, float h = 0.f, uint32_t child_flags = 0,
+        uint32_t window_flags = 0) const
+    {
+        const bool open = m_api->begin_child(Str(id).c, w, h, child_flags, window_flags) != 0;
+        return UiScope(open, m_api->end_child);
+    }
+    // The width of the next widget (< 0 - the rest of the line minus that much). @group imgui @thread main
+    void set_next_item_width(float w) const { m_api->set_next_item_width(w); }
+    // The width of every widget of the scope. @group imgui @thread main
+    [[nodiscard]] UiScope item_width(float w) const
+    {
+        m_api->push_item_width(w);
+        return UiScope(true, m_api->pop_item_width);
+    }
+    // A text before a framed widget on the same line. @group imgui @thread main
+    void align_text_to_frame_padding() const { m_api->align_text_to_frame_padding(); }
+    // The free space from the cursor. @group imgui @thread main
+    UiVec2 content_region_avail() const
+    {
+        UiVec2 v;
+        m_api->get_content_region_avail(&v.x, &v.y);
+        return v;
+    }
+    // @group imgui @thread main
+    UiVec2 window_size() const
+    {
+        UiVec2 v;
+        m_api->get_window_size(&v.x, &v.y);
+        return v;
+    }
+    // The cursor in the window. @group imgui @thread main
+    UiVec2 cursor_pos() const
+    {
+        UiVec2 v;
+        m_api->get_cursor_pos(&v.x, &v.y);
+        return v;
+    }
+    // @group imgui @thread main
+    void set_cursor_pos(float x, float y) const { m_api->set_cursor_pos(x, y); }
+    // The size of a text; wrap_width > 0 - wrapped. @group imgui @thread main
+    UiVec2 calc_text_size(std::string_view text, float wrap_width = 0.f) const
+    {
+        UiVec2 v;
+        m_api->calc_text_size(Str(text).c, wrap_width, &v.x, &v.y);
+        return v;
+    }
+    // @group imgui @thread main
+    float text_line_height() const { return m_api->get_text_line_height(); }
+    float frame_height() const { return m_api->get_frame_height(); }
+
+    // --- text: shown as it is ---
+
+    // @group imgui @thread main
+    void text(std::string_view value) const { m_api->text_n(value.data(), static_cast<uint32_t>(value.size())); }
+    // std::format into a buffer of 1024 bytes on the stack (a longer text is cut at a character), then shown as it
+    // is: a wrong format is a compile error. @group imgui @thread main
+    template <typename... Args>
+    void text_fmt(std::format_string<Args...> fmt, Args&&... args) const
+    {
+        char buffer[1024];
+        const auto result = std::format_to_n(buffer, sizeof(buffer), fmt, std::forward<Args>(args)...);
+        size_t length = result.size < static_cast<std::ptrdiff_t>(sizeof(buffer)) ? static_cast<size_t>(result.size)
+                                                                                  : sizeof(buffer);
+        if (result.size > static_cast<std::ptrdiff_t>(sizeof(buffer)))
+        {
+            // Cut: not in the middle of a UTF-8 character. The last character goes only when its bytes do not all fit
+            // (a whole one right at the end stays; a text of exactly 1024 bytes is not cut at all)
+            size_t start = length;
+            while (start > 0 && (static_cast<unsigned char>(buffer[start - 1]) & 0xC0u) == 0x80u)
+                --start;
+            if (start > 0)
+            {
+                const unsigned lead = static_cast<unsigned char>(buffer[start - 1]);
+                const size_t need = lead >= 0xF0u ? 4 : lead >= 0xE0u ? 3 : lead >= 0xC0u ? 2 : 1;
+                if (start - 1 + need > length)
+                    length = start - 1;
+            }
+        }
+        m_api->text_n(buffer, static_cast<uint32_t>(length));
+    }
+    // 0xAARRGGBB. @group imgui @thread main
+    void text_colored(uint32_t argb, std::string_view value) const { m_api->text_colored(argb, Str(value).c); }
+    // @group imgui @thread main
+    void text_disabled(std::string_view value) const { m_api->text_disabled(Str(value).c); }
+    void text_wrapped(std::string_view value) const { m_api->text_wrapped(Str(value).c); }
+    void label_text(std::string_view label, std::string_view value) const { m_api->label_text(Str(label).c, Str(value).c); }
+    void bullet_text(std::string_view value) const { m_api->bullet_text(Str(value).c); }
+    void bullet() const { m_api->bullet(); }
+    // Texts of the scope wrap at x (0 - the window edge, < 0 - no wrapping). @group imgui @thread main
+    [[nodiscard]] UiScope text_wrap_pos(float wrap_local_pos_x = 0.f) const
+    {
+        m_api->push_text_wrap_pos(wrap_local_pos_x);
+        return UiScope(true, m_api->pop_text_wrap_pos);
+    }
+
+    // --- buttons: true when pressed ---
+
+    // @group imgui @thread main
+    bool button(std::string_view label, float w = 0.f, float h = 0.f) const { return m_api->button(Str(label).c, w, h) != 0; }
+    bool small_button(std::string_view label) const { return m_api->small_button(Str(label).c) != 0; }
+    bool invisible_button(std::string_view id, float w, float h) const { return m_api->invisible_button(Str(id).c, w, h) != 0; }
+    bool arrow_button(std::string_view id, uint32_t dir) const { return m_api->arrow_button(Str(id).c, dir) != 0; }
+    // true when changed. @group imgui @thread main
+    bool checkbox(std::string_view label, bool& value) const
+    {
+        int v = value ? 1 : 0;
+        const bool changed = m_api->checkbox(Str(label).c, &v) != 0;
+        value = v != 0;
+        return changed;
+    }
+    // Toggles the bits flags_value in flags. @group imgui @thread main
+    bool checkbox_flags(std::string_view label, uint32_t& flags, uint32_t flags_value) const
+    {
+        return m_api->checkbox_flags(Str(label).c, &flags, flags_value) != 0;
+    }
+    // true when pressed. @group imgui @thread main
+    bool radio_button(std::string_view label, bool active) const { return m_api->radio_button(Str(label).c, active ? 1 : 0) != 0; }
+    // value becomes button_value when pressed. @group imgui @thread main
+    bool radio_button(std::string_view label, int& value, int button_value) const
+    {
+        const bool pressed = radio_button(label, value == button_value);
+        if (pressed)
+            value = button_value;
+        return pressed;
+    }
+    // fraction 0..1; overlay empty - the percent. @group imgui @thread main
+    void progress_bar(float fraction, std::string_view overlay = "", float w = 0.f, float h = 0.f) const
+    {
+        const Str text(overlay);
+        m_api->progress_bar(fraction, w, h, overlay.empty() ? nullptr : text.c);
+    }
+
+    // --- numbers: true when changed; fmt nullptr - the default of ImGui ---
+
+    // @group imgui @thread main
+    bool slider_float(std::string_view label, float& v, float v_min, float v_max, const char* fmt = nullptr,
+        uint32_t flags = 0) const
+    {
+        return m_api->slider_float(Str(label).c, &v, v_min, v_max, fmt, flags) != 0;
+    }
+    // 2..4 components. @group imgui @thread main
+    bool slider_float_n(std::string_view label, std::span<float> v, float v_min, float v_max, const char* fmt = nullptr,
+        uint32_t flags = 0) const
+    {
+        return m_api->slider_float_n(Str(label).c, v.data(), static_cast<uint32_t>(v.size()), v_min, v_max, fmt, flags) != 0;
+    }
+    // @group imgui @thread main
+    bool slider_int(std::string_view label, int& v, int v_min, int v_max, const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->slider_int(Str(label).c, &v, v_min, v_max, fmt, flags) != 0;
+    }
+    bool slider_int_n(std::string_view label, std::span<int> v, int v_min, int v_max, const char* fmt = nullptr,
+        uint32_t flags = 0) const
+    {
+        return m_api->slider_int_n(Str(label).c, v.data(), static_cast<uint32_t>(v.size()), v_min, v_max, fmt, flags) != 0;
+    }
+    // Radians, the limits in degrees. @group imgui @thread main
+    bool slider_angle(std::string_view label, float& v_rad, float v_degrees_min = -360.f, float v_degrees_max = 360.f,
+        const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->slider_angle(Str(label).c, &v_rad, v_degrees_min, v_degrees_max, fmt, flags) != 0;
+    }
+    // v_min == v_max - no limits. @group imgui @thread main
+    bool drag_float(std::string_view label, float& v, float v_speed = 1.f, float v_min = 0.f, float v_max = 0.f,
+        const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->drag_float(Str(label).c, &v, v_speed, v_min, v_max, fmt, flags) != 0;
+    }
+    bool drag_float_n(std::string_view label, std::span<float> v, float v_speed = 1.f, float v_min = 0.f,
+        float v_max = 0.f, const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->drag_float_n(Str(label).c, v.data(), static_cast<uint32_t>(v.size()), v_speed, v_min, v_max, fmt,
+                   flags) != 0;
+    }
+    bool drag_int(std::string_view label, int& v, float v_speed = 1.f, int v_min = 0, int v_max = 0,
+        const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->drag_int(Str(label).c, &v, v_speed, v_min, v_max, fmt, flags) != 0;
+    }
+    bool drag_int_n(std::string_view label, std::span<int> v, float v_speed = 1.f, int v_min = 0, int v_max = 0,
+        const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->drag_int_n(Str(label).c, v.data(), static_cast<uint32_t>(v.size()), v_speed, v_min, v_max, fmt,
+                   flags) != 0;
+    }
+    // step 0 - no +/- buttons; flags GWP_IMGUI_INPUT_*. @group imgui @thread main
+    bool input_float(std::string_view label, float& v, float step = 0.f, float step_fast = 0.f,
+        const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->input_float(Str(label).c, &v, step, step_fast, fmt, flags) != 0;
+    }
+    bool input_float_n(std::string_view label, std::span<float> v, const char* fmt = nullptr, uint32_t flags = 0) const
+    {
+        return m_api->input_float_n(Str(label).c, v.data(), static_cast<uint32_t>(v.size()), fmt, flags) != 0;
+    }
+    bool input_int(std::string_view label, int& v, int step = 1, int step_fast = 100, uint32_t flags = 0) const
+    {
+        return m_api->input_int(Str(label).c, &v, step, step_fast, flags) != 0;
+    }
+
+    // --- text input: true when the text changed (GWP_IMGUI_INPUT_ENTER_RETURNS_TRUE - on Enter) ---
+
+    // A buffer of the plugin: cap bytes, NUL-terminated, edited in place. @group imgui @thread main
+    bool input_text(std::string_view label, char* buf, uint32_t cap, uint32_t flags = 0) const
+    {
+        return m_api->input_text(Str(label).c, buf, cap, flags) != 0;
+    }
+    // A std::string of at most max_bytes bytes (up to GWP_IMGUI_MAX_INPUT_TEXT - 1, a bigger one is clamped). A longer
+    // value is shown cut (on a UTF-8 boundary) and stays whole until the player edits it. @group imgui @thread main
+    bool input_text(std::string_view label, std::string& value, uint32_t max_bytes = 255, uint32_t flags = 0) const
+    {
+        size_t copied = 0;
+        std::vector<char>& buf = text_buffer(value, max_bytes, GWP_IMGUI_MAX_INPUT_TEXT, copied);
+        const bool changed = m_api->input_text(Str(label).c, buf.data(), static_cast<uint32_t>(buf.size()), flags) != 0;
+        take_text(buf, copied, value);
+        return changed;
+    }
+    // The same with a hint shown while the text is empty. @group imgui @thread main
+    bool input_text_with_hint(std::string_view label, std::string_view hint, std::string& value,
+        uint32_t max_bytes = 255, uint32_t flags = 0) const
+    {
+        size_t copied = 0;
+        std::vector<char>& buf = text_buffer(value, max_bytes, GWP_IMGUI_MAX_INPUT_TEXT, copied);
+        const bool changed = m_api->input_text_with_hint(Str(label).c, Str(hint).c, buf.data(),
+                                 static_cast<uint32_t>(buf.size()), flags) != 0;
+        take_text(buf, copied, value);
+        return changed;
+    }
+    // Several lines, at most max_bytes bytes (up to GWP_IMGUI_MAX_INPUT_TEXT_MULTILINE - 1, a bigger one is clamped);
+    // w, h 0 - auto. @group imgui @thread main
+    bool input_text_multiline(std::string_view label, std::string& value, uint32_t max_bytes = 4095, float w = 0.f,
+        float h = 0.f, uint32_t flags = 0) const
+    {
+        size_t copied = 0;
+        std::vector<char>& buf = text_buffer(value, max_bytes, GWP_IMGUI_MAX_INPUT_TEXT_MULTILINE, copied);
+        const bool changed = m_api->input_text_multiline(Str(label).c, buf.data(), static_cast<uint32_t>(buf.size()), w,
+                                 h, flags) != 0;
+        take_text(buf, copied, value);
+        return changed;
+    }
+
+    // --- choice ---
+
+    // current: the index in items; true when changed. @group imgui @thread main
+    bool combo(std::string_view label, int& current, std::span<const char* const> items,
+        int popup_max_height_in_items = -1) const
+    {
+        return m_api->combo(Str(label).c, &current, items.data(), static_cast<uint32_t>(items.size()),
+                   popup_max_height_in_items) != 0;
+    }
+    // A combo with its own content (selectable items): draw it when true. @group imgui @thread main
+    [[nodiscard]] UiScope combo(std::string_view label, std::string_view preview, uint32_t flags = 0) const
+    {
+        const bool open = m_api->begin_combo(Str(label).c, Str(preview).c, flags) != 0;
+        return UiScope(open, open ? m_api->end_combo : nullptr);
+    }
+    // true when clicked. @group imgui @thread main
+    bool selectable(std::string_view label, bool selected = false, uint32_t flags = 0, float w = 0.f, float h = 0.f) const
+    {
+        return m_api->selectable(Str(label).c, selected ? 1 : 0, flags, w, h) != 0;
+    }
+    // current: the index in items; true when changed. @group imgui @thread main
+    bool list_box(std::string_view label, int& current, std::span<const char* const> items, int height_in_items = -1) const
+    {
+        return m_api->list_box(Str(label).c, &current, items.data(), static_cast<uint32_t>(items.size()),
+                   height_in_items) != 0;
+    }
+    // A list box with its own content: draw it when true. @group imgui @thread main
+    [[nodiscard]] UiScope list_box(std::string_view label, float w = 0.f, float h = 0.f) const
+    {
+        const bool open = m_api->begin_list_box(Str(label).c, w, h) != 0;
+        return UiScope(open, open ? m_api->end_list_box : nullptr);
+    }
+
+    // --- color: 0..1, true when changed ---
+
+    // @group imgui @thread main
+    bool color_edit3(std::string_view label, float (&rgb)[3], uint32_t flags = 0) const
+    {
+        return m_api->color_edit3(Str(label).c, rgb, flags) != 0;
+    }
+    bool color_edit4(std::string_view label, float (&rgba)[4], uint32_t flags = 0) const
+    {
+        return m_api->color_edit4(Str(label).c, rgba, flags) != 0;
+    }
+    // A color square (0xAARRGGBB); true when pressed. @group imgui @thread main
+    bool color_button(std::string_view id, uint32_t argb, uint32_t flags = 0, float w = 0.f, float h = 0.f) const
+    {
+        return m_api->color_button(Str(id).c, argb, flags, w, h) != 0;
+    }
+
+    // --- trees ---
+
+    // A tree node: its children when true (tree_pop in the destructor). @group imgui @thread main
+    [[nodiscard]] UiScope tree(std::string_view label, uint32_t flags = 0) const
+    {
+        const bool open = m_api->tree_node_ex(Str(label).c, flags) != 0;
+        return UiScope(open, open ? m_api->tree_pop : nullptr);
+    }
+    // true - open (nothing to end). @group imgui @thread main
+    bool collapsing_header(std::string_view label, uint32_t flags = 0) const
+    {
+        return m_api->collapsing_header(Str(label).c, flags) != 0;
+    }
+    // The next tree node / header opens or closes (cond GWP_IMGUI_COND_*, 0 - always). @group imgui @thread main
+    void set_next_item_open(bool open, uint32_t cond = 0) const { m_api->set_next_item_open(open ? 1 : 0, cond); }
+
+    // --- tabs ---
+
+    // @group imgui @thread main
+    [[nodiscard]] UiScope tab_bar(std::string_view id, uint32_t flags = 0) const
+    {
+        const bool open = m_api->begin_tab_bar(Str(id).c, flags) != 0;
+        return UiScope(open, open ? m_api->end_tab_bar : nullptr);
+    }
+    // The tab is selected: its content when true. open: nullptr - no close button, else false after a close.
+    // @group imgui @thread main
+    [[nodiscard]] UiScope tab_item(std::string_view label, bool* open = nullptr, uint32_t flags = 0) const
+    {
+        int keep = open && *open ? 1 : 0;
+        const bool selected = m_api->begin_tab_item(Str(label).c, open ? &keep : nullptr, flags) != 0;
+        if (open)
+            *open = keep != 0;
+        return UiScope(selected, selected ? m_api->end_tab_item : nullptr);
+    }
+
+    // --- tables ---
+
+    // columns 1..511; the rows when true (end_table in the destructor). @group imgui @thread main
+    [[nodiscard]] UiScope table(std::string_view id, int columns, uint32_t flags = 0, float outer_w = 0.f,
+        float outer_h = 0.f) const
+    {
+        const bool open = m_api->begin_table(Str(id).c, columns, flags, outer_w, outer_h) != 0;
+        return UiScope(open, open ? m_api->end_table : nullptr);
+    }
+    // @group imgui @thread main
+    void table_next_row(uint32_t row_flags = 0, float min_row_height = 0.f) const { m_api->table_next_row(row_flags, min_row_height); }
+    bool table_next_column() const { return m_api->table_next_column() != 0; }
+    bool table_set_column_index(int column) const { return m_api->table_set_column_index(column) != 0; }
+    void table_setup_column(std::string_view label, uint32_t flags = 0, float init_width_or_weight = 0.f) const
+    {
+        m_api->table_setup_column(Str(label).c, flags, init_width_or_weight);
+    }
+    void table_setup_scroll_freeze(int cols, int rows) const { m_api->table_setup_scroll_freeze(cols, rows); }
+    void table_headers_row() const { m_api->table_headers_row(); }
+    // The columns and the header row in one call: table_setup_column for every label, then table_headers_row.
+    // @group imgui @thread main
+    void table_headers(std::initializer_list<std::string_view> labels) const
+    {
+        for (const std::string_view label : labels)
+            table_setup_column(label);
+        table_headers_row();
+    }
+
+    // --- plots: the engine takes at most GWP_IMGUI_MAX_PLOT_VALUES values ---
+
+    // @group imgui @thread main
+    void plot_lines(std::string_view label, std::span<const float> values, float scale_min = GWP_IMGUI_AUTO_SCALE,
+        float scale_max = GWP_IMGUI_AUTO_SCALE, float w = 0.f, float h = 0.f, std::string_view overlay = "",
+        uint32_t values_offset = 0) const
+    {
+        const Str text(overlay);
+        m_api->plot_lines(Str(label).c, values.data(), static_cast<uint32_t>(values.size()), values_offset,
+            overlay.empty() ? nullptr : text.c, scale_min, scale_max, w, h);
+    }
+    void plot_histogram(std::string_view label, std::span<const float> values, float scale_min = GWP_IMGUI_AUTO_SCALE,
+        float scale_max = GWP_IMGUI_AUTO_SCALE, float w = 0.f, float h = 0.f, std::string_view overlay = "",
+        uint32_t values_offset = 0) const
+    {
+        const Str text(overlay);
+        m_api->plot_histogram(Str(label).c, values.data(), static_cast<uint32_t>(values.size()), values_offset,
+            overlay.empty() ? nullptr : text.c, scale_min, scale_max, w, h);
+    }
+
+    // --- tooltips ---
+
+    // @group imgui @thread main
+    void set_tooltip(std::string_view value) const { m_api->set_tooltip(Str(value).c); }
+    // The tooltip of the last item (when it is hovered). @group imgui @thread main
+    void set_item_tooltip(std::string_view value) const { m_api->set_item_tooltip(Str(value).c); }
+
+    // --- clipboard (write only) ---
+
+    // The text goes to the clipboard of the OS (at most 64 KiB, cut on a UTF-8 boundary); the clipboard is never read.
+    // Appended to GwpImGuiApi later: false - this engine has no set_clipboard_text (nothing is copied).
+    // @group imgui @thread main
+    bool set_clipboard_text(std::string_view value) const
+    {
+        if (!GWP_IMGUI_HAS(m_api, set_clipboard_text))
+            return false;
+        m_api->set_clipboard_text(Str(value).c);
+        return true;
+    }
+    // Widgets in a tooltip. @group imgui @thread main
+    [[nodiscard]] UiScope tooltip() const
+    {
+        const bool open = m_api->begin_tooltip() != 0;
+        return UiScope(open, open ? m_api->end_tooltip : nullptr);
+    }
+    [[nodiscard]] UiScope item_tooltip() const
+    {
+        const bool open = m_api->begin_item_tooltip() != 0;
+        return UiScope(open, open ? m_api->end_tooltip : nullptr);
+    }
+
+    // --- popups ---
+
+    // @group imgui @thread main
+    void open_popup(std::string_view id, uint32_t popup_flags = 0) const { m_api->open_popup(Str(id).c, popup_flags); }
+    // The popup while it is open. @group imgui @thread main
+    [[nodiscard]] UiScope popup(std::string_view id, uint32_t window_flags = 0) const
+    {
+        const bool open = m_api->begin_popup(Str(id).c, window_flags) != 0;
+        return UiScope(open, open ? m_api->end_popup : nullptr);
+    }
+    // A modal popup with a title; open: nullptr - no close button. @group imgui @thread main
+    [[nodiscard]] UiScope popup_modal(std::string_view name, bool* open = nullptr, uint32_t window_flags = 0) const
+    {
+        int keep = open && *open ? 1 : 0;
+        const bool shown = m_api->begin_popup_modal(Str(name).c, open ? &keep : nullptr, window_flags) != 0;
+        if (open)
+            *open = keep != 0;
+        return UiScope(shown, shown ? m_api->end_popup : nullptr);
+    }
+    // A popup on a click on the last item (the right button by default); id empty - the id of the last item.
+    // @group imgui @thread main
+    [[nodiscard]] UiScope popup_context_item(std::string_view id = "", uint32_t popup_flags = 0) const
+    {
+        const Str text(id);
+        const bool open = m_api->begin_popup_context_item(id.empty() ? nullptr : text.c, popup_flags) != 0;
+        return UiScope(open, open ? m_api->end_popup : nullptr);
+    }
+    // @group imgui @thread main
+    void close_current_popup() const { m_api->close_current_popup(); }
+    bool is_popup_open(std::string_view id, uint32_t popup_flags = 0) const
+    {
+        return m_api->is_popup_open(Str(id).c, popup_flags) != 0;
+    }
+
+    // --- menus ---
+
+    // The menu bar of the window (GWP_IMGUI_WINDOW_MENU_BAR). @group imgui @thread main
+    [[nodiscard]] UiScope menu_bar() const
+    {
+        const bool open = m_api->begin_menu_bar() != 0;
+        return UiScope(open, open ? m_api->end_menu_bar : nullptr);
+    }
+    // @group imgui @thread main
+    [[nodiscard]] UiScope menu(std::string_view label, bool enabled = true) const
+    {
+        const bool open = m_api->begin_menu(Str(label).c, enabled ? 1 : 0) != 0;
+        return UiScope(open, open ? m_api->end_menu : nullptr);
+    }
+    // true when clicked; selected: nullptr - no check mark, else toggled. @group imgui @thread main
+    bool menu_item(std::string_view label, std::string_view shortcut = "", bool* selected = nullptr,
+        bool enabled = true) const
+    {
+        const Str keys(shortcut);
+        int value = selected && *selected ? 1 : 0;
+        const bool clicked = m_api->menu_item(Str(label).c, shortcut.empty() ? nullptr : keys.c,
+                                 selected ? &value : nullptr, enabled ? 1 : 0) != 0;
+        if (selected)
+            *selected = value != 0;
+        return clicked;
+    }
+
+    // --- state ---
+
+    // @group imgui @thread main
+    bool is_item_hovered(uint32_t flags = 0) const { return m_api->is_item_hovered(flags) != 0; }
+    bool is_item_active() const { return m_api->is_item_active() != 0; }
+    bool is_item_clicked(int mouse_button = GWP_IMGUI_MOUSE_LEFT) const { return m_api->is_item_clicked(mouse_button) != 0; }
+    bool is_item_edited() const { return m_api->is_item_edited() != 0; }
+    bool is_item_deactivated_after_edit() const { return m_api->is_item_deactivated_after_edit() != 0; }
+    bool is_window_focused(uint32_t flags = 0) const { return m_api->is_window_focused(flags) != 0; }
+    bool is_window_hovered(uint32_t flags = 0) const { return m_api->is_window_hovered(flags) != 0; }
+    void set_keyboard_focus_here(int offset = 0) const { m_api->set_keyboard_focus_here(offset); }
+    void set_item_default_focus() const { m_api->set_item_default_focus(); }
+
+    // --- ids and style: scopes ---
+
+    // The ids of the widgets of the scope include this one. @group imgui @thread main
+    [[nodiscard]] UiScope id(std::string_view value) const
+    {
+        m_api->push_id_str(Str(value).c);
+        return UiScope(true, m_api->pop_id);
+    }
+    [[nodiscard]] UiScope id(int value) const
+    {
+        m_api->push_id_int(value);
+        return UiScope(true, m_api->pop_id);
+    }
+    // A color of the style (GWP_IMGUI_COL_*, 0xAARRGGBB) for the scope. @group imgui @thread main
+    [[nodiscard]] UiScope style_color(uint32_t idx, uint32_t argb) const
+    {
+        m_api->push_style_color(idx, argb);
+        return UiScope(true, m_api->pop_style_color);
+    }
+    // A variable of the style (GWP_IMGUI_STYLE_*) for the scope: (float) or (vec2). @group imgui @thread main
+    [[nodiscard]] UiScope style_var(uint32_t idx, float value) const
+    {
+        m_api->push_style_var_float(idx, value);
+        return UiScope(true, m_api->pop_style_var);
+    }
+    [[nodiscard]] UiScope style_var(uint32_t idx, float x, float y) const
+    {
+        m_api->push_style_var_vec2(idx, x, y);
+        return UiScope(true, m_api->pop_style_var);
+    }
+    // The widgets of the scope are grayed out and inactive (when disabled). @group imgui @thread main
+    [[nodiscard]] UiScope disabled(bool disabled = true) const
+    {
+        m_api->begin_disabled(disabled ? 1 : 0);
+        return UiScope(true, m_api->end_disabled);
+    }
+
+private:
+    // A NUL-terminated copy of a string_view for the C table: on the stack up to 255 bytes, on the heap above
+    struct Str
+    {
+        char small[256];
+        std::string big;
+        const char* c = small;
+        explicit Str(std::string_view value)
+        {
+            if (value.size() < sizeof(small))
+            {
+                if (!value.empty())
+                    std::memcpy(small, value.data(), value.size());
+                small[value.size()] = '\0';
+            }
+            else
+            {
+                big.assign(value);
+                c = big.c_str();
+            }
+        }
+        Str(const Str&) = delete;
+        Str& operator=(const Str&) = delete;
+    };
+
+    // The buffer of input_text for a std::string: max_bytes + 1 bytes with the text (one per thread, reused).
+    // max_bytes is clamped to the limit of the engine (limit - 1: a bigger buffer would only cost memory, the engine
+    // uses `limit` bytes of it). A value longer than max_bytes is cut in the buffer only, on a UTF-8 boundary; copied -
+    // the bytes put into the buffer (take_text)
+    static std::vector<char>& text_buffer(const std::string& value, uint32_t max_bytes, uint32_t limit, size_t& copied)
+    {
+        thread_local std::vector<char> buffer;
+        if (max_bytes > limit - 1)
+            max_bytes = limit - 1;
+        buffer.resize(static_cast<size_t>(max_bytes) + 1);
+        size_t length = value.size() < max_bytes ? value.size() : max_bytes;
+        if (length < value.size())
+        {
+            while (length > 0 && (static_cast<unsigned char>(value[length]) & 0xC0u) == 0x80u)
+                --length;
+        }
+        if (length)
+            std::memcpy(buffer.data(), value.data(), length);
+        buffer[length] = '\0';
+        copied = length;
+        return buffer;
+    }
+    // The text back into the string when the widget changed it (also without "changed": ENTER_RETURNS_TRUE). A buffer
+    // that still holds what text_buffer copied leaves the value as it is: merely showing a value longer than max_bytes
+    // does not cut it (review 2026-11-18)
+    static void take_text(const std::vector<char>& buffer, size_t copied, std::string& value)
+    {
+        const char* text = buffer.data();
+        const size_t length = std::strlen(text);
+        if (length == copied && std::memcmp(text, value.data(), length) == 0)
+            return;
+        value.assign(text, length);
+    }
+
+    const GwpImGuiApi* m_api = nullptr;
+};
+
+/*
+ * ImGuiTool: a window of the plugin (Plugin::imgui_tool_register). The engine calls the methods on the main thread,
+ * inside the ImGui frame of the editor. draw: every frame while the window is open and the editor (F10) is not
+ * hidden; inside the window (the engine makes Begin/End of it); `ui` is valid until draw returns. An exception from a
+ * method is caught by gwp::Plugin: logged, the window closes (the scopes of the stack end on the way out).
+ * The object must live until imgui_tool_unregister or the unload of the plugin (a member of the plugin class).
+ */
+class ImGuiTool
+{
+public:
+    // @group imgui @thread main
+    ImGuiTool() = default;
+    virtual ~ImGuiTool() = default;
+
+    // The content of the window. frame.flags: GWP_IMGUI_FRAME_LIGHT (the light state: no input),
+    // GWP_IMGUI_FRAME_FIRST (the first draw after the window opened), GWP_IMGUI_FRAME_IN_GAME. @group imgui @thread main
+    virtual void draw(Ui& ui, const GwpImGuiFrame& frame) = 0;
+    // The window opened (the menu, imgui_tool_set_open, the open flag of imgui.ini): before its first draw.
+    // @group imgui @thread main
+    virtual void on_open() {}
+    // The window closed (the cross, the menu, imgui_tool_set_open, imgui_tool_unregister). Not called when the plugin
+    // stops or is unloaded. @group imgui @thread main
+    virtual void on_close() {}
+};
+
+// Plugin::imgui_tool_register: the fields of GwpImGuiToolDesc (the same rules; empty strings - NULL).
+struct ImGuiToolOptions
+{
+    std::string id;            // a-z 0-9 _ . -, 2..63 bytes, "<addon id>_..."; unique among all the tools
+    std::string title;         // the id of a string or the text; empty - the id
+    std::string menu;          // the submenu of "Addons" ("My addon/Debug"); empty - the addon id
+    std::string tooltip;       // the hint of the menu item; empty - none
+    uint32_t flags = 0;        // GWP_IMGUI_TOOL_*
+    uint32_t window_flags = 0; // GWP_IMGUI_WINDOW_*
+    int32_t order = 0;         // the order inside the submenu (lower - higher)
+    UiVec2 size;               // the size at the first open, 0 - auto
+    UiVec2 pos;                // the position at the first open, (0, 0) - ImGui decides
+    UiVec2 min_size;           // the smallest size, 0 - none
+};
+
+/*
  * Plugin: base class of a C++ plugin. Takes over the protocol of the C ABI, so a plugin is a class with the
  * handlers it needs:
  *
@@ -887,6 +1634,7 @@ public:
  *    alife_on_start, alife_on_before_save and alife_on_load;
  *  - timers: timer_start without an event name, expired timers come to on_timer(name);
  *  - binders: bind(class_id, section_mask, binder) attaches a gwp::Binder to the matching objects.
+ *  - ImGui tools: imgui_tool_register(tool, options) puts a gwp::ImGuiTool into the menu "Addons" of the editor.
  * The raw API stays available through api() and self(). Every handler runs on the main thread.
  * The object is created in gwp_plugin_init and destroyed right after on_unload, while the engine API is still valid.
  */
@@ -1108,6 +1856,98 @@ public:
         if (!next)
             return GWP_OK;
         return user_data_write(name, *next);
+    }
+
+    // --- ImGui tools (group imgui, wiki/doc/plugins/api/imgui.md) ------------------------------------------------
+    // A window of the plugin in the menu "Addons" of the editor (F10): a gwp::ImGuiTool. The engine removes the tools
+    // by itself when the plugin stops (unload, crash, plugin_reload): register them in on_init.
+
+    // The engine has the group (imgui_tool_register): an older one answers GWP_ERROR_NOT_SUPPORTED below.
+    // @group imgui @thread any
+    bool has_imgui_tools() const noexcept { return m_api != nullptr && GWP_API_HAS(m_api, imgui_tool_register); }
+
+    // Registers `tool` (imgui_tool_register of the engine: the codes are its codes). The engine calls its draw /
+    // on_open / on_close; an exception from them is logged and closes the window. `tool` must live until
+    // imgui_tool_unregister or the unload of the plugin. @group imgui @thread main
+    GwpResult imgui_tool_register(ImGuiTool& tool, const ImGuiToolOptions& options)
+    {
+        if (!has_imgui_tools())
+            return GWP_ERROR_NOT_SUPPORTED;
+        // A node freed by imgui_tool_unregister is reused: the deque never shrinks (the engine keeps its address)
+        ImGuiToolNode* node = nullptr;
+        for (ImGuiToolNode& n : m_imgui_tools)
+        {
+            if (!n.tool)
+            {
+                node = &n;
+                break;
+            }
+        }
+        if (!node)
+            node = &m_imgui_tools.emplace_back();
+        node->owner = this;
+        node->tool = &tool;
+        node->id = options.id;
+        GwpImGuiToolDesc desc{};
+        desc.size = sizeof(desc);
+        desc.flags = options.flags;
+        desc.id = node->id.c_str();
+        desc.title = options.title.empty() ? nullptr : options.title.c_str();
+        desc.menu = options.menu.empty() ? nullptr : options.menu.c_str();
+        desc.tooltip = options.tooltip.empty() ? nullptr : options.tooltip.c_str();
+        desc.draw = &imgui_draw_trampoline;
+        desc.on_open = &imgui_open_trampoline;
+        desc.on_close = &imgui_close_trampoline;
+        desc.user = node;
+        desc.window_flags = options.window_flags;
+        desc.order = options.order;
+        desc.size_w = options.size.x;
+        desc.size_h = options.size.y;
+        desc.pos_x = options.pos.x;
+        desc.pos_y = options.pos.y;
+        desc.min_w = options.min_size.x;
+        desc.min_h = options.min_size.y;
+        const GwpResult result = m_api->imgui_tool_register(m_self, &desc);
+        if (result != GWP_OK)
+            node->tool = nullptr;
+        return result;
+    }
+
+    // Removes a tool of this plugin: an open window gets on_close. @group imgui @thread main
+    GwpResult imgui_tool_unregister(std::string_view id)
+    {
+        if (!has_imgui_tools())
+            return GWP_ERROR_NOT_SUPPORTED;
+        const std::string key(id);
+        const GwpResult result = m_api->imgui_tool_unregister(m_self, key.c_str());
+        if (result == GWP_OK || result == GWP_ERROR_NOT_FOUND)
+        {
+            for (ImGuiToolNode& n : m_imgui_tools)
+            {
+                if (n.tool && n.id == key)
+                    n.tool = nullptr;
+            }
+        }
+        return result;
+    }
+
+    // Opens or closes a tool (any addon's); show_editor: the editor goes to the full state (the window is seen).
+    // @group imgui @thread main
+    GwpResult imgui_tool_set_open(std::string_view id, bool open, bool show_editor = false)
+    {
+        if (!has_imgui_tools())
+            return GWP_ERROR_NOT_SUPPORTED;
+        const std::string key(id);
+        return m_api->imgui_tool_set_open(m_self, key.c_str(), open ? 1 : 0, show_editor ? GWP_IMGUI_SHOW_EDITOR : 0u);
+    }
+
+    // The window is open or asked to open; false for an engine without the group. @group imgui @thread main
+    bool imgui_tool_is_open(std::string_view id) const
+    {
+        if (!has_imgui_tools())
+            return false;
+        const std::string key(id);
+        return m_api->imgui_tool_is_open(m_self, key.c_str()) != 0;
     }
 
 protected:
@@ -1761,6 +2601,73 @@ private:
             m_log.warn("save block version {} ({} bytes) is truncated or has another layout", version, size);
     }
 
+    // A registered ImGui tool: the engine keeps the address (GwpImGuiToolDesc::user)
+    struct ImGuiToolNode
+    {
+        Plugin* owner = nullptr;
+        ImGuiTool* tool = nullptr; // nullptr - free for imgui_tool_register
+        std::string id;
+    };
+
+    // An exception from a method of the tool: logged, the window closes (on_close comes from the engine at once)
+    void imgui_tool_failed(ImGuiToolNode& node, const char* method, const char* what) noexcept
+    {
+        m_log.error("ImGui tool '{}' {} failed: {} (the window is closed)", node.id, method, what);
+        m_api->imgui_tool_set_open(m_self, node.id.c_str(), 0, 0u);
+    }
+
+    template <typename F>
+    static void imgui_tool_call(void* user, const char* method, F&& fn) noexcept
+    {
+        auto* node = static_cast<ImGuiToolNode*>(user);
+        if (!node || !node->tool)
+            return;
+        try
+        {
+            fn(*node->tool);
+        }
+        catch (const std::exception& e)
+        {
+            node->owner->imgui_tool_failed(*node, method, e.what());
+        }
+        catch (...)
+        {
+            node->owner->imgui_tool_failed(*node, method, "unknown exception");
+        }
+    }
+    static void GWP_CALL imgui_draw_trampoline(void* user, const GwpImGuiApi* ui, const GwpImGuiFrame* frame) noexcept
+    {
+        if (!ui || !frame)
+            return;
+        imgui_tool_call(user, "draw", [ui, frame](ImGuiTool& tool) {
+            Ui wrapper(ui);
+            tool.draw(wrapper, *frame);
+        });
+    }
+    static void GWP_CALL imgui_open_trampoline(void* user) noexcept
+    {
+        imgui_tool_call(user, "on_open", [](ImGuiTool& tool) { tool.on_open(); });
+    }
+    static void GWP_CALL imgui_close_trampoline(void* user) noexcept
+    {
+        // An exception from on_close is only logged: the window is closed already
+        auto* node = static_cast<ImGuiToolNode*>(user);
+        if (!node || !node->tool)
+            return;
+        try
+        {
+            node->tool->on_close();
+        }
+        catch (const std::exception& e)
+        {
+            node->owner->m_log.error("ImGui tool '{}' on_close failed: {}", node->id, e.what());
+        }
+        catch (...)
+        {
+            node->owner->m_log.error("ImGui tool '{}' on_close failed: unknown exception", node->id);
+        }
+    }
+
     const GwpEngineApi* m_api = nullptr;
     const GwpPlugin* m_self = nullptr;
     Logger m_log;
@@ -1769,6 +2676,7 @@ private:
     bool m_timer_subscribed = false;
     std::deque<Subscription> m_subscriptions; // deque: the engine keeps pointers to the elements
     std::deque<Binding> m_bindings;           // same; freed nodes are reused by bind
+    std::deque<ImGuiToolNode> m_imgui_tools;  // same; freed nodes are reused by imgui_tool_register
 };
 } // namespace gwp
 
@@ -1778,8 +2686,12 @@ private:
  * version of the headers, GWP_API_VERSION; see Plugin::init).
  *     GWP_DEFINE_PLUGIN(MyPlugin)
  *     GWP_DEFINE_PLUGIN(MyPlugin, GWP_MAKE_VERSION(0, 1, 0))
+ * GWP_DEFINE_PLUGIN_EXPAND makes the list of arguments be split again: the traditional preprocessor of MSVC (without
+ * /Zc:preprocessor) passes __VA_ARGS__ on to GWP_DEFINE_PLUGIN_IMPL as one argument, so the form with api_min would put
+ * "MyPlugin, api_min" into Type. The extra pass changes nothing for a conforming preprocessor.
  */
-#define GWP_DEFINE_PLUGIN(...) GWP_DEFINE_PLUGIN_IMPL(__VA_ARGS__, GWP_API_VERSION, )
+#define GWP_DEFINE_PLUGIN_EXPAND(x) x
+#define GWP_DEFINE_PLUGIN(...) GWP_DEFINE_PLUGIN_EXPAND(GWP_DEFINE_PLUGIN_IMPL(__VA_ARGS__, GWP_API_VERSION, ))
 #define GWP_DEFINE_PLUGIN_IMPL(Type, api_min, ...)                                                        \
     GWP_PLUGIN_INIT                                                                                       \
     {                                                                                                     \

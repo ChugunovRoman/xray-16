@@ -4602,6 +4602,9 @@
     <ClInclude Include="addon_api_extra.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
+    <ClInclude Include="addon_api_imgui.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_api_feedback.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
@@ -4663,6 +4666,15 @@
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_lua_entry.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_imgui_core.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_imgui_lua.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_imgui_tools.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_lua_console.h">
@@ -7822,6 +7834,9 @@
     <ClCompile Include="addon_api_extra.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
+    <ClCompile Include="addon_api_imgui.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
     <ClCompile Include="addon_api_feedback.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
@@ -7895,6 +7910,18 @@
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_lua_entry.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_imgui_core.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_imgui_lua.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_imgui_lua_widgets.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_imgui_tools.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_lua_console.cpp">

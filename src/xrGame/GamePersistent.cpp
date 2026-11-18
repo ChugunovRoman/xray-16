@@ -4,6 +4,7 @@
 #include "addon_content.h"
 #include "addon_api_console.h"
 #include "addon_lua_console.h"
+#include "addon_imgui_tools.h"
 #include "addon_object_events.h"
 #include "level_pack.h"
 #include "GamePersistent.h"
@@ -160,17 +161,10 @@ void CGamePersistent::OnAppStart()
     // UI().OnUIReset, MainMenu::RestartScripts): that is the freeze at the menu. A level load of the command line keeps
     // its own path (the end of this function: the save it loads may ask for other content) - nothing is mounted here
     gw::RequestStartupLevelPack();
-    if (gw::ApplyStartupContentEarly())
-    {
-        // The Lua state of CAI_Space::init was made over the scripts of the base: it is made again on the layers
-        gw::RestartLuaForStartupContent();
-        // The notifications that the content set is applied need that state (addon_slots.cpp)
-        gw::FinishStartupContentEarly();
-    }
+    const bool content_early = gw::ApplyStartupContentEarly();
 
     // init game globals: read over the layers of the addons mounted above (addon_slots.cpp ReloadContentConfigs does it
-    // again on a switch of the content). Always after the wait below (the first frame of the menu,
-    // ApplyStartupContentForLevel at the end)
+    // again on a switch of the content), in parallel with the UI core below
 #ifndef XR_PLATFORM_WINDOWS
     init_game_globals();
 #else
@@ -180,6 +174,23 @@ void CGamePersistent::OnAppStart()
     GEnv.UI = xr_new<UICore>();
     GEnv.UI->Focus().RegisterDebuggable();
     xray::StartupMark("app_ui_core"); // 50z1: fonts, UI textures
+
+    // 50z1-startup-addon-content.md: the communities, their relations, the ranks, the profiles, the info portions and
+    // the dialogs are read before any Lua of the menu runs - the Lua restart below runs on_load of the addons, the main
+    // menu runs its scripts, and both may ask for them (relation_registry, the Plugin API of a plugin's handler): a table
+    // being filled on the task must not be read. The task overlaps the UI core, the longest part
+#ifdef XR_PLATFORM_WINDOWS
+    TaskScheduler->Wait(initializeGlobals);
+#endif
+    xray::StartupMark("app_game_globals_wait"); // 50z1: the wait for init_game_globals (xml of dialogs, profiles)
+    if (content_early)
+    {
+        // The Lua state of CAI_Space::init was made over the scripts of the base: it is made again on the layers, with
+        // the UI core and the game globals there (on_load of the addons ran with both before the early mount too - at
+        // the first frame of the menu). The notifications that the content set is applied wait for the first frame of
+        // the menu (they talk to the menu, addon_slots.cpp FinishStartupContentApplied)
+        gw::RestartLuaForStartupContent();
+    }
     m_pMainMenu = xr_new<CMainMenu>();
     xray::StartupMark("app_main_menu_object"); // 50z1: the script engine (plugins, class scripts), CMainMenu
     if (GEnv.isDedicatedServer)
@@ -202,10 +213,7 @@ void CGamePersistent::OnAppStart()
     ansel->Init();
 #endif
 
-#ifdef XR_PLATFORM_WINDOWS
-    TaskScheduler->Wait(initializeGlobals);
-#endif
-    xray::StartupMark("app_game_globals_wait"); // 50z1: Ansel, the wait for init_game_globals (xml of dialogs, profiles)
+    xray::StartupMark("app_ansel"); // 50z1: Ansel (init_game_globals is waited for above, before the menu)
 
     // A level load right away from the command line (-start, its KERNEL:start waits for the first frame): no menu to
     // mount the content at - it is mounted now, before the level. After the wait: init_game_globals reads the files
@@ -701,6 +709,9 @@ void CGamePersistent::OnFrame()
         gw::addons::console::OnFrame();
         // addons.register_command: commands typed outside the logic thread, removed commands (gap P03)
         gw::addons::lua_console::OnFrame();
+        // addons.register_imgui_tool: tool.defer functions, the asked state of the editor, imgui.ini marks
+        // (20-imgui-addon-tools.md; the host draws later in this frame, ide is on seqFrame with priority -5)
+        gw::addons::imgui_tools::OnFrame();
     }
     // 10-location-packs.md: a switch of the location pack asked for (Lua level_pack.switch, the start of the game)
     gw::OnFrameLevelPacks();

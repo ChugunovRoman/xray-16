@@ -323,7 +323,6 @@ bool CUIActorMenu::ToPartnerRuck(CUICellItem* itm, bool b_use_cursor_pos, bool w
             new_owner->SetItem(cell);
 
         PIItem cell_item = static_cast<PIItem>(cell->m_pData);
-        NotePartnerWeaponMove(cell_item, NO_ACTIVE_SLOT);
         if (IsPartnerEquipItem(cell_item))
         {
             // the partner's own item (its slot, belt): to its ruck at once, as ToBag does for the actor
@@ -382,17 +381,6 @@ void CUIActorMenu::SendEvent_PartnerItem2Place(PIItem pItem, u16 event_type, u16
     default: PlaySnd(eItemToRuck); break;
     }
     clear_highlight_lists();
-}
-
-void CUIActorMenu::NotePartnerWeaponMove(PIItem item, u16 target_slot)
-{
-    if (!m_pEquipOwner || !item)
-        return;
-    const bool to_weapon_slot = target_slot == INV_SLOT_2 || target_slot == INV_SLOT_3;
-    const bool from_weapon_slot = IsPartnerEquipItem(item) && m_pEquipOwner->inventory().InSlot(item) &&
-        (item->CurrSlot() == INV_SLOT_2 || item->CurrSlot() == INV_SLOT_3);
-    if (to_weapon_slot || from_weapon_slot || m_pEquipOwner->IsEquipmentSwapped(item->object_id()))
-        m_pEquipOwner->ResetEquipmentSwap();
 }
 
 void CUIActorMenu::SendEvent_PartnerItem2Actor(PIItem pItem)

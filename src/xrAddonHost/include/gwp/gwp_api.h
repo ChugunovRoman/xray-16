@@ -1031,6 +1031,576 @@ typedef void(GWP_CALL* GwpAsyncFn)(void* user);
 #define GWP_DRAW_MAX_ID 56u
 
 /* ------------------------------------------------------------------------- */
+/* ImGui tools of addons (group imgui)                                        */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * A window of the plugin in the menu "Addons" of the in-game editor (F10): imgui_tool_register (GwpEngineApi) gives
+ * the engine a GwpImGuiToolDesc; while the window is open and the editor is not hidden, the engine calls its `draw`
+ * every frame - on the main thread, inside the window (the engine makes Begin/End of it), between NewFrame and
+ * EndFrame of the ImGui frame. `draw` gets GwpImGuiApi: the widgets of ImGui as a table of C functions of the engine
+ * (a stable ABI of GW, not the ABI of ImGui: the plugin has no ImGui of its own and needs no headers of it).
+ * Rules of the table (wiki/doc/plugins/api/imgui.md):
+ *  - Only inside `draw` of a tool: the pointer is valid until `draw` returns. A call outside of it does nothing and
+ *    returns 0 (a warning once per plugin module).
+ *  - Strings are UTF-8 and NUL-terminated; a text is shown as it is, never as a printf format (format it yourself).
+ *    `fmt` of a slider / drag / input is the one exception: exactly one conversion of the type of the widget
+ *    (%d %i %u %x %X for the int widgets, %f %F %e %E %g %G for the float ones, flags, width and precision allowed,
+ *    plus any "%%"), at most 64 bytes; NULL - the default of ImGui; anything else is replaced by the default (a
+ *    warning once per tool).
+ *  - A label is the id of the widget too: "Text##id" shows "Text", the id uses the whole label ("##id" - no text).
+ *  - Pairs: begin_child / begin_group / push_id_* / push_style_* / push_item_width / push_text_wrap_pos /
+ *    begin_disabled / indent need their end_* / pop_* / unindent always; begin_table / begin_combo / begin_list_box
+ *    / begin_menu / begin_menu_bar / begin_popup* / begin_tooltip / begin_item_tooltip / begin_tab_bar /
+ *    begin_tab_item / tree_node* need theirs only when they returned non-zero. An end_* without its begin_* (or out
+ *    of order) does nothing and warns once per tool; what `draw` left open the engine closes (a warning once per
+ *    tool). At most GWP_IMGUI_MAX_STACK_DEPTH pairs open at once: a begin_* over that does nothing and returns 0.
+ *  - Flags are the constants GWP_IMGUI_* below (values of GW, not of ImGui: the engine translates them); unknown bits
+ *    are ignored with a warning once per tool. Booleans: int, 0 - false, anything else - true; returned 0 or 1.
+ *  - Colors: uint32_t 0xAARRGGBB (as draw_* of the group level), or float[3] / float[4] 0..1 for the color editors.
+ *  - Limits: GWP_IMGUI_MAX_INPUT_TEXT / GWP_IMGUI_MAX_INPUT_TEXT_MULTILINE bytes of a text buffer (a bigger `cap`
+ *    is used up to the limit), GWP_IMGUI_MAX_LIST_ITEMS items of combo / list_box, GWP_IMGUI_MAX_PLOT_VALUES values of
+ *    a plot (more is cut, a warning once per tool).
+ * The table grows by appending: check a function added later with GWP_IMGUI_HAS(ui, field). The functions of the
+ * first version (up to begin_disabled / end_disabled) are all there when imgui_tool_register is (GWP_API_HAS).
+ */
+
+/* GwpImGuiFrame::flags */
+#define GWP_IMGUI_FRAME_LIGHT 0x1u   /* the light state of the editor: the window is transparent and takes no input */
+#define GWP_IMGUI_FRAME_FIRST 0x2u   /* the first draw after the window opened */
+#define GWP_IMGUI_FRAME_IN_GAME 0x4u /* a level is loaded and the actor is there (else the main menu, a load...) */
+
+/* GwpImGuiToolDesc::flags */
+#define GWP_IMGUI_TOOL_DEV_ONLY 0x1u      /* shown only with the keys -uidbg / -dbg / -addon_debug */
+#define GWP_IMGUI_TOOL_HIDE_IN_LIGHT 0x2u /* not drawn in the light state of the editor */
+#define GWP_IMGUI_TOOL_NO_SAVE_OPEN 0x4u  /* the open flag is not kept in imgui.ini (closed after a restart) */
+
+/* imgui_tool_set_open flags */
+#define GWP_IMGUI_SHOW_EDITOR 0x1u /* open: the editor goes to the full state at the next frame (the window is seen) */
+
+/* Window flags: GwpImGuiToolDesc::window_flags, begin_child, begin_popup, begin_popup_modal. */
+#define GWP_IMGUI_WINDOW_AUTO_RESIZE 0x1u          /* the size follows the content */
+#define GWP_IMGUI_WINDOW_NO_RESIZE 0x2u            /* the player cannot resize it */
+#define GWP_IMGUI_WINDOW_NO_COLLAPSE 0x4u          /* no collapse button (tool windows) */
+#define GWP_IMGUI_WINDOW_NO_SCROLLBAR 0x8u         /* no vertical scrollbar (the wheel still scrolls) */
+#define GWP_IMGUI_WINDOW_HORIZONTAL_SCROLLBAR 0x10u /* a horizontal scrollbar when the content is wider */
+#define GWP_IMGUI_WINDOW_MENU_BAR 0x20u            /* a menu bar: begin_menu_bar works in it */
+
+/* begin_child child_flags */
+#define GWP_IMGUI_CHILD_BORDERS 0x1u                 /* a border and the padding of a window */
+#define GWP_IMGUI_CHILD_ALWAYS_USE_WINDOW_PADDING 0x2u /* the padding without a border */
+#define GWP_IMGUI_CHILD_RESIZE_X 0x4u                /* the player may resize it by the right edge */
+#define GWP_IMGUI_CHILD_RESIZE_Y 0x8u                /* ... by the bottom edge */
+#define GWP_IMGUI_CHILD_AUTO_RESIZE_X 0x10u          /* the width follows the content */
+#define GWP_IMGUI_CHILD_AUTO_RESIZE_Y 0x20u          /* the height follows the content */
+#define GWP_IMGUI_CHILD_FRAME_STYLE 0x40u            /* drawn like a frame of a widget */
+
+/* begin_table flags. One GWP_IMGUI_TABLE_SIZING_* at most (several - the first of them in this order). */
+#define GWP_IMGUI_TABLE_RESIZABLE 0x1u
+#define GWP_IMGUI_TABLE_REORDERABLE 0x2u
+#define GWP_IMGUI_TABLE_HIDEABLE 0x4u
+#define GWP_IMGUI_TABLE_CONTEXT_MENU_IN_BODY 0x8u
+#define GWP_IMGUI_TABLE_ROW_BG 0x10u
+#define GWP_IMGUI_TABLE_BORDERS_INNER_H 0x20u
+#define GWP_IMGUI_TABLE_BORDERS_OUTER_H 0x40u
+#define GWP_IMGUI_TABLE_BORDERS_INNER_V 0x80u
+#define GWP_IMGUI_TABLE_BORDERS_OUTER_V 0x100u
+#define GWP_IMGUI_TABLE_BORDERS_H (GWP_IMGUI_TABLE_BORDERS_INNER_H | GWP_IMGUI_TABLE_BORDERS_OUTER_H)
+#define GWP_IMGUI_TABLE_BORDERS_V (GWP_IMGUI_TABLE_BORDERS_INNER_V | GWP_IMGUI_TABLE_BORDERS_OUTER_V)
+#define GWP_IMGUI_TABLE_BORDERS_INNER (GWP_IMGUI_TABLE_BORDERS_INNER_H | GWP_IMGUI_TABLE_BORDERS_INNER_V)
+#define GWP_IMGUI_TABLE_BORDERS_OUTER (GWP_IMGUI_TABLE_BORDERS_OUTER_H | GWP_IMGUI_TABLE_BORDERS_OUTER_V)
+#define GWP_IMGUI_TABLE_BORDERS (GWP_IMGUI_TABLE_BORDERS_INNER | GWP_IMGUI_TABLE_BORDERS_OUTER)
+#define GWP_IMGUI_TABLE_NO_BORDERS_IN_BODY 0x200u
+#define GWP_IMGUI_TABLE_SIZING_FIXED_FIT 0x400u
+#define GWP_IMGUI_TABLE_SIZING_FIXED_SAME 0x800u
+#define GWP_IMGUI_TABLE_SIZING_STRETCH_PROP 0x1000u
+#define GWP_IMGUI_TABLE_SIZING_STRETCH_SAME 0x2000u
+#define GWP_IMGUI_TABLE_NO_HOST_EXTEND_X 0x4000u
+#define GWP_IMGUI_TABLE_NO_HOST_EXTEND_Y 0x8000u
+#define GWP_IMGUI_TABLE_NO_KEEP_COLUMNS_VISIBLE 0x10000u
+#define GWP_IMGUI_TABLE_PRECISE_WIDTHS 0x20000u
+#define GWP_IMGUI_TABLE_NO_CLIP 0x40000u
+#define GWP_IMGUI_TABLE_PAD_OUTER_X 0x80000u
+#define GWP_IMGUI_TABLE_NO_PAD_OUTER_X 0x100000u
+#define GWP_IMGUI_TABLE_NO_PAD_INNER_X 0x200000u
+#define GWP_IMGUI_TABLE_SCROLL_X 0x400000u /* needs the outer size of begin_table */
+#define GWP_IMGUI_TABLE_SCROLL_Y 0x800000u /* needs the outer size of begin_table */
+#define GWP_IMGUI_TABLE_HIGHLIGHT_HOVERED_COLUMN 0x1000000u
+
+/* table_setup_column flags. One of WIDTH_STRETCH / WIDTH_FIXED and one of INDENT_ENABLE / INDENT_DISABLE at most. */
+#define GWP_IMGUI_TABLE_COLUMN_DEFAULT_HIDE 0x1u
+#define GWP_IMGUI_TABLE_COLUMN_WIDTH_STRETCH 0x2u
+#define GWP_IMGUI_TABLE_COLUMN_WIDTH_FIXED 0x4u
+#define GWP_IMGUI_TABLE_COLUMN_NO_RESIZE 0x8u
+#define GWP_IMGUI_TABLE_COLUMN_NO_REORDER 0x10u
+#define GWP_IMGUI_TABLE_COLUMN_NO_HIDE 0x20u
+#define GWP_IMGUI_TABLE_COLUMN_NO_CLIP 0x40u
+#define GWP_IMGUI_TABLE_COLUMN_NO_HEADER_LABEL 0x80u
+#define GWP_IMGUI_TABLE_COLUMN_NO_HEADER_WIDTH 0x100u
+#define GWP_IMGUI_TABLE_COLUMN_INDENT_ENABLE 0x200u
+#define GWP_IMGUI_TABLE_COLUMN_INDENT_DISABLE 0x400u
+
+/* table_next_row flags */
+#define GWP_IMGUI_TABLE_ROW_HEADERS 0x1u /* the row looks like a header row */
+
+/* tree_node_ex, collapsing_header flags */
+#define GWP_IMGUI_TREE_SELECTED 0x1u
+#define GWP_IMGUI_TREE_FRAMED 0x2u
+#define GWP_IMGUI_TREE_ALLOW_OVERLAP 0x4u
+#define GWP_IMGUI_TREE_DEFAULT_OPEN 0x8u
+#define GWP_IMGUI_TREE_OPEN_ON_DOUBLE_CLICK 0x10u
+#define GWP_IMGUI_TREE_OPEN_ON_ARROW 0x20u
+#define GWP_IMGUI_TREE_LEAF 0x40u
+#define GWP_IMGUI_TREE_BULLET 0x80u
+#define GWP_IMGUI_TREE_FRAME_PADDING 0x100u
+#define GWP_IMGUI_TREE_SPAN_AVAIL_WIDTH 0x200u
+#define GWP_IMGUI_TREE_SPAN_FULL_WIDTH 0x400u
+#define GWP_IMGUI_TREE_SPAN_ALL_COLUMNS 0x800u
+
+/* input_text* flags (and input_float* / input_int) */
+#define GWP_IMGUI_INPUT_CHARS_DECIMAL 0x1u
+#define GWP_IMGUI_INPUT_CHARS_HEXADECIMAL 0x2u
+#define GWP_IMGUI_INPUT_CHARS_SCIENTIFIC 0x4u
+#define GWP_IMGUI_INPUT_CHARS_UPPERCASE 0x8u
+#define GWP_IMGUI_INPUT_CHARS_NO_BLANK 0x10u
+#define GWP_IMGUI_INPUT_ALLOW_TAB_INPUT 0x20u
+#define GWP_IMGUI_INPUT_ENTER_RETURNS_TRUE 0x40u /* input_text*: returns 1 on Enter, not on every edit (input_float* /
+                                                    input_int ignore it with a warning: is_item_deactivated_after_edit) */
+#define GWP_IMGUI_INPUT_ESCAPE_CLEARS_ALL 0x80u
+#define GWP_IMGUI_INPUT_CTRL_ENTER_FOR_NEW_LINE 0x100u
+#define GWP_IMGUI_INPUT_READ_ONLY 0x200u
+#define GWP_IMGUI_INPUT_PASSWORD 0x400u /* not for input_text_multiline */
+#define GWP_IMGUI_INPUT_AUTO_SELECT_ALL 0x800u
+#define GWP_IMGUI_INPUT_NO_UNDO_REDO 0x1000u
+
+/* slider_* / drag_* flags */
+#define GWP_IMGUI_SLIDER_LOGARITHMIC 0x1u
+#define GWP_IMGUI_SLIDER_NO_ROUND_TO_FORMAT 0x2u
+#define GWP_IMGUI_SLIDER_NO_INPUT 0x4u     /* no Ctrl+Click text input */
+#define GWP_IMGUI_SLIDER_ALWAYS_CLAMP 0x8u /* the text input is clamped to min..max too */
+#define GWP_IMGUI_SLIDER_WRAP_AROUND 0x10u /* drag_* only: past max goes to min and back */
+
+/* color_edit3 / color_edit4 / color_button flags. One DISPLAY_*, one of UINT8 / FLOAT at most. */
+#define GWP_IMGUI_COLOR_NO_ALPHA 0x1u
+#define GWP_IMGUI_COLOR_NO_PICKER 0x2u
+#define GWP_IMGUI_COLOR_NO_OPTIONS 0x4u
+#define GWP_IMGUI_COLOR_NO_SMALL_PREVIEW 0x8u
+#define GWP_IMGUI_COLOR_NO_INPUTS 0x10u
+#define GWP_IMGUI_COLOR_NO_TOOLTIP 0x20u
+#define GWP_IMGUI_COLOR_NO_LABEL 0x40u
+#define GWP_IMGUI_COLOR_NO_DRAG_DROP 0x80u
+#define GWP_IMGUI_COLOR_NO_BORDER 0x100u
+#define GWP_IMGUI_COLOR_ALPHA_BAR 0x200u
+#define GWP_IMGUI_COLOR_DISPLAY_RGB 0x400u
+#define GWP_IMGUI_COLOR_DISPLAY_HSV 0x800u
+#define GWP_IMGUI_COLOR_DISPLAY_HEX 0x1000u
+#define GWP_IMGUI_COLOR_UINT8 0x2000u
+#define GWP_IMGUI_COLOR_FLOAT 0x4000u
+
+/* selectable flags */
+#define GWP_IMGUI_SELECTABLE_NO_AUTO_CLOSE_POPUPS 0x1u
+#define GWP_IMGUI_SELECTABLE_SPAN_ALL_COLUMNS 0x2u
+#define GWP_IMGUI_SELECTABLE_ALLOW_DOUBLE_CLICK 0x4u
+#define GWP_IMGUI_SELECTABLE_DISABLED 0x8u
+#define GWP_IMGUI_SELECTABLE_ALLOW_OVERLAP 0x10u
+#define GWP_IMGUI_SELECTABLE_HIGHLIGHT 0x20u
+
+/* begin_combo flags. One HEIGHT_* at most; NO_PREVIEW goes without NO_ARROW_BUTTON and WIDTH_FIT_PREVIEW. */
+#define GWP_IMGUI_COMBO_POPUP_ALIGN_LEFT 0x1u
+#define GWP_IMGUI_COMBO_HEIGHT_SMALL 0x2u
+#define GWP_IMGUI_COMBO_HEIGHT_REGULAR 0x4u
+#define GWP_IMGUI_COMBO_HEIGHT_LARGE 0x8u
+#define GWP_IMGUI_COMBO_HEIGHT_LARGEST 0x10u
+#define GWP_IMGUI_COMBO_NO_ARROW_BUTTON 0x20u
+#define GWP_IMGUI_COMBO_NO_PREVIEW 0x40u
+#define GWP_IMGUI_COMBO_WIDTH_FIT_PREVIEW 0x80u
+
+/* begin_tab_bar flags */
+#define GWP_IMGUI_TAB_BAR_REORDERABLE 0x1u
+#define GWP_IMGUI_TAB_BAR_AUTO_SELECT_NEW_TABS 0x2u
+#define GWP_IMGUI_TAB_BAR_TAB_LIST_POPUP_BUTTON 0x4u
+#define GWP_IMGUI_TAB_BAR_NO_CLOSE_WITH_MIDDLE_MOUSE_BUTTON 0x8u
+#define GWP_IMGUI_TAB_BAR_NO_TAB_LIST_SCROLLING_BUTTONS 0x10u
+#define GWP_IMGUI_TAB_BAR_NO_TOOLTIP 0x20u
+
+/* begin_tab_item flags */
+#define GWP_IMGUI_TAB_ITEM_UNSAVED_DOCUMENT 0x1u
+#define GWP_IMGUI_TAB_ITEM_SET_SELECTED 0x2u
+#define GWP_IMGUI_TAB_ITEM_NO_CLOSE_WITH_MIDDLE_MOUSE_BUTTON 0x4u
+#define GWP_IMGUI_TAB_ITEM_NO_TOOLTIP 0x8u
+#define GWP_IMGUI_TAB_ITEM_NO_REORDER 0x10u
+
+/* set_next_item_open cond: one of them; 0 - always */
+#define GWP_IMGUI_COND_ALWAYS 0x1u
+#define GWP_IMGUI_COND_ONCE 0x2u           /* once per run of the game */
+#define GWP_IMGUI_COND_FIRST_USE_EVER 0x4u /* when nothing is kept for it */
+#define GWP_IMGUI_COND_APPEARING 0x8u      /* when it appears after being hidden */
+
+/* arrow_button dir */
+#define GWP_IMGUI_DIR_LEFT 0u
+#define GWP_IMGUI_DIR_RIGHT 1u
+#define GWP_IMGUI_DIR_UP 2u
+#define GWP_IMGUI_DIR_DOWN 3u
+
+/* is_item_clicked mouse button */
+#define GWP_IMGUI_MOUSE_LEFT 0
+#define GWP_IMGUI_MOUSE_RIGHT 1
+#define GWP_IMGUI_MOUSE_MIDDLE 2
+
+/* is_item_hovered / is_window_hovered flags (each takes the ones its comment names, the others are ignored) */
+#define GWP_IMGUI_HOVERED_CHILD_WINDOWS 0x1u                    /* window */
+#define GWP_IMGUI_HOVERED_ROOT_WINDOW 0x2u                      /* window */
+#define GWP_IMGUI_HOVERED_ANY_WINDOW 0x4u                       /* window */
+#define GWP_IMGUI_HOVERED_ALLOW_WHEN_BLOCKED_BY_POPUP 0x8u      /* item, window */
+#define GWP_IMGUI_HOVERED_ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM 0x10u /* item, window */
+#define GWP_IMGUI_HOVERED_ALLOW_WHEN_OVERLAPPED 0x20u           /* item */
+#define GWP_IMGUI_HOVERED_ALLOW_WHEN_DISABLED 0x40u             /* item */
+#define GWP_IMGUI_HOVERED_FOR_TOOLTIP 0x80u                     /* item, window: the delay of a tooltip */
+#define GWP_IMGUI_HOVERED_STATIONARY 0x100u                     /* item, window */
+#define GWP_IMGUI_HOVERED_DELAY_SHORT 0x200u                    /* item */
+#define GWP_IMGUI_HOVERED_DELAY_NORMAL 0x400u                   /* item */
+
+/* is_window_focused flags */
+#define GWP_IMGUI_FOCUSED_CHILD_WINDOWS 0x1u
+#define GWP_IMGUI_FOCUSED_ROOT_WINDOW 0x2u
+#define GWP_IMGUI_FOCUSED_ANY_WINDOW 0x4u
+
+/* open_popup, begin_popup_context_item, is_popup_open flags. The mouse button of begin_popup_context_item:
+   0 - the right one (as ImGui by default), GWP_IMGUI_POPUP_MOUSE_LEFT / _MIDDLE - another one. */
+#define GWP_IMGUI_POPUP_MOUSE_LEFT 0x1u
+#define GWP_IMGUI_POPUP_MOUSE_MIDDLE 0x2u
+#define GWP_IMGUI_POPUP_NO_REOPEN 0x4u
+#define GWP_IMGUI_POPUP_NO_OPEN_OVER_EXISTING_POPUP 0x8u
+#define GWP_IMGUI_POPUP_ANY_POPUP_ID 0x10u    /* is_popup_open: any popup (str_id may be NULL) */
+#define GWP_IMGUI_POPUP_ANY_POPUP_LEVEL 0x20u /* is_popup_open: at any level of the popup stack */
+
+/* push_style_color idx: the colors of the style a plugin may change for its widgets */
+#define GWP_IMGUI_COL_TEXT 0u
+#define GWP_IMGUI_COL_TEXT_DISABLED 1u
+#define GWP_IMGUI_COL_WINDOW_BG 2u
+#define GWP_IMGUI_COL_CHILD_BG 3u
+#define GWP_IMGUI_COL_POPUP_BG 4u
+#define GWP_IMGUI_COL_BORDER 5u
+#define GWP_IMGUI_COL_FRAME_BG 6u
+#define GWP_IMGUI_COL_FRAME_BG_HOVERED 7u
+#define GWP_IMGUI_COL_FRAME_BG_ACTIVE 8u
+#define GWP_IMGUI_COL_CHECK_MARK 9u
+#define GWP_IMGUI_COL_SLIDER_GRAB 10u
+#define GWP_IMGUI_COL_SLIDER_GRAB_ACTIVE 11u
+#define GWP_IMGUI_COL_BUTTON 12u
+#define GWP_IMGUI_COL_BUTTON_HOVERED 13u
+#define GWP_IMGUI_COL_BUTTON_ACTIVE 14u
+#define GWP_IMGUI_COL_HEADER 15u
+#define GWP_IMGUI_COL_HEADER_HOVERED 16u
+#define GWP_IMGUI_COL_HEADER_ACTIVE 17u
+#define GWP_IMGUI_COL_SEPARATOR 18u
+#define GWP_IMGUI_COL_TAB 19u
+#define GWP_IMGUI_COL_TAB_HOVERED 20u
+#define GWP_IMGUI_COL_TAB_SELECTED 21u
+#define GWP_IMGUI_COL_PLOT_LINES 22u
+#define GWP_IMGUI_COL_PLOT_LINES_HOVERED 23u
+#define GWP_IMGUI_COL_PLOT_HISTOGRAM 24u
+#define GWP_IMGUI_COL_PLOT_HISTOGRAM_HOVERED 25u
+#define GWP_IMGUI_COL_TABLE_HEADER_BG 26u
+#define GWP_IMGUI_COL_TABLE_BORDER_STRONG 27u
+#define GWP_IMGUI_COL_TABLE_BORDER_LIGHT 28u
+#define GWP_IMGUI_COL_TABLE_ROW_BG 29u
+#define GWP_IMGUI_COL_TABLE_ROW_BG_ALT 30u
+#define GWP_IMGUI_COL_TEXT_SELECTED_BG 31u
+#define GWP_IMGUI_COL_COUNT 32u
+
+/* push_style_var_float / push_style_var_vec2 idx: (float) - push_style_var_float, (vec2) - push_style_var_vec2; the
+   other function for the index does nothing (a warning once per tool) */
+#define GWP_IMGUI_STYLE_ALPHA 0u                 /* (float) */
+#define GWP_IMGUI_STYLE_DISABLED_ALPHA 1u        /* (float) */
+#define GWP_IMGUI_STYLE_WINDOW_PADDING 2u        /* (vec2) */
+#define GWP_IMGUI_STYLE_FRAME_PADDING 3u         /* (vec2) */
+#define GWP_IMGUI_STYLE_FRAME_ROUNDING 4u        /* (float) */
+#define GWP_IMGUI_STYLE_FRAME_BORDER_SIZE 5u     /* (float) */
+#define GWP_IMGUI_STYLE_ITEM_SPACING 6u          /* (vec2) */
+#define GWP_IMGUI_STYLE_ITEM_INNER_SPACING 7u    /* (vec2) */
+#define GWP_IMGUI_STYLE_INDENT_SPACING 8u        /* (float) */
+#define GWP_IMGUI_STYLE_CELL_PADDING 9u          /* (vec2) */
+#define GWP_IMGUI_STYLE_GRAB_MIN_SIZE 10u        /* (float) */
+#define GWP_IMGUI_STYLE_GRAB_ROUNDING 11u        /* (float) */
+#define GWP_IMGUI_STYLE_CHILD_ROUNDING 12u       /* (float) */
+#define GWP_IMGUI_STYLE_CHILD_BORDER_SIZE 13u    /* (float) */
+#define GWP_IMGUI_STYLE_BUTTON_TEXT_ALIGN 14u    /* (vec2) 0..1 */
+#define GWP_IMGUI_STYLE_SELECTABLE_TEXT_ALIGN 15u /* (vec2) 0..1 */
+#define GWP_IMGUI_STYLE_COUNT 16u
+
+/* plot_lines / plot_histogram scale_min, scale_max: computed from the values (FLT_MAX, as in ImGui) */
+#define GWP_IMGUI_AUTO_SCALE 3.402823466e+38F
+
+/* Limits of the table (see the rules above) and of the registration */
+#define GWP_IMGUI_MAX_STACK_DEPTH 64u              /* open pairs of one draw */
+#define GWP_IMGUI_MAX_INPUT_TEXT 16384u            /* input_text, input_text_with_hint: bytes of the buffer */
+#define GWP_IMGUI_MAX_INPUT_TEXT_MULTILINE 65536u  /* input_text_multiline */
+#define GWP_IMGUI_MAX_LIST_ITEMS 1024u             /* combo, list_box */
+#define GWP_IMGUI_MAX_PLOT_VALUES 4096u            /* plot_lines, plot_histogram */
+#define GWP_IMGUI_MAX_FORMAT 64u                   /* fmt of a slider / drag / input, bytes */
+#define GWP_IMGUI_MAX_ID 63u                       /* GwpImGuiToolDesc::id, bytes */
+#define GWP_IMGUI_MAX_TITLE 127u                   /* title, bytes */
+#define GWP_IMGUI_MAX_MENU 127u                    /* menu, bytes; up to GWP_IMGUI_MAX_MENU_DEPTH levels */
+#define GWP_IMGUI_MAX_MENU_DEPTH 3u
+#define GWP_IMGUI_MAX_TOOLTIP 511u                 /* tooltip, bytes */
+#define GWP_IMGUI_MAX_TOOLS_PER_ADDON 32u          /* the tools of one addon: its Lua part and its plugin together */
+#define GWP_IMGUI_MAX_TOOLS 256u                   /* the tools of all the addons */
+
+/* What `draw` gets with every call. The engine fills it; read a field added later only when `size` covers it. */
+typedef struct GwpImGuiFrame
+{
+    uint32_t size;     /* sizeof(GwpImGuiFrame) of the engine */
+    uint32_t flags;    /* GWP_IMGUI_FRAME_* */
+    float dt;          /* real seconds since the previous frame */
+    uint32_t reserved; /* 0 */
+    const char* id;    /* the id of the tool (GwpImGuiToolDesc::id) */
+} GwpImGuiFrame;
+
+/* The widgets of ImGui for `draw`: functions of the engine, valid until `draw` returns (see the rules above). No
+   `self`: the engine knows the tool that draws now. Names and arguments follow C++ ImGui (ImGui::SliderFloat ->
+   slider_float); a function that returns int gives what the ImGui function returns as bool (1 - pressed / changed /
+   open). Pointers to values (int* v, float* v...) are read and written in place; NULL where a value is required
+   makes the call do nothing (a warning once per tool). The whole table: @group imgui @thread main. */
+typedef struct GwpImGuiApi
+{
+    uint32_t size;     /* sizeof(GwpImGuiApi) of the engine: functions are appended in later versions */
+    uint32_t reserved; /* 0 */
+
+    /* --- layout --- */
+    /* The next widget on the same line. offset_from_start_x 0 - right after the previous one; spacing < 0 - the
+       spacing of the style. */
+    void(GWP_CALL* same_line)(float offset_from_start_x, float spacing);
+    void(GWP_CALL* new_line)(void);
+    void(GWP_CALL* spacing)(void);
+    void(GWP_CALL* separator)(void);
+    void(GWP_CALL* separator_text)(const char* label); /* a separator with a text in it */
+    void(GWP_CALL* dummy)(float w, float h);           /* an empty space of that size */
+    /* indent: the content goes right by w (0 - the indent spacing of the style); unindent closes the last indent
+       (back by the same width). A pair: indent needs its unindent. */
+    void(GWP_CALL* indent)(float w);
+    void(GWP_CALL* unindent)(void);
+    void(GWP_CALL* begin_group)(void); /* the widgets up to end_group act as one item (same_line after it...) */
+    void(GWP_CALL* end_group)(void);
+    /* A scrolling region inside the window. w, h: 0 - the rest of the window, < 0 - the rest minus that much;
+       child_flags GWP_IMGUI_CHILD_*, window_flags GWP_IMGUI_WINDOW_*. end_child is called always, also after 0. */
+    int(GWP_CALL* begin_child)(const char* str_id, float w, float h, uint32_t child_flags, uint32_t window_flags);
+    void(GWP_CALL* end_child)(void);
+    void(GWP_CALL* set_next_item_width)(float w); /* > 0 - pixels, < 0 - the rest of the line minus that much */
+    void(GWP_CALL* push_item_width)(float w);     /* the same for every next widget, until pop_item_width */
+    void(GWP_CALL* pop_item_width)(void);
+    void(GWP_CALL* align_text_to_frame_padding)(void); /* a text before a framed widget on the same line */
+    void(GWP_CALL* get_content_region_avail)(float* w, float* h); /* the free space from the cursor; NULL - skip */
+    void(GWP_CALL* get_window_size)(float* w, float* h);
+    void(GWP_CALL* get_cursor_pos)(float* x, float* y); /* in the window, from its top left corner */
+    void(GWP_CALL* set_cursor_pos)(float x, float y);
+    /* The size of a text; wrap_width > 0 - wrapped at that width, 0 - one line. */
+    void(GWP_CALL* calc_text_size)(const char* text, float wrap_width, float* w, float* h);
+    float(GWP_CALL* get_text_line_height)(void);
+    float(GWP_CALL* get_frame_height)(void); /* the height of a framed widget (a button, a slider) */
+
+    /* --- text: shown as it is, never formatted --- */
+    void(GWP_CALL* text)(const char* text);
+    void(GWP_CALL* text_n)(const char* text, uint32_t length); /* `length` bytes, no NUL needed */
+    void(GWP_CALL* text_colored)(uint32_t argb, const char* text);
+    void(GWP_CALL* text_disabled)(const char* text);
+    void(GWP_CALL* text_wrapped)(const char* text); /* wrapped at the window edge (or push_text_wrap_pos) */
+    void(GWP_CALL* label_text)(const char* label, const char* text); /* "text  label", aligned as a widget */
+    void(GWP_CALL* bullet_text)(const char* text);
+    void(GWP_CALL* bullet)(void);
+    void(GWP_CALL* push_text_wrap_pos)(float wrap_local_pos_x); /* 0 - the window edge, < 0 - no wrapping */
+    void(GWP_CALL* pop_text_wrap_pos)(void);
+
+    /* --- buttons --- */
+    int(GWP_CALL* button)(const char* label, float w, float h); /* w, h: 0 - fit the label */
+    int(GWP_CALL* small_button)(const char* label);
+    int(GWP_CALL* invisible_button)(const char* str_id, float w, float h); /* w, h > 0 */
+    int(GWP_CALL* arrow_button)(const char* str_id, uint32_t dir);          /* dir GWP_IMGUI_DIR_* */
+    int(GWP_CALL* checkbox)(const char* label, int* v);                     /* *v 0 / 1; returns 1 when changed */
+    int(GWP_CALL* checkbox_flags)(const char* label, uint32_t* flags, uint32_t flags_value);
+    int(GWP_CALL* radio_button)(const char* label, int active); /* returns 1 when pressed: set your value then */
+    /* fraction 0..1; w, h: 0 - the full width and the frame height; overlay NULL - the percent */
+    void(GWP_CALL* progress_bar)(float fraction, float w, float h, const char* overlay);
+
+    /* --- numbers: return 1 when the value changed; n of *_n: 2..4 components --- */
+    int(GWP_CALL* slider_float)(const char* label, float* v, float v_min, float v_max, const char* fmt, uint32_t flags);
+    int(GWP_CALL* slider_float_n)(const char* label, float* v, uint32_t n, float v_min, float v_max, const char* fmt,
+        uint32_t flags);
+    int(GWP_CALL* slider_int)(const char* label, int* v, int v_min, int v_max, const char* fmt, uint32_t flags);
+    int(GWP_CALL* slider_int_n)(const char* label, int* v, uint32_t n, int v_min, int v_max, const char* fmt,
+        uint32_t flags);
+    /* *v_rad in radians, the limits in degrees */
+    int(GWP_CALL* slider_angle)(const char* label, float* v_rad, float v_degrees_min, float v_degrees_max,
+        const char* fmt, uint32_t flags);
+    /* drag_*: v_speed - the change per pixel of the mouse; v_min == v_max - no limits */
+    int(GWP_CALL* drag_float)(const char* label, float* v, float v_speed, float v_min, float v_max, const char* fmt,
+        uint32_t flags);
+    int(GWP_CALL* drag_float_n)(const char* label, float* v, uint32_t n, float v_speed, float v_min, float v_max,
+        const char* fmt, uint32_t flags);
+    int(GWP_CALL* drag_int)(const char* label, int* v, float v_speed, int v_min, int v_max, const char* fmt,
+        uint32_t flags);
+    int(GWP_CALL* drag_int_n)(const char* label, int* v, uint32_t n, float v_speed, int v_min, int v_max,
+        const char* fmt, uint32_t flags);
+    /* input_*: flags GWP_IMGUI_INPUT_*; step 0 - no +/- buttons */
+    int(GWP_CALL* input_float)(const char* label, float* v, float step, float step_fast, const char* fmt,
+        uint32_t flags);
+    int(GWP_CALL* input_float_n)(const char* label, float* v, uint32_t n, const char* fmt, uint32_t flags);
+    int(GWP_CALL* input_int)(const char* label, int* v, int step, int step_fast, uint32_t flags);
+
+    /* --- text input: buf of cap bytes, NUL-terminated (a buffer without a NUL in cap bytes gets one at cap - 1);
+       edited in place. Returns 1 when the text changed (with GWP_IMGUI_INPUT_ENTER_RETURNS_TRUE - on Enter). --- */
+    int(GWP_CALL* input_text)(const char* label, char* buf, uint32_t cap, uint32_t flags);
+    int(GWP_CALL* input_text_with_hint)(const char* label, const char* hint, char* buf, uint32_t cap, uint32_t flags);
+    int(GWP_CALL* input_text_multiline)(const char* label, char* buf, uint32_t cap, float w, float h, uint32_t flags);
+
+    /* --- choice --- */
+    /* items: `count` strings (none NULL); *current - the index (out of range - nothing chosen); returns 1 when
+       changed. popup_max_height_in_items -1 - the default. */
+    int(GWP_CALL* combo)(const char* label, int* current, const char* const* items, uint32_t count,
+        int popup_max_height_in_items);
+    int(GWP_CALL* begin_combo)(const char* label, const char* preview, uint32_t flags); /* GWP_IMGUI_COMBO_* */
+    void(GWP_CALL* end_combo)(void);
+    /* selected: shown as selected; returns 1 when clicked. flags GWP_IMGUI_SELECTABLE_*; w, h 0 - auto */
+    int(GWP_CALL* selectable)(const char* label, int selected, uint32_t flags, float w, float h);
+    int(GWP_CALL* list_box)(const char* label, int* current, const char* const* items, uint32_t count,
+        int height_in_items);
+    int(GWP_CALL* begin_list_box)(const char* label, float w, float h);
+    void(GWP_CALL* end_list_box)(void);
+
+    /* --- color: float 0..1, edited in place; returns 1 when changed. flags GWP_IMGUI_COLOR_* --- */
+    int(GWP_CALL* color_edit3)(const char* label, float* rgb, uint32_t flags);
+    int(GWP_CALL* color_edit4)(const char* label, float* rgba, uint32_t flags);
+    int(GWP_CALL* color_button)(const char* desc_id, uint32_t argb, uint32_t flags, float w, float h);
+
+    /* --- trees: tree_node* returns 1 when open - then tree_pop --- */
+    int(GWP_CALL* tree_node)(const char* label);
+    int(GWP_CALL* tree_node_ex)(const char* label, uint32_t flags); /* GWP_IMGUI_TREE_* */
+    void(GWP_CALL* tree_pop)(void);
+    int(GWP_CALL* collapsing_header)(const char* label, uint32_t flags); /* 1 - open; no tree_pop */
+    void(GWP_CALL* set_next_item_open)(int is_open, uint32_t cond);       /* cond GWP_IMGUI_COND_*, 0 - always */
+
+    /* --- tabs --- */
+    int(GWP_CALL* begin_tab_bar)(const char* str_id, uint32_t flags); /* GWP_IMGUI_TAB_BAR_* */
+    void(GWP_CALL* end_tab_bar)(void);
+    /* p_open: NULL - no close button; else the tab has one and *p_open becomes 0 when it is pressed */
+    int(GWP_CALL* begin_tab_item)(const char* label, int* p_open, uint32_t flags); /* GWP_IMGUI_TAB_ITEM_* */
+    void(GWP_CALL* end_tab_item)(void);
+
+    /* --- tables --- */
+    /* columns 1..511; flags GWP_IMGUI_TABLE_*; outer_w, outer_h 0 - auto (needed for SCROLL_X / SCROLL_Y) */
+    int(GWP_CALL* begin_table)(const char* str_id, int columns, uint32_t flags, float outer_w, float outer_h);
+    void(GWP_CALL* end_table)(void);
+    /* The functions below work only right inside a table (no begin_child between): else they do nothing. */
+    void(GWP_CALL* table_next_row)(uint32_t row_flags, float min_row_height); /* GWP_IMGUI_TABLE_ROW_* */
+    int(GWP_CALL* table_next_column)(void);              /* 1 - the column is visible */
+    int(GWP_CALL* table_set_column_index)(int column_n); /* 0..columns - 1 */
+    /* Before the first row: one per column, at most `columns`. init_width_or_weight > 0 only with a sizing
+       policy (GWP_IMGUI_TABLE_SIZING_* or a GWP_IMGUI_TABLE_COLUMN_WIDTH_*), else it is ignored. */
+    void(GWP_CALL* table_setup_column)(const char* label, uint32_t flags, float init_width_or_weight);
+    void(GWP_CALL* table_setup_scroll_freeze)(int cols, int rows); /* before the first row */
+    void(GWP_CALL* table_headers_row)(void);
+
+    /* --- plots: count values (up to GWP_IMGUI_MAX_PLOT_VALUES), the first at values_offset (a ring buffer);
+       scale GWP_IMGUI_AUTO_SCALE - computed; overlay NULL - none; w, h 0 - auto --- */
+    void(GWP_CALL* plot_lines)(const char* label, const float* values, uint32_t count, uint32_t values_offset,
+        const char* overlay, float scale_min, float scale_max, float w, float h);
+    void(GWP_CALL* plot_histogram)(const char* label, const float* values, uint32_t count, uint32_t values_offset,
+        const char* overlay, float scale_min, float scale_max, float w, float h);
+
+    /* --- tooltips --- */
+    void(GWP_CALL* set_tooltip)(const char* text);      /* a tooltip at the mouse this frame */
+    void(GWP_CALL* set_item_tooltip)(const char* text); /* the same when the last item is hovered */
+    int(GWP_CALL* begin_tooltip)(void);                 /* widgets in a tooltip; 1 - then end_tooltip */
+    int(GWP_CALL* begin_item_tooltip)(void);            /* the same when the last item is hovered */
+    void(GWP_CALL* end_tooltip)(void);
+
+    /* --- popups: open_popup marks it open, begin_popup* draws it while it is open (1 - then end_popup) --- */
+    void(GWP_CALL* open_popup)(const char* str_id, uint32_t popup_flags);
+    int(GWP_CALL* begin_popup)(const char* str_id, uint32_t window_flags);
+    /* A modal popup with a title bar. p_open: NULL - no close button */
+    int(GWP_CALL* begin_popup_modal)(const char* name, int* p_open, uint32_t window_flags);
+    /* Opens and draws a popup on a click on the last item (the right button by default). str_id NULL - the id of
+       the last item (it must have one: a button, not a text) */
+    int(GWP_CALL* begin_popup_context_item)(const char* str_id, uint32_t popup_flags);
+    void(GWP_CALL* end_popup)(void);
+    void(GWP_CALL* close_current_popup)(void); /* inside begin_popup*: closes it */
+    int(GWP_CALL* is_popup_open)(const char* str_id, uint32_t popup_flags);
+
+    /* --- menus: begin_menu_bar needs GWP_IMGUI_WINDOW_MENU_BAR of the window --- */
+    int(GWP_CALL* begin_menu_bar)(void);
+    void(GWP_CALL* end_menu_bar)(void);
+    int(GWP_CALL* begin_menu)(const char* label, int enabled);
+    void(GWP_CALL* end_menu)(void);
+    /* Returns 1 when clicked. shortcut: a text only (NULL - none); p_selected: NULL - no check mark, else toggled */
+    int(GWP_CALL* menu_item)(const char* label, const char* shortcut, int* p_selected, int enabled);
+
+    /* --- state of the last item and of the window --- */
+    int(GWP_CALL* is_item_hovered)(uint32_t flags); /* GWP_IMGUI_HOVERED_* */
+    int(GWP_CALL* is_item_active)(void);
+    int(GWP_CALL* is_item_clicked)(int mouse_button); /* GWP_IMGUI_MOUSE_* */
+    int(GWP_CALL* is_item_edited)(void);
+    int(GWP_CALL* is_item_deactivated_after_edit)(void);
+    int(GWP_CALL* is_window_focused)(uint32_t flags); /* GWP_IMGUI_FOCUSED_* */
+    int(GWP_CALL* is_window_hovered)(uint32_t flags); /* GWP_IMGUI_HOVERED_* */
+    void(GWP_CALL* set_keyboard_focus_here)(int offset); /* -1 - the previous widget, 0 - the next one... */
+    void(GWP_CALL* set_item_default_focus)(void);
+
+    /* --- ids and style --- */
+    /* The ids of the widgets up to pop_id include this one: the same label in a loop gets distinct ids */
+    void(GWP_CALL* push_id_str)(const char* str_id);
+    void(GWP_CALL* push_id_int)(int int_id);
+    void(GWP_CALL* pop_id)(void);
+    void(GWP_CALL* push_style_color)(uint32_t idx, uint32_t argb); /* idx GWP_IMGUI_COL_* */
+    void(GWP_CALL* pop_style_color)(void);                         /* one push_style_color */
+    void(GWP_CALL* push_style_var_float)(uint32_t idx, float value); /* idx GWP_IMGUI_STYLE_* (float) */
+    void(GWP_CALL* push_style_var_vec2)(uint32_t idx, float x, float y); /* idx GWP_IMGUI_STYLE_* (vec2) */
+    void(GWP_CALL* pop_style_var)(void);                                 /* one push_style_var_* */
+    void(GWP_CALL* begin_disabled)(int disabled); /* the widgets up to end_disabled are grayed out and inactive */
+    void(GWP_CALL* end_disabled)(void);
+    /* ----- end of the first version: functions are appended below this line only ----- */
+
+    /* --- clipboard (appended: check GWP_IMGUI_HAS(ui, set_clipboard_text)) --- */
+    /* The text (UTF-8) goes to the clipboard of the OS; at most 64 KiB, a longer one is cut on a character boundary.
+       Write only: the clipboard is not read (privacy). */
+    void(GWP_CALL* set_clipboard_text)(const char* text);
+} GwpImGuiApi;
+
+/* True when the widget table `ui` provides the member `field` (a function appended in a later version). */
+#define GWP_IMGUI_HAS(ui, field) \
+    ((ui) != NULL && (ui)->size >= (uint32_t)(offsetof(GwpImGuiApi, field) + sizeof(((GwpImGuiApi*)0)->field)))
+
+/* The content of the window: every frame while it is open and the editor is not hidden (see above). user: the
+   pointer of GwpImGuiToolDesc. */
+typedef void(GWP_CALL* GwpImGuiDrawFn)(void* user, const GwpImGuiApi* ui, const GwpImGuiFrame* frame);
+/* on_open (before the first draw after the window opened) / on_close (the window closed: the cross, the menu,
+   imgui_tool_set_open, imgui_tool_unregister). */
+typedef void(GWP_CALL* GwpImGuiToolFn)(void* user);
+
+/* imgui_tool_register: a tool. Zero-initialize, set size = sizeof(GwpImGuiToolDesc), id, draw. The strings are
+   copied; `user` is passed back to the callbacks. */
+typedef struct GwpImGuiToolDesc
+{
+    uint32_t size;  /* sizeof(GwpImGuiToolDesc) of the plugin: fields may be appended in later versions */
+    uint32_t flags; /* GWP_IMGUI_TOOL_* */
+    /* a-z 0-9 _ . -, 2..GWP_IMGUI_MAX_ID bytes, starts with "<addon id>_" (as a cvar); unique among all the tools */
+    const char* id;
+    const char* title;   /* the id of a string or the text (NULL - the id): the window and the menu item */
+    const char* menu;    /* a submenu of "Addons", levels split by '/' ("My addon/Debug"), each one the id of a
+                            string or the text; NULL - the addon id */
+    const char* tooltip; /* the hint of the menu item: the id of a string or the text; NULL - none */
+    GwpImGuiDrawFn draw; /* required */
+    GwpImGuiToolFn on_open;  /* NULL - none */
+    GwpImGuiToolFn on_close; /* NULL - none */
+    void* user;
+    uint32_t window_flags; /* GWP_IMGUI_WINDOW_* */
+    int32_t order;         /* the order inside its submenu: a lower one is higher, then by the title */
+    float size_w, size_h;  /* the size at the first open (then imgui.ini), 0 - auto */
+    float pos_x, pos_y;    /* the position at the first open, (0, 0) - ImGui decides */
+    float min_w, min_h;    /* the smallest size, 0 - none */
+    uint32_t reserved[2];  /* 0 */
+} GwpImGuiToolDesc;
+
+/* ------------------------------------------------------------------------- */
 /* Engine API table (engine -> plugin)                                        */
 /* ------------------------------------------------------------------------- */
 
@@ -2584,14 +3154,16 @@ typedef struct GwpEngineApi
        community_goodwill_limits (values and deltas -1000000 .. 1000000). community_relation: relation_registry.community_relation(from, to) - one direction:
        (a, b) and (b, a) are two values; 0 for an unknown name. community_set_relation: set_community_relation. The
        table of community relations is NOT saved by the engine: it is built from the configs (those of the addons
-       included) each time the content of the game is applied - the first frame of the main menu, a switch of a slot
+       included) each time the content of the game is applied - the start of the game, a switch of a slot
        provider or a location pack in the menu, before a level started from the command line; never during a game -
        and lives until the next apply: a load neither saves nor restores it, so a change stays across loads of other
        saves until reset_relations_to_default or the next apply. Keep communities by name, not by an index. The scripts of the mod keep their own changes and set them
        again when the actor spawns; a plugin keeps its changes itself (save_write) and sets them again at
        actor_on_spawn. Every real change is the event relation_on_changed. GWP_ERROR_INVALID_ARGUMENT: an unknown
        community, not a character; GWP_ERROR_INVALID_STATE: no game (the goodwill functions; the relation table works
-       without one).
+       without one). Before the communities are read - on_init of a plugin loaded at the start of the game, before the
+       main menu is built - there is no data: community_exists 0, community_goodwill and community_relation 0, the
+       setters and character_set_community GWP_ERROR_INVALID_STATE; read them at addons_content_applied or later.
        @group character @thread main */
     int(GWP_CALL* community_exists)(const char* community);
     int32_t(GWP_CALL* community_goodwill)(const char* community, GwpObjectId who);
@@ -3043,6 +3615,44 @@ typedef struct GwpEngineApi
         const float position[3], const float angles[3]);
     GwpResult(GWP_CALL* actor_change_level_to)(const GwpPlugin* self, const char* level_name);
     /* ===== end of engine gaps (group engine) ===== */
+
+    /* ===== ImGui tools of addons (plans/addons_api_support/20-imgui-addon-tools.md) =====
+       One additive step: an engine has all of these or none (GWP_API_HAS(api, imgui_tool_register) tells). The
+       types, the widget table GwpImGuiApi and the constants are above ("ImGui tools of addons"). */
+
+    /* A window of the plugin in the menu "Addons" of the editor (F10), seen by every player in the full state of the
+       editor (GWP_IMGUI_TOOL_DEV_ONLY - only with -uidbg / -dbg / -addon_debug; the console addon_imgui_tools 0 hides
+       them all). imgui_tool_register: desc->draw is called every frame while the window is open (see GwpImGuiDrawFn);
+       the strings are copied. The open flag is kept in imgui.ini by "<addon id>/<id>": a window open when the game
+       was closed - or when the plugin stopped - opens again after the next registration (unless
+       GWP_IMGUI_TOOL_NO_SAVE_OPEN). The engine removes the tools of the plugin by itself when it stops (unload,
+       crash, plugin_reload; on_close is not called then); register them again in gwp_plugin_init. A crash in draw,
+       on_open or on_close stops the plugin as any crash does ("crashed in the ImGui tool '<id>'"). Registration
+       works also in the main menu, before any game.
+       GWP_ERROR_INVALID_ARGUMENT - desc NULL, desc->size below sizeof(GwpImGuiToolDesc) of version 0.1 (the
+       structure of this header), draw NULL, a bad id (charset, length, not "<addon id>_...", or a name of a longer
+       addon id as with the cvars: "gw_npc_x" is of addon gw_npc, not of gw), a length over its limit (title, menu
+       and its depth, tooltip), a size / position / min size that is negative, NaN or infinite, reserved not 0;
+       GWP_ERROR_NOT_SUPPORTED - an unknown bit of flags or window_flags; GWP_ERROR_INVALID_STATE - the id is
+       taken (by any addon), GWP_IMGUI_MAX_TOOLS_PER_ADDON / GWP_IMGUI_MAX_TOOLS reached, the plugin is stopped.
+       The reason of a refusal is in the log.
+       imgui_tool_unregister: an open window gets on_close, the open flag is cleared. GWP_ERROR_NOT_FOUND - no such
+       tool; GWP_ERROR_ACCESS_DENIED - a tool of another addon or of the Lua part.
+       imgui_tool_set_open: opens (on_open comes before the first draw, at the next frame of the editor) or closes
+       (on_close at once) any tool, also of another addon (a hotkey of a key group). flags GWP_IMGUI_SHOW_EDITOR: the
+       editor goes to the full state (the window is seen at once). Opening clears the error mark of a tool.
+       GWP_ERROR_NOT_FOUND - no such tool, or it is hidden now (GWP_IMGUI_TOOL_DEV_ONLY without the keys);
+       GWP_ERROR_NOT_SUPPORTED - an unknown flag. imgui_tool_is_open: 1 - open or asked to open, 0 - closed or no
+       such tool.
+       Safe inside draw and the other callbacks of the tools: a tool registered there is drawn from the next frame, a
+       removed one is freed after the frame. The GwpResult ones: GWP_ERROR_NOT_MAIN_THREAD outside the main thread,
+       GWP_ERROR_INVALID_ARGUMENT - self or id NULL; imgui_tool_is_open gives 0 then.
+       @group imgui @thread main */
+    GwpResult(GWP_CALL* imgui_tool_register)(const GwpPlugin* self, const GwpImGuiToolDesc* desc);
+    GwpResult(GWP_CALL* imgui_tool_unregister)(const GwpPlugin* self, const char* id);
+    GwpResult(GWP_CALL* imgui_tool_set_open)(const GwpPlugin* self, const char* id, int open, uint32_t flags);
+    int(GWP_CALL* imgui_tool_is_open)(const GwpPlugin* self, const char* id);
+    /* ===== end of ImGui tools of addons ===== */
 } GwpEngineApi;
 
 /* True when the engine table provides the member `field` (the check of an additive step, see "Compatibility"). */
@@ -3108,12 +3718,21 @@ GWP_STATIC_ASSERT(offsetof(GwpDanger, type) == 4, "GwpDanger: size first");
 GWP_STATIC_ASSERT(offsetof(GwpSightParams, sight_type) == 4, "GwpSightParams: size first");
 GWP_STATIC_ASSERT(sizeof(GwpBinderUpdate) == 8, "GwpBinderUpdate: id, reserved, dt_ms");
 GWP_STATIC_ASSERT(offsetof(GwpSquadState, level_id) == 8, "GwpSquadState: size and found first");
+GWP_STATIC_ASSERT(offsetof(GwpImGuiFrame, flags) == 4, "GwpImGuiFrame: size first");
+GWP_STATIC_ASSERT(offsetof(GwpImGuiFrame, id) == 16, "GwpImGuiFrame: size, flags, dt, reserved, then id");
+GWP_STATIC_ASSERT(offsetof(GwpImGuiApi, same_line) == 8, "GwpImGuiApi: size and reserved first");
+GWP_STATIC_ASSERT(offsetof(GwpImGuiToolDesc, id) == 8, "GwpImGuiToolDesc: size and flags first");
 #if defined(_WIN64) || defined(__LP64__)
 GWP_STATIC_ASSERT(sizeof(GwpValue) == 24, "GwpValue: 8 bytes of header and a 16-byte union");
 GWP_STATIC_ASSERT(sizeof(GwpEvent) == 40, "GwpEvent: size, flags, id, argc, name, argv, result");
 GWP_STATIC_ASSERT(offsetof(GwpPluginDesc, api_built) == 32, "GwpPluginDesc: api_built after user");
 GWP_STATIC_ASSERT(offsetof(GwpSubscribeOptions, priority) == 32, "GwpSubscribeOptions: priority after reserved2");
 GWP_STATIC_ASSERT(sizeof(GwpSubscribeOptions) == 40, "GwpSubscribeOptions: no tail padding (reserved3)");
+GWP_STATIC_ASSERT(sizeof(GwpImGuiFrame) == 24, "GwpImGuiFrame: 16 bytes of header and id");
+GWP_STATIC_ASSERT(offsetof(GwpImGuiToolDesc, window_flags) == 72, "GwpImGuiToolDesc: window_flags after user");
+GWP_STATIC_ASSERT(sizeof(GwpImGuiToolDesc) == 112, "GwpImGuiToolDesc: no tail padding (reserved)");
+GWP_STATIC_ASSERT(offsetof(GwpImGuiApi, end_disabled) == 8 + 120 * 8, "GwpImGuiApi: 121 functions of version 0.1");
+GWP_STATIC_ASSERT(offsetof(GwpImGuiApi, set_clipboard_text) == 8 + 121 * 8, "GwpImGuiApi: appended after end_disabled");
 #endif
 
 /* ------------------------------------------------------------------------- */

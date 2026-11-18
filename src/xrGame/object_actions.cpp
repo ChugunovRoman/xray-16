@@ -46,11 +46,9 @@ namespace
 // plans/addon_companion_extended/npc_equipment.md: an NPC whose equipment the player sets up (equipment_editable)
 // keeps the slots the player filled: an item already in a slot is shown from it (a rifle the player put into the
 // pistol slot stays there); an item of the ruck goes to its base slot when it is free, a weapon of the slots 2 / 3 -
-// to the other one of them when that is free. Both busy (the choice of the weapon took it in a fight because the weapons
-// of the slots have no ammo, CAI_Stalker::update_best_item_info_impl) - the temporary swap: the slot whose weapon cannot
-// kill gives place, the weapon goes to the ruck and is remembered (CInventoryOwner::SetEquipmentSwapped; the first
-// record of the slot stays - it is the weapon of the player, not an earlier replacement), it comes back later. No such
-// slot - NO_ACTIVE_SLOT: nothing is shown, nothing leaves its slot. The other slots (grenades, binoculars) - as before
+// to the other one of them when that is free. Both busy - NO_ACTIVE_SLOT: the item is not shown, the weapons of the
+// slots stay (the choice of the weapon, CAI_Stalker::update_best_item_info_impl, does not pick such an item; this is
+// the guard). The other slots (grenades, binoculars) - as before
 u16 show_slot(CAI_Stalker& stalker, CInventoryItem* item)
 {
     const u16 base = item->BaseSlot();
@@ -67,16 +65,6 @@ u16 show_slot(CAI_Stalker& stalker, CInventoryItem* item)
         const u16 other = base == INV_SLOT_2 ? INV_SLOT_3 : INV_SLOT_2;
         if (!inv.ItemFromSlot(other))
             return other;
-        for (const u16 slot : { base, other })
-        {
-            CInventoryItem* current = inv.ItemFromSlot(slot);
-            if (current && current != item && !current->can_kill())
-            {
-                if (stalker.EquipmentSwapped(slot) == u16(-1))
-                    stalker.SetEquipmentSwapped(slot, current->object_id());
-                return slot;
-            }
-        }
         return NO_ACTIVE_SLOT;
     }
     // the other slots (grenades, binoculars...) - as before

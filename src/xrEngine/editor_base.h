@@ -30,6 +30,16 @@ public:
     virtual void apply_settings() {}
     virtual void save_settings(ImGuiTextBuffer* /*buffer*/) const {}
     virtual size_t estimate_settings_size() const { return 0; }
+
+    // plans/addons_api_support/20-imgui-addon-tools.md: a tool that is not one window of the menu Tools.
+    // false - the menu Tools (-uidbg) does not list it (the tool shows its windows itself).
+    virtual bool in_tools_menu() const { return true; }
+    // Inside BeginMainMenuBar of the editor (state full), after the menu Tools: a menu of its own (always, -uidbg or
+    // not). The tools of the addons show the menu "Addons" here.
+    virtual void on_main_menu_bar() {}
+    // Windows that stay in the light state (the editor switches full -> light instead of hidden), apart from the open
+    // flag: the windows of the addons do not set the open flag of the tool (Device.editor_mode() would turn true).
+    virtual bool has_light_windows() const { return false; }
 };
 
 class ENGINE_API ide final :
@@ -58,6 +68,9 @@ public:
 
     [[nodiscard]]
     bool is_shown() const;
+    // A tool has windows that stay in the light state (ide_tool::has_light_windows)
+    [[nodiscard]]
+    bool has_light_windows() const;
 
     [[nodiscard]]
     auto GetState() const { return m_state; }

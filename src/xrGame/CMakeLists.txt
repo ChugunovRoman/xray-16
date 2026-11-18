@@ -98,6 +98,8 @@ target_sources(xrGame PRIVATE
     addon_api_world.h
     addon_api_extra.cpp
     addon_api_extra.h
+    addon_api_imgui.cpp
+    addon_api_imgui.h
     addon_api_feedback.cpp
     addon_api_feedback.h
     addon_api_character.cpp
@@ -130,6 +132,13 @@ target_sources(xrGame PRIVATE
     addon_content.h
     addon_host.cpp
     addon_host.h
+    addon_imgui_core.cpp
+    addon_imgui_core.h
+    addon_imgui_lua.cpp
+    addon_imgui_lua.h
+    addon_imgui_lua_widgets.cpp
+    addon_imgui_tools.cpp
+    addon_imgui_tools.h
     addon_lua_entry.cpp
     addon_lua_entry.h
     addon_lua_console.cpp
