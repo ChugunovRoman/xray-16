@@ -9,6 +9,7 @@
 #include "xrEngine/xr_level_controller.h"
 #include "xrEngine/CustomHUD.h"
 #include "addon_object_events.h"
+#include "MainMenu.h" // CUIScriptOverlay: the topmost layer of script windows gets the mouse clicks first
 
 namespace
 {
@@ -378,6 +379,9 @@ bool CDialogHolder::IR_UIOnKeyboardPress(int dik)
         Fvector2 cp = GetUICursor().GetCursorPosition();
         EUIMessages action =
             (dik == MOUSE_1) ? WINDOW_LBUTTON_DOWN : (dik == MOUSE_2) ? WINDOW_RBUTTON_DOWN : WINDOW_CBUTTON_DOWN;
+        // GW: the topmost layer of script windows (notifications) is drawn over this holder: it gets the click first
+        if (GetUICursor().IsVisible() && MainMenu() && MainMenu()->Overlay().OnMouseAction(cp.x, cp.y, action))
+            return true;
         if (TIR->OnMouseAction(cp.x, cp.y, action))
             return true;
     }
@@ -450,6 +454,10 @@ bool CDialogHolder::IR_UIOnKeyboardRelease(int dik)
         Fvector2 cp = GetUICursor().GetCursorPosition();
         EUIMessages action =
             (dik == MOUSE_1) ? WINDOW_LBUTTON_UP : (dik == MOUSE_2) ? WINDOW_RBUTTON_UP : WINDOW_CBUTTON_UP;
+        // GW: the topmost layer of script windows (notifications) is drawn over this holder: it gets the click first.
+        // No cursor check here: the release of a press the layer took is the layer's, even if the cursor hid meanwhile
+        if (MainMenu() && MainMenu()->Overlay().OnMouseAction(cp.x, cp.y, action))
+            return true;
         if (TIR->OnMouseAction(cp.x, cp.y, action))
             return true;
     }

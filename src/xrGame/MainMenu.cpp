@@ -67,6 +67,152 @@ extern int g_bodycamSession;
 
 CMainMenu* MainMenu() { return (CMainMenu*)g_pGamePersistent->m_pMainMenu; };
 
+// ---------------------------------------------------------------------------------------------------------------------
+// CUIScriptOverlay
+// ---------------------------------------------------------------------------------------------------------------------
+
+// Render: after the level (REG_PRIORITY_NORMAL), the device (0) and the main menu (4), before the tutorial (-2) and
+// the cursor (-3): higher priorities go first. Frame: with the main menu, where the script windows of the menu update
+constexpr int OVERLAY_RENDER_PRIORITY = -1;
+constexpr int OVERLAY_FRAME_PRIORITY = REG_PRIORITY_LOW - 1000;
+
+CUIScriptOverlay::~CUIScriptOverlay()
+{
+    m_windows.clear();
+    Register(false);
+}
+
+void CUIScriptOverlay::Register(bool on)
+{
+    if (on == m_registered)
+        return;
+    m_registered = on;
+    if (on)
+    {
+        Device.seqRender.Add(this, OVERLAY_RENDER_PRIORITY);
+        Device.seqFrame.Add(this, OVERLAY_FRAME_PRIORITY);
+    }
+    else
+    {
+        Device.seqRender.Remove(this);
+        Device.seqFrame.Remove(this);
+    }
+}
+
+void CUIScriptOverlay::Add(CUIWindow* window)
+{
+    if (!window)
+        return;
+    // Added again - on top of the others. No Remove(): it would unregister the layer from the device sequences and
+    // register it again inside their Process (a second OnFrame in the same frame)
+    const auto it = std::find(m_windows.begin(), m_windows.end(), window);
+    if (it != m_windows.end())
+        m_windows.erase(it);
+    m_windows.push_back(window);
+    Register(true);
+}
+
+void CUIScriptOverlay::Remove(CUIWindow* window)
+{
+    const auto it = std::find(m_windows.begin(), m_windows.end(), window);
+    if (it != m_windows.end())
+        m_windows.erase(it);
+    if (m_windows.empty())
+        Register(false);
+}
+
+bool CUIScriptOverlay::Contains(const CUIWindow* window) const
+{
+    return std::find(m_windows.begin(), m_windows.end(), window) != m_windows.end();
+}
+
+void CUIScriptOverlay::Clear()
+{
+    if (!m_windows.empty())
+        Msg("* [ui overlay] %u script window(s) dropped: the Lua state is reset", u32(m_windows.size()));
+    m_windows.clear();
+    Register(false);
+    m_mouse_down = false;
+}
+
+bool CUIScriptOverlay::OnMouseAction(float x, float y, EUIMessages action)
+{
+    const bool down = action == WINDOW_LBUTTON_DOWN || action == WINDOW_RBUTTON_DOWN ||
+        action == WINDOW_CBUTTON_DOWN || action == WINDOW_LBUTTON_DB_CLICK;
+    const bool up = action == WINDOW_LBUTTON_UP || action == WINDOW_RBUTTON_UP || action == WINDOW_CBUTTON_UP;
+    if (m_windows.empty())
+    {
+        // the layer emptied between the press and the release: the release still was ours
+        const bool was_down = up && m_mouse_down;
+        m_mouse_down = false;
+        return was_down;
+    }
+    if (load_screen_renderer.IsActive())
+        return false;
+
+    // From the top window down, as they are drawn in reverse. A copy: a click may add or remove windows of the layer
+    // (the script hides a notification in its BUTTON_CLICKED)
+    bool handled = false;
+    const xr_vector<CUIWindow*> windows = m_windows;
+    for (auto it = windows.rbegin(); it != windows.rend(); ++it)
+    {
+        CUIWindow* window = *it;
+        if (!Contains(window) || !window->IsShown() || !window->IsEnabled())
+            continue;
+        // a top level window: it takes the screen coordinates of the cursor and checks its own rect
+        if (window->OnMouseAction(x, y, action))
+        {
+            handled = true;
+            break;
+        }
+    }
+    if (down)
+    {
+        m_mouse_down = handled;
+        return handled;
+    }
+    if (up)
+    {
+        // a button sends BUTTON_CLICKED on the release and does not report it as handled: the release of a press
+        // taken by the layer is the layer's, the dialogs under it never saw the press
+        const bool was_down = m_mouse_down;
+        m_mouse_down = false;
+        return was_down || handled;
+    }
+    return handled;
+}
+
+void CUIScriptOverlay::OnFrame()
+{
+    ZoneScoped;
+
+    // A copy: the Update of a script window may add or remove windows of the layer
+    const xr_vector<CUIWindow*> windows = m_windows;
+    for (CUIWindow* window : windows)
+    {
+        if (Contains(window) && window->IsShown())
+            window->Update();
+    }
+}
+
+void CUIScriptOverlay::OnRender()
+{
+    ZoneScoped;
+
+    if (m_windows.empty())
+        return;
+    // Not over the loading screen and not into the screenshot of a save (the menu skips that frame as well)
+    if (load_screen_renderer.IsActive() || (MainMenu() && MainMenu()->IsTakingSaveScreenshot()))
+        return;
+    for (CUIWindow* window : m_windows)
+    {
+        if (window->IsShown())
+            window->Draw();
+    }
+    // The text of the layer: the HUD and the menu have flushed their fonts already, ours would wait a frame under them
+    UI().RenderFont();
+}
+
 CMainMenu::CMainMenu()
 {
     ZoneScoped;
@@ -79,6 +225,8 @@ CMainMenu::CMainMenu()
         CResetEventCb(CID cid, CMainMenu* mm) : CEventNotifierCallbackWithCid(cid), m_mainmenu(mm) {}
         void ProcessEvent() override
         {
+            // The windows of the topmost layer belong to the Lua state that is about to close
+            m_mainmenu->Overlay().Clear();
             if (m_mainmenu->IsActive() && m_mainmenu->m_restarting_scripts)
                 m_mainmenu->DropStartDialog(); // RestartScripts builds it again in the new Lua state
             else if (g_bodycamSession)

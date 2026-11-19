@@ -14,6 +14,7 @@ class demo_info_loader;
 #include "UIDialogHolder.h"
 #include "xrUICore/Callbacks/UIWndCallback.h"
 #include "xrUICore/ui_base.h"
+#include "xrUICore/UIMessages.h" // EUIMessages: CUIScriptOverlay::OnMouseAction
 #include "DemoInfo.h"
 #include "ai_space.h"
 
@@ -41,6 +42,42 @@ struct Patch_Dawnload_Progress
     [[nodiscard]] float GetProgress()   const { return Progress; }
     [[nodiscard]] pcstr GetStatus()     const { return Status.c_str(); }
     [[nodiscard]] pcstr GetFlieName()   const { return FileName.c_str(); }
+};
+
+// Topmost layer of script windows (notifications, toasts): drawn every frame after the level with its HUD, the main
+// menu and every dialog of both, under the tutorial (-2) and the cursor (-3); works the same in the game and in the
+// main menu. The windows take no input except the mouse buttons (OnMouseAction). Lua owns the windows: the script
+// keeps its reference while the window is in the layer (main_menu.overlay_add / overlay_remove). The layer forgets all
+// of them when the Lua state is reset (CMainMenu, EVENT_SCRIPT_ENGINE_RESET comes before the old Lua state closes), so
+// it never draws a dead window.
+class CUIScriptOverlay final : public pureRender, public pureFrame
+{
+    xr_vector<CUIWindow*> m_windows;
+    bool m_registered = false;
+    bool m_mouse_down = false; // a button was pressed over the layer: its release belongs to the layer too
+
+    // In the device sequences only while there is a window: no cost when the layer is empty
+    void Register(bool on);
+
+public:
+    CUIScriptOverlay() = default;
+    CUIScriptOverlay(const CUIScriptOverlay&) = delete;
+    CUIScriptOverlay& operator=(const CUIScriptOverlay&) = delete;
+    ~CUIScriptOverlay();
+
+    void Add(CUIWindow* window); // on top of the windows already in the layer
+    void Remove(CUIWindow* window);
+    bool Contains(const CUIWindow* window) const;
+    void Clear();
+
+    // A mouse button over the windows of the layer (CDialogHolder gives it the clicks first, while the cursor is
+    // shown): the windows get it as in any dialog (OnMouseAction; a button sends BUTTON_CLICKED to its script window).
+    // true - the layer took the click: the dialogs under it do not get it. The release of a button pressed over the
+    // layer is taken as well
+    bool OnMouseAction(float x, float y, EUIMessages action);
+
+    void OnRender() override;
+    void OnFrame() override;
 };
 
 class CMainMenu : public IMainMenu,
@@ -216,6 +253,14 @@ public:
 
     CEventNotifierCallback::CID m_script_reset_event_cid;
     CEventNotifierCallback::CID m_script_started_event_cid;
+
+    // Topmost layer of script windows (main_menu.overlay_add): in the game and in the main menu
+    CUIScriptOverlay& Overlay() { return m_overlay; }
+    // The frame that takes the screenshot of a save: no UI in it
+    bool IsTakingSaveScreenshot() const { return m_Flags.test(flGameSaveScreenshot); }
+
+private:
+    CUIScriptOverlay m_overlay;
 
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION(CDialogHolder, CUIDialogWnd, CUIWindow);

@@ -180,7 +180,28 @@ void CMainMenu::script_register(lua_State* luaState)
 
     module(luaState, "main_menu")
     [
-        def("get_main_menu", &MainMenu)
+        def("get_main_menu", &MainMenu),
+        // Topmost layer of script windows (CUIScriptOverlay, MainMenu.h): over the HUD, the main menu and all their
+        // dialogs, in the game and in the menu. The layer keeps a raw pointer: the script MUST keep its reference to
+        // the window while the window is in the layer (a collected window would be drawn after its death). The layer
+        // drops every window on the reset of the Lua state. overlay_add -> false: no main menu yet (the start of the
+        // game, on_load of the addons), the window is not in the layer
+        def("overlay_add", +[](CUIWindow* window)
+        {
+            if (!window || !MainMenu())
+                return false;
+            MainMenu()->Overlay().Add(window);
+            return true;
+        }),
+        def("overlay_remove", +[](CUIWindow* window)
+        {
+            if (MainMenu())
+                MainMenu()->Overlay().Remove(window);
+        }),
+        def("overlay_contains", +[](CUIWindow* window)
+        {
+            return MainMenu() && MainMenu()->Overlay().Contains(window);
+        })
     ];
 
     // 50r-slow-disk-async-textures.md: prefetch_textures(names), see ui_export_prefetch_textures above
