@@ -3,6 +3,8 @@
 #define LevelSoundsH
 #pragma once
 
+#include <atomic>
+
 struct SStaticSound
 {
     ref_sound m_Source;
@@ -37,7 +39,7 @@ public:
     void Load(LPCSTR fn, LPCSTR params);
     BOOL in(u32 game_time);
     bool IsPlaying() const;
-    void Play();
+    void Play(float volume);
     void Stop();
     void SetVolume(float volume);
 };
@@ -50,12 +52,19 @@ class CLevelSoundManager
     MusicTrackVec m_MusicTracks;
     u32 m_NextTrackTime;
     int m_CurrentTrack;
+    // Script-driven attenuation of the level ambient music (dynamic music fades it out in combat, sleep mutes it).
+    // Written from the game thread (Lua), read in Update() which may run as a parallel delegate.
+    std::atomic<float> m_MusicFactor{ 1.f };
+    float m_AppliedMusicFactor = 1.f;
 
 public:
     CLevelSoundManager();
     void Load();
     void Unload();
     void Update();
+
+    void SetMusicFactor(float factor);
+    float GetMusicFactor() const { return m_MusicFactor.load(std::memory_order_relaxed); }
 };
 
 #endif

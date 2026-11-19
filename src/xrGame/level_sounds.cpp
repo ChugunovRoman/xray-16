@@ -115,7 +115,9 @@ void SMusicTrack::Load(LPCSTR fn, LPCSTR params)
 BOOL SMusicTrack::in(u32 game_time)
 {
     // game_time -ms
-    if (m_ActiveTime.x == 0 && m_ActiveTime.y)
+    // 0,0 means "always active". The original GSC check (x == 0 && y) made every track starting at 00:00 play
+    // around the clock and every "0, 0" track never play.
+    if (m_ActiveTime.x == 0 && m_ActiveTime.y == 0)
         return TRUE;
 
     bool b_cross_midnight = (m_ActiveTime.y < m_ActiveTime.x);
@@ -132,13 +134,13 @@ BOOL SMusicTrack::in(u32 game_time)
     return res;
 }
 
-void SMusicTrack::Play()
+void SMusicTrack::Play(float volume)
 {
     m_SourceStereo.play_at_pos(0, Fvector().set(0.0f, 0.0f, 0.0f), sm_2D | sm_IgnoreTimeFactor);
     m_SourceLeft.play_at_pos(0, Fvector().set(-0.5f, 0.f, 0.3f), sm_2D | sm_IgnoreTimeFactor);
     m_SourceRight.play_at_pos(0, Fvector().set(+0.5f, 0.f, 0.3f), sm_2D | sm_IgnoreTimeFactor);
 
-    SetVolume(1.0f);
+    SetVolume(volume);
 }
 
 bool SMusicTrack::IsPlaying() const
@@ -168,6 +170,12 @@ void SMusicTrack::Stop()
 //-----------------------------------------------------------------------------
 CLevelSoundManager::CLevelSoundManager() : m_CurrentTrack(0) { m_NextTrackTime = 0; }
 
+void CLevelSoundManager::SetMusicFactor(float factor)
+{
+    clamp(factor, 0.0f, 1.0f);
+    m_MusicFactor.store(factor, std::memory_order_relaxed);
+}
+
 void CLevelSoundManager::Load()
 {
     ZoneScoped;
@@ -189,6 +197,9 @@ void CLevelSoundManager::Load()
 
     // music
     m_CurrentTrack = -1;
+    // A new level starts with unattenuated music; scripts set their factor again after the load
+    m_MusicFactor.store(1.f, std::memory_order_relaxed);
+    m_AppliedMusicFactor = 1.f;
 
     CInifile& gameLtx = *pGameIni;
 
@@ -243,6 +254,7 @@ void CLevelSoundManager::Update()
     }
 
     // music track
+    const float music_factor = m_MusicFactor.load(std::memory_order_relaxed);
     if (!m_MusicTracks.empty())
     {
         if (m_CurrentTrack < 0 && engine_time > m_NextTrackTime)
@@ -267,7 +279,8 @@ void CLevelSoundManager::Update()
                 u32 idx = Random.randI(indices.size());
                 m_CurrentTrack = indices[idx];
                 SMusicTrack& T = m_MusicTracks[m_CurrentTrack];
-                T.Play();
+                T.Play(music_factor);
+                m_AppliedMusicFactor = music_factor;
 #ifdef DEBUG
                 Log("- Play music track:", T.m_DbgName.c_str());
 #endif
@@ -281,6 +294,11 @@ void CLevelSoundManager::Update()
         if (m_CurrentTrack >= 0)
         {
             SMusicTrack& T = m_MusicTracks[m_CurrentTrack];
+            if (!fsimilar(m_AppliedMusicFactor, music_factor, EPS_S))
+            {
+                T.SetVolume(music_factor);
+                m_AppliedMusicFactor = music_factor;
+            }
             if (!T.IsPlaying())
             {
                 m_CurrentTrack = -1;

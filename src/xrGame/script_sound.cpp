@@ -14,13 +14,15 @@
 #include "ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
 
-CScriptSound::CScriptSound(LPCSTR caSoundName, ESoundTypes sound_type)
+CScriptSound::CScriptSound(LPCSTR caSoundName, ESoundTypes sound_type) : CScriptSound(caSoundName, sound_type, false) {}
+
+CScriptSound::CScriptSound(LPCSTR caSoundName, ESoundTypes sound_type, bool is_music)
 {
     m_bIsNoSound = !Engine.Sound.IsSoundEnabled();
     m_caSoundToPlay = caSoundName;
     string_path l_caFileName;
     if (FS.exist(l_caFileName, "$game_sounds$", caSoundName, ".ogg"))
-        m_sound.create(caSoundName, st_Effect, sound_type);
+        m_sound.create(caSoundName, is_music ? st_Music : st_Effect, sound_type);
     else
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "File not found \"%s\"!", l_caFileName);
 }

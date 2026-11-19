@@ -431,6 +431,8 @@ public:
     void script_gc(); // GC-cycle
     IC CPHCommander& ph_commander();
     IC CPHCommander& ph_commander_scripts();
+    // May be null (not created for every level type); used by the script music volume API.
+    CLevelSoundManager* level_sound_manager() const { return m_level_sound_manager; }
 
     CLevel();
     virtual ~CLevel();

@@ -621,6 +621,25 @@ void set_snd_volume(float v)
     psSoundVFactor = v;
     clamp(psSoundVFactor, 0.0f, 1.0f);
 }
+
+#include "level_sounds.h"
+// Attenuation factor (0..1) of the level ambient music (game.ltx music_tracks). It is applied on top of the
+// snd_volume_music option, so scripts never have to rewrite the player's setting.
+float get_music_volume()
+{
+    if (!g_pGameLevel)
+        return 1.0f;
+    const CLevelSoundManager* mgr = Level().level_sound_manager();
+    return mgr ? mgr->GetMusicFactor() : 1.0f;
+}
+
+void set_music_volume(float v)
+{
+    if (!g_pGameLevel)
+        return;
+    if (CLevelSoundManager* mgr = Level().level_sound_manager())
+        mgr->SetMusicFactor(v);
+}
 #include "actor_statistic_mgr.h"
 void add_actor_points(LPCSTR sect, LPCSTR detail_key, int cnt, int pts)
 {
@@ -1170,6 +1189,8 @@ void CLevel::script_register(lua_State* luaState)
         def("iterate_sounds", &iterate_sounds2),
         def("get_snd_volume", &get_snd_volume),
         def("set_snd_volume", &set_snd_volume),
+        def("get_music_volume", &get_music_volume),
+        def("set_music_volume", &set_music_volume),
 
         def("add_cam_effector", &add_cam_effector),
         def("add_cam_effector2", &add_cam_effector2),

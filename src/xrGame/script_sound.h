@@ -22,6 +22,9 @@ class CScriptSound
 
 public:
     CScriptSound(LPCSTR caSoundName, ESoundTypes sound_type = SOUND_TYPE_NO_SOUND);
+    // is_music: create the sound as st_Music, so its loudness follows snd_volume_music instead of snd_volume_eff
+    // (and is not affected by the hit/shock volume factor). Used by the dynamic combat music.
+    CScriptSound(LPCSTR caSoundName, ESoundTypes sound_type, bool is_music);
     virtual ~CScriptSound();
     IC u32 Length();
     IC void Play(CScriptGameObject* object);
