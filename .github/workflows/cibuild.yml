@@ -686,14 +686,62 @@ jobs:
           dist/gw_merge-linux-x86_64.tar.gz
           dist/gw_merge-linux-x86_64.tar.gz.sha256
 
+  # Release gating (needs.<job>.result is the aggregate of a whole matrix, so per-entry checks are done via the API):
+  # - Windows and gw_merge: every job must succeed (hard requirement, checked right in `if`);
+  # - macOS: never blocks the release (hosted macOS runners often drop jobs with "not acquired by Runner");
+  # - Linux/BSD/Flatpak: Release and ReleaseMasterGold (and Flatpak) must succeed, Debug/Mixed failures only warn.
+  # !cancelled() instead of success(): run even if some needed jobs failed, but not when the run was cancelled.
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/') && success()
+    if: >-
+      startsWith(github.ref, 'refs/tags/') && !cancelled() &&
+      needs.windows.result == 'success' && needs.gw_merge.result == 'success'
     needs: [windows, cmake, cmake_macos, bsd, flatpak, gw_merge]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
+    - name: Check required builds
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        # filter=latest: the latest attempt of every job, so "Re-run failed jobs" is taken into account
+        jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
+          --jq '.jobs[] | [.name, (.conclusion // "none")] | @tsv')
+        bad=0
+        required=0
+        while IFS=$'\t' read -r name conclusion; do
+          [ -z "$name" ] && continue
+          case "$name" in
+            "Publish GitHub Release") continue ;;
+            macOS*) need=0 ;;
+            Windows*|gw_merge*|Flatpak*) need=1 ;;
+            *)
+              # Linux/BSD matrix names look like "<platform> <configuration> <arch> ..."
+              if [[ " $name " =~ \ (Release|ReleaseMasterGold)\  ]]; then need=1; else need=0; fi
+              ;;
+          esac
+          if [ "$need" -eq 1 ]; then
+            required=$((required + 1))
+            if [ "$conclusion" != "success" ]; then
+              echo "::error::Required build '$name' finished with '$conclusion'"
+              bad=1
+            fi
+          elif [ "$conclusion" != "success" ]; then
+            echo "::warning::Optional build '$name' finished with '$conclusion', release goes on without it"
+          fi
+        done <<< "$jobs"
+        if [ "$required" -eq 0 ]; then
+          echo "::error::No required build jobs found in the run"
+          exit 1
+        fi
+        if [ "$bad" -ne 0 ]; then
+          exit 1
+        fi
+        echo "All $required required builds succeeded"
+
     - name: Download all artifacts
       uses: actions/download-artifact@main
       with:
