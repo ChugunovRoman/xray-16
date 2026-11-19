@@ -225,6 +225,53 @@ void CUIMMShniaga::ShowPage(enum_page_id page_id)
     }
 }
 
+bool CUIMMShniaga::AddButton(pcstr name, pcstr caption, pcstr before)
+{
+    // The look (font, color, size) is taken from a button of the XML list: without one there is nothing to copy
+    if (!name || !*name || m_buttons.empty())
+        return false;
+
+    auto pos = m_buttons.end();
+    for (auto it = m_buttons.begin(); it != m_buttons.end(); ++it)
+    {
+        // a copy of the name: WindowName() returns shared_str by value
+        const shared_str wnd_name_str = (*it)->WindowName();
+        pcstr wnd_name = wnd_name_str.c_str() ? wnd_name_str.c_str() : "";
+        if (0 == xr_strcmp(name, wnd_name))
+        {
+            Msg("! CUIMMShniaga::AddButton: button [%s] is already in the list", name);
+            return false;
+        }
+        if (before && *before && pos == m_buttons.end() && 0 == xr_strcmp(before, wnd_name))
+            pos = it;
+    }
+
+    CUIStatic* tmpl = m_buttons.front();
+    auto* st = xr_new<CUIStatic>("Button");
+    st->SetWndPos(Fvector2().set(0, 0));
+    st->SetWndSize(tmpl->GetWndSize());
+    st->SetFont(tmpl->GetFont());
+    st->SetTextComplexMode(false);
+    st->SetTextST(caption ? caption : name);
+    st->SetTextColor(tmpl->GetTextColor());
+    st->SetTextAlignment(CGameFont::alCenter);
+    st->SetVTextAlignment(valCenter);
+    st->SetWindowName(name);
+    st->SetMessageTarget(this);
+    m_buttons.insert(pos, st);
+
+    // The main page is on the screen: rebuild its view, the selected button stays selected
+    if (epi_main == m_page)
+    {
+        CUIWindow* selected = m_selected;
+        m_view->Clear();
+        for (CUIStatic* btn : m_buttons)
+            m_view->AddWindow(btn, false);
+        SelectBtn(selected ? selected : m_buttons[0]);
+    }
+    return true;
+}
+
 void CUIMMShniaga::ShowMain()
 {
     m_page = epi_main;

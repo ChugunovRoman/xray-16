@@ -46,6 +46,10 @@ public:
     }; // enum	enum_page_id
     void SetPage(enum_page_id page_id, LPCSTR xml_file, LPCSTR xml_path);
     void ShowPage(enum_page_id page_id);
+    // GlobalWar: adds a button to the list of the main page (Lua: addons put their items into the base list).
+    // The button copies the look of the first button of the list; it goes before the button named `before`
+    // (nil / empty / not found - at the end). Its click comes to the message target by `name`, as the XML ones.
+    bool AddButton(pcstr name, pcstr caption, pcstr before);
 
 protected:
     typedef enum { E_Begin = 0, E_Update, E_Finilize, E_Stop } EVENT;

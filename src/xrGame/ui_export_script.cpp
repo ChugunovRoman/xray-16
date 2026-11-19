@@ -132,7 +132,8 @@ void CMainMenu::script_register(lua_State* luaState)
             ]
             .def("SetVisibleMagnifier", &CUIMMShniaga::SetVisibleMagnifier)
             .def("SetPage", &CUIMMShniaga::SetPage)
-            .def("ShowPage", &CUIMMShniaga::ShowPage),
+            .def("ShowPage", &CUIMMShniaga::ShowPage)
+            .def("AddButton", &CUIMMShniaga::AddButton),
 
         class_<SServerFilters>("SServerFilters")
             .def(constructor<>())
